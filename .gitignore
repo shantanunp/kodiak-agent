@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+indexer/build/
+indexer/.gradle/
+*.class
+*.jar
+!indexer/gradle/wrapper/gradle-wrapper.jar
+
+# Environment & secrets (never commit keys)
+.env
+.env.local
+.env.*.local
+
+# Runtime cache (GitHub worktrees, index, labels)
+.cache/
+translator/cache/
+
+# Portable JDK downloaded for Gradle
+.jdk/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo

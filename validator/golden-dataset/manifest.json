@@ -1,0 +1,10 @@
+{
+  "mapperId": "example-mapper",
+  "count": 3,
+  "records": [
+    "record-001",
+    "record-002",
+    "record-003"
+  ],
+  "generatedAt": "2026-07-30T05:47:36.807Z"
+}

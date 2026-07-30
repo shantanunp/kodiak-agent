@@ -1,0 +1,14 @@
+{
+  "id": "record-003",
+  "input": {
+    "firstName": "Lin",
+    "lastName": "Zhao",
+    "age": 16
+  },
+  "expectedOutput": {
+    "displayName": "LIN ZHAO",
+    "adult": false
+  },
+  "mapperId": "example-mapper",
+  "capturedAt": "2026-07-30T05:47:36.806Z"
+}

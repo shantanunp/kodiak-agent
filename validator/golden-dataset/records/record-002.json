@@ -1,0 +1,14 @@
+{
+  "id": "record-002",
+  "input": {
+    "firstName": "Grace",
+    "lastName": "Hopper",
+    "age": 85
+  },
+  "expectedOutput": {
+    "displayName": "GRACE HOPPER",
+    "adult": true
+  },
+  "mapperId": "example-mapper",
+  "capturedAt": "2026-07-30T05:47:36.806Z"
+}

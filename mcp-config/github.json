@@ -1,0 +1,11 @@
+{
+  "command": "github-mcp-server",
+  "args": [
+    "--read-only",
+    "--tools",
+    "get_file_contents,list_commits,get_commit,search_code"
+  ],
+  "env": {
+    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+  }
+}

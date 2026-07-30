@@ -1,0 +1,20 @@
+repo: "shantanunp/Kmismomapper"
+branch: "main"
+scope:
+  - "src/main/java/com/kodiakservice/mapper/**/*.java"
+mappers:
+  - id: demo-ai-recognition-mapper
+    sourceFile: src/main/java/com/kodiakservice/mapper/DemoAiRecognitionMapper.java
+    class: com.kodiakservice.mapper.DemoAiRecognitionMapper
+    entryMethod: map
+    sourceType: com.kodiakservice.mapper.DemoAiRecognitionMapper$Person
+    targetType: com.kodiakservice.mapper.DemoAiRecognitionMapper$Summary
+    goldenTests: src/test/java/com/kodiakservice/mapper/DemoAiRecognitionMapperTest.java
+
+  - id: lpa-request-mapper
+    sourceFile: src/main/java/com/kodiakservice/mapper/LpaRequestMapper.java
+    class: com.kodiakservice.mapper.LpaRequestMapper
+    entryMethod: map
+    sourceType: com.kodiakservice.dto.input.LoanApplicationRequest
+    targetType: com.kodiakservice.lpa.schema.lpa.LPALoanAssessmentServiceRequest
+    goldenTests: src/test/java/com/kodiakservice/mapper/LpaRequestMapperTest.java
