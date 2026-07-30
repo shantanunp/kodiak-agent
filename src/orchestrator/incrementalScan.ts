@@ -12,12 +12,14 @@ import { parseArgs } from "node:util";
 import { paths } from "../config/env.js";
 import { createHash } from "node:crypto";
 
-const { values } = parseArgs({
-  options: {
-    local: { type: "boolean", default: false },
-    registry: { type: "string", default: paths.registry },
-  },
-});
+function cliOptions() {
+  return parseArgs({
+    options: {
+      local: { type: "boolean", default: false },
+      registry: { type: "string", default: paths.registry },
+    },
+  }).values;
+}
 
 function localCommitSha(repo: string, branch: string): string {
   return (
@@ -26,6 +28,7 @@ function localCommitSha(repo: string, branch: string): string {
 }
 
 export async function incrementalScan(): Promise<void> {
+  const values = cliOptions();
   const registry = loadRegistry(values.registry!);
   const repoSlug = registry.repo;
 
@@ -39,7 +42,7 @@ export async function incrementalScan(): Promise<void> {
     }
 
     const mapperIds = registry.mappers.map((m) => m.id);
-    await scanFiles(mapperIds, { local: true, commitSha: currentSha });
+    await scanFiles(mapperIds, { local: true, commitSha: currentSha, registryPath: values.registry });
     cache.setLastIndexedSha(repoSlug, currentSha);
     console.log(JSON.stringify({ action: "scan", mode: "local", sha: currentSha, mappers: mapperIds }));
     return;
@@ -60,7 +63,7 @@ export async function incrementalScan(): Promise<void> {
 
     if (!lastSha) {
       const mapperIds = registry.mappers.map((m) => m.id);
-      await scanFiles(mapperIds, { remote: true, commitSha: currentSha });
+      await scanFiles(mapperIds, { remote: true, commitSha: currentSha, registryPath: values.registry });
       cache.setLastIndexedSha(repoSlug, currentSha);
       console.log(
         JSON.stringify({ action: "scan", mode: "full", sha: currentSha, mappers: mapperIds }),
@@ -91,7 +94,7 @@ export async function incrementalScan(): Promise<void> {
       return;
     }
 
-    await scanFiles(mapperIds, { remote: true, commitSha: currentSha });
+    await scanFiles(mapperIds, { remote: true, commitSha: currentSha, registryPath: values.registry });
     cache.setLastIndexedSha(repoSlug, currentSha);
     console.log(
       JSON.stringify({ action: "scan", mode: "incremental", sha: currentSha, mappers: mapperIds }),

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline Viewer — Kodiak Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EEF1EC; --panel:#FFFFFF; --ink:#17201C; --ink-soft:#5C665F; --ink-faint:#8B948D; --line:#DADFD9;
+    --source:#0F6E56; --source-bg:#E1F3EC;
+    --target:#9A5B0A; --target-bg:#FBEFDC;
+    --op:#4A3F8C; --op-bg:#ECE9F8;
+    --cond:#A32B4B; --cond-bg:#FBE7ED;
+    --raw:#6B7280; --raw-bg:#F3F4F6;
+    --font-display:'Space Grotesk', sans-serif; --font-body:'Inter', sans-serif; --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);}
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 60px;}
+  header{margin-bottom:18px;}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:4px;}
+  .brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink);display:flex;align-items:center;justify-content:center;}
+  .brand-mark span{width:10px;height:10px;border-radius:2px;background:var(--bg);}
+  h1{font-family:var(--font-display);font-weight:600;font-size:20px;margin:0;}
+  .tagline{color:var(--ink-soft);font-size:13.5px;margin:4px 0 0 36px;}
+  .meta-bar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0;font-size:12px;color:var(--ink-soft);}
+  .pill{font-family:var(--font-mono);background:var(--panel);border:1px solid var(--line);padding:4px 10px;border-radius:6px;}
+  .legend{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;font-size:12.5px;color:var(--ink-soft);}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
+  .layout{display:grid;grid-template-columns:230px 1fr;gap:20px;align-items:start;}
+  .schema-panel,.canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .schema-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin-bottom:8px;}
+  .schema-group{font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);margin:10px 0 4px;}
+  .schema-field{font-family:var(--font-mono);font-size:12px;padding:4px 6px;border-radius:6px;}
+  .schema-field:hover{background:var(--bg);}
+  .target-name{font-family:var(--font-mono);font-size:15px;font-weight:500;color:var(--target);background:var(--target-bg);padding:3px 9px;border-radius:6px;display:inline-block;}
+  .pipeline{margin-top:18px;padding-left:6px;}
+  .step{display:flex;gap:14px;padding-bottom:20px;}
+  .step-rail{position:relative;display:flex;flex-direction:column;align-items:center;width:30px;flex-shrink:0;}
+  .step-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;border:2px solid var(--panel);}
+  .step-line{position:absolute;top:28px;bottom:-20px;width:2px;background:repeating-linear-gradient(var(--line),var(--line) 4px,transparent 4px,transparent 8px);}
+  .step:last-child .step-line{display:none;}
+  .step-card{flex:1;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;}
+  .step-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;}
+  .step-body{margin-top:8px;font-size:13px;line-height:1.55;}
+  .mono{font-family:var(--font-mono);font-size:12px;background:var(--panel);padding:2px 6px;border-radius:4px;border:1px solid var(--line);}
+  .badge{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;margin-left:6px;}
+  .badge-gemini{background:var(--op-bg);color:var(--op);}
+  .badge-det{background:var(--source-bg);color:var(--source);}
+  .badge-raw{background:var(--raw-bg);color:var(--raw);}
+  .code-block{font-family:var(--font-mono);font-size:11.5px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:6px;white-space:pre-wrap;word-break:break-word;}
+  .summary{margin-top:20px;border-top:1px solid var(--line);padding-top:14px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;}
+  .error{color:var(--cond);padding:20px;background:var(--cond-bg);border-radius:8px;}
+  .nested{margin-top:8px;padding-left:12px;border-left:2px solid var(--line);}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="brand-mark"><span></span></div><h1>Pipeline Viewer</h1></div>
+    <p class="tagline">Read-only view of indexed + labeled mapping logic (Phase 2)</p>
+  </header>
+  <div class="meta-bar" id="metaBar"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--source)"></span>Read</span>
+    <span><span class="dot" style="background:var(--op)"></span>Transform / Build</span>
+    <span><span class="dot" style="background:var(--cond)"></span>Filter</span>
+    <span><span class="dot" style="background:var(--target)"></span>Write</span>
+    <span><span class="dot" style="background:var(--raw)"></span>Raw / unclassified</span>
+  </div>
+  <div class="layout">
+    <div class="schema-panel" id="schemaPanel"></div>
+    <div class="canvas" id="canvas"><p class="error">Loading…</p></div>
+  </div>
+</div>
+<script>
+const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W', raw:'?' };
+const COLOR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', write:'--target', raw:'--raw' };
+const BG = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg', raw:'--raw-bg' };
+const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Transform', build:'Build object', write:'Write to target', raw:'Unclassified (raw)' };
+
+function badge(step) {
+  if (step.kind === 'raw') return '<span class="badge badge-raw">needs review</span>';
+  if (step.labelSource === 'gemini') return '<span class="badge badge-gemini">AI labeled</span>';
+  return '<span class="badge badge-det">deterministic</span>';
+}
+
+function renderStepBody(step) {
+  if (step.kind === 'read') return `Field <span class="mono">${esc(step.field)}</span>`;
+  if (step.kind === 'filter') {
+    let inner = `When <span class="mono">${esc(step.value || step.op)}</span>`;
+    if (step.children?.length) inner += `<div class="nested">${step.children.map(renderStep).join('')}</div>`;
+    return inner;
+  }
+  if (step.kind === 'select') return `Take <span class="mono">${esc(step.mode)}</span>`;
+  if (step.kind === 'transform') {
+    let t = `Apply <span class="mono">${esc(step.op)}</span> to <span class="mono">${esc(step.field)}</span>`;
+    if (step.field2) t += ` and <span class="mono">${esc(step.field2)}</span>`;
+    if (step.param !== undefined) t += ` · param <span class="mono">${esc(String(step.param))}</span>`;
+    return t;
+  }
+  if (step.kind === 'build') {
+    const rows = (step.rows || []).map(r => `<span class="mono">${esc(r.source)}</span> → <span class="mono">${esc(r.target)}</span>`).join(', ');
+    return rows ? `Map fields: ${rows}` : `Create object${step.sourceText ? '' : ''}`;
+  }
+  if (step.kind === 'write') return `Save to <span class="mono">${esc(step.target)}</span>`;
+  if (step.kind === 'raw') return `Could not classify automatically`;
+  return esc(step.sourceText || '');
+}
+
+function renderStep(step) {
+  const k = step.kind;
+  return `<div class="step">
+    <div class="step-rail"><div class="step-icon" style="background:var(${BG[k]});color:var(${COLOR[k]})">${ICONS[k]||'?'}</div><div class="step-line"></div></div>
+    <div class="step-card">
+      <div class="step-kicker" style="color:var(${COLOR[k]})">${LABELS[k]||k}${badge(step)}</div>
+      <div class="step-body">${renderStepBody(step)}</div>
+      ${step.sourceText ? `<div class="code-block">${esc(step.sourceText)}</div>` : ''}
+      ${step.labelReason ? `<div style="font-size:11px;color:var(--ink-faint);margin-top:4px">${esc(step.labelReason)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function summarize(steps) {
+  return steps.map(s => {
+    if (s.kind === 'read') return `read ${s.field}`;
+    if (s.kind === 'transform') return `${s.op}(${s.field}${s.field2?', '+s.field2:''})`;
+    if (s.kind === 'write') return `write ${s.target}`;
+    if (s.kind === 'filter') return `filter ${s.value||''}`;
+    if (s.kind === 'build') return 'build object';
+    if (s.kind === 'raw') return 'raw (review)';
+    return s.kind;
+  }).join(', then ') + '.';
+}
+
+function renderSchema(data) {
+  const el = document.getElementById('schemaPanel');
+  const src = (data.sourceFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
+  const tgt = (data.targetFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
+  el.innerHTML = `
+    <div class="schema-title">Source · ${esc(data.sourceSimple)}</div>${src}
+    <div class="schema-group">Target · ${esc(data.targetSimple)}</div>${tgt}
+    <div class="schema-group" style="margin-top:12px;font-size:11px;color:var(--ink-faint)">From indexer + labeler. Read-only.</div>`;
+}
+
+function render(data) {
+  document.getElementById('metaBar').innerHTML = [
+    `<span class="pill">${esc(data.mapperId)}</span>`,
+    data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
+    data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
+    data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
+  ].join('');
+  renderSchema(data);
+  document.getElementById('canvas').innerHTML = `
+    <span class="target-name">${esc(data.target)}</span>
+    <div class="pipeline">${(data.steps||[]).map(renderStep).join('')}</div>
+    <div class="summary"><strong>Summary:</strong> ${esc(summarize(data.steps||[]))}</div>`;
+}
+
+async function load() {
+  const params = new URLSearchParams(location.search);
+  const mapper = params.get('mapper') || 'demo-ai-recognition-mapper';
+  try {
+    const res = await fetch(`/data/${mapper}.view.json`);
+    if (!res.ok) throw new Error(`Missing data/${mapper}.view.json — run: npm run view:export -- --mapper ${mapper} --label`);
+    render(await res.json());
+  } catch (e) {
+    document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  }
+}
+load();
+</script>
+</body>
+</html>

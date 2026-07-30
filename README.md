@@ -15,6 +15,8 @@ npm run read-source -- --path src/main/java/com/kodiakservice/mapper/DemoAiRecog
 npm run scan -- --mapper demo-ai-recognition-mapper --remote
 npm run scan -- --mapper lpa-request-mapper --remote
 npm run label -- --mapper demo-ai-recognition-mapper   # Phase 2: Gemini labels RAW steps
+npm run view:export -- --mapper demo-ai-recognition-mapper --label
+npm run view:serve   # http://localhost:4173/?mapper=demo-ai-recognition-mapper
 npm run scan:incremental      # re-scan only when main advances
 npm run poll                  # poll every 15 min
 ```
@@ -67,8 +69,25 @@ Uses REST `generativelanguage.googleapis.com/v1beta/...:generateContent` with `X
 
 ```bash
 npm run label -- --mapper demo-ai-recognition-mapper
+npm run view:export -- --mapper demo-ai-recognition-mapper --label
+npm run view:serve
 ```
+
+Open **http://localhost:4173/?mapper=demo-ai-recognition-mapper** for the read-only pipeline viewer.
+
+## Pipeline viewer (Phase 2)
+
+Export labeled pipeline to UI format and serve locally:
+
+```bash
+npm run view:export -- --mapper demo-ai-recognition-mapper --label
+npm run view:serve
+```
+
+Or one shot: `npm run view` (export demo mapper + start server).
 
 ## Architecture
 
 See [CLAUDE.md](./CLAUDE.md) for phase boundaries and the no-AI-in-discovery rule.
+
+See [ABOUT.md](./ABOUT.md) for phase completion status and project overview.

@@ -1,11 +1,6 @@
 #!/usr/bin/env tsx
 /**
  * Full scan: registry → fetch → JavaParser index → cache.
- *
- * Usage:
- *   npx tsx src/orchestrator/scanRepo.ts --mapper example-mapper
- *   npx tsx src/orchestrator/scanRepo.ts --mapper example-mapper --local
- *   npx tsx src/orchestrator/scanRepo.ts --mapper example-mapper --remote
  */
 
 import { parseArgs } from "node:util";
@@ -22,20 +17,19 @@ import {
   writeRuntimeRegistry,
 } from "../indexer/runIndexer.js";
 
-const { values } = parseArgs({
-  options: {
-    mapper: { type: "string", short: "m" },
-    local: { type: "boolean", default: false },
-    remote: { type: "boolean", default: false },
-    registry: { type: "string", default: paths.registry },
-  },
-});
+export interface ScanOptions {
+  local?: boolean;
+  remote?: boolean;
+  commitSha?: string;
+  registryPath?: string;
+}
 
 async function fetchOrReadLocal(
   mapper: MapperEntry,
   worktree: string,
   commitSha: string,
   remote: boolean,
+  registryPath: string,
 ): Promise<{ blobSha: string }> {
   if (!remote) {
     const localPath = join(paths.root, mapper.sourceFile);
@@ -47,7 +41,7 @@ async function fetchOrReadLocal(
     return { blobSha: cache.contentHash(content) };
   }
 
-  const registry = loadRegistry(values.registry!);
+  const registry = loadRegistry(registryPath);
   const { owner, name } = parseRepoSlug(registry.repo);
   const client = new GitHubClient();
   await client.connectMcp();
@@ -62,11 +56,12 @@ async function fetchOrReadLocal(
 
 export async function scanFiles(
   mapperIds: string[],
-  options: { local?: boolean; remote?: boolean; commitSha?: string } = {},
+  options: ScanOptions = {},
 ): Promise<cache.CacheEntry[]> {
-  const registry = loadRegistry(values.registry!);
-  const useLocal = options.local ?? values.local ?? !values.remote;
-  const useRemote = options.remote ?? values.remote ?? false;
+  const registryPath = options.registryPath ?? paths.registry;
+  const registry = loadRegistry(registryPath);
+  const useRemote = options.remote ?? false;
+  const useLocal = options.local ?? !useRemote;
   const runtimeRegistry = join(paths.cacheDir, "runtime-registry.yaml");
 
   let commitSha = options.commitSha ?? "local";
@@ -98,7 +93,13 @@ export async function scanFiles(
 
   const results: cache.CacheEntry[] = [];
   for (const mapper of mappers) {
-    const { blobSha } = await fetchOrReadLocal(mapper, worktree, commitSha, useRemote);
+    const { blobSha } = await fetchOrReadLocal(
+      mapper,
+      worktree,
+      commitSha,
+      useRemote && !useLocal,
+      registryPath,
+    );
     const entry = indexAndCache(mapper, worktree, commitSha, blobSha, runtimeRegistry);
     results.push(entry);
   }
@@ -107,15 +108,26 @@ export async function scanFiles(
 }
 
 async function main(): Promise<void> {
+  const { values } = parseArgs({
+    options: {
+      mapper: { type: "string", short: "m" },
+      local: { type: "boolean", default: false },
+      remote: { type: "boolean", default: false },
+      registry: { type: "string", default: paths.registry },
+    },
+  });
+
   const registry = loadRegistry(values.registry!);
   let mapperIds = registry.mappers.map((m) => m.id);
+  if (values.mapper) mapperIds = [values.mapper];
 
-  if (values.mapper) {
-    mapperIds = [values.mapper];
-  }
-
-  const useRemote = values.remote || (!values.local && !!process.env.GITHUB_TOKEN);
-  const results = await scanFiles(mapperIds, { local: !useRemote, remote: useRemote });
+  const useRemote =
+    values.remote || (!values.local && (!!process.env.GITHUB_TOKEN || true));
+  const results = await scanFiles(mapperIds, {
+    local: values.local,
+    remote: useRemote && !values.local,
+    registryPath: values.registry,
+  });
 
   for (const entry of results) {
     console.log(

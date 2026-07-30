@@ -12,6 +12,9 @@
     "latest-sha": "tsx src/tools/getLatestCommitSha.ts",
     "golden:capture": "tsx validator/golden-dataset/capture.ts",
     "label": "tsx translator/cli.ts",
+    "view:export": "tsx translator/export-view.ts",
+    "view:serve": "tsx ui/pipeline-viewer/serve.ts",
+    "view": "npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve",
     "build:indexer": "cd indexer && JAVA_HOME=\"${JAVA_HOME:-$(cd .. && pwd)/.jdk}\" ./gradlew shadowJar"
   },
   "engines": {
