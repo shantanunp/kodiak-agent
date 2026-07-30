@@ -4,6 +4,7 @@ import {
   writeFileSync,
   renameSync,
   existsSync,
+  readdirSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -75,4 +76,21 @@ export function worktreeDir(commitSha: string): string {
 
 export function contentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 40);
+}
+
+/** Most recent cache entry for a mapper source path (any blob SHA). */
+export function findLatestByFilePath(filePath: string): CacheEntry | null {
+  const dir = indexDir();
+  if (!existsSync(dir)) return null;
+
+  let latest: CacheEntry | null = null;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const entry = JSON.parse(readFileSync(join(dir, name), "utf8")) as CacheEntry;
+    if (entry.filePath !== filePath) continue;
+    if (!latest || entry.indexedAt > latest.indexedAt) {
+      latest = entry;
+    }
+  }
+  return latest;
 }
