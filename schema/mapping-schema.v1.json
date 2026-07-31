@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kodiak-agent.local/schema/mapping-schema.v1.json",
+  "title": "Kodiak Mapping Schema Document",
+  "type": "object",
+  "required": ["version", "mapperId", "source", "target", "savedAt"],
+  "properties": {
+    "version": { "const": 1 },
+    "mapperId": { "type": "string", "minLength": 1 },
+    "savedAt": { "type": "string", "format": "date-time" },
+    "source": { "$ref": "#/$defs/structureSide" },
+    "target": { "$ref": "#/$defs/structureSide" }
+  },
+  "$defs": {
+    "structureSide": {
+      "type": "object",
+      "required": ["method", "root"],
+      "properties": {
+        "method": { "enum": ["manual", "schema", "sample"] },
+        "format": { "type": "string" },
+        "root": { "$ref": "#/$defs/schemaNode" }
+      }
+    },
+    "schemaNode": {
+      "type": "object",
+      "required": ["id", "name", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": {
+          "enum": ["string", "integer", "number", "boolean", "date", "object", "array"]
+        },
+        "itemType": { "type": "string" },
+        "required": { "type": "boolean" },
+        "description": { "type": "string" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/schemaNode" }
+        }
+      }
+    }
+  }
+}

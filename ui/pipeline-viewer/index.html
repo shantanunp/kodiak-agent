@@ -35,6 +35,11 @@
   .schema-group{font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);margin:10px 0 4px;}
   .schema-field{font-family:var(--font-mono);font-size:12px;padding:4px 6px;border-radius:6px;}
   .schema-field:hover{background:var(--bg);}
+  .schema-tree{margin-left:0;padding-left:0;list-style:none;}
+  .schema-tree li{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--ink-soft);}
+  .schema-tree .node-name{color:var(--ink);}
+  .schema-tree ul{margin:2px 0 4px 14px;padding:0;list-style:none;border-left:1px dashed var(--line);}
+  .schema-ref{font-size:11px;color:var(--ink-faint);margin-top:10px;}
   .target-name{font-family:var(--font-mono);font-size:15px;font-weight:500;color:var(--target);background:var(--target-bg);padding:3px 9px;border-radius:6px;display:inline-block;}
   .pipeline{margin-top:18px;padding-left:6px;}
   .step{display:flex;gap:14px;padding-bottom:20px;}
@@ -139,24 +144,58 @@ function summarize(steps) {
   }).join(', then ') + '.';
 }
 
-function renderSchema(data) {
-  const el = document.getElementById('schemaPanel');
-  const src = (data.sourceFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
-  const tgt = (data.targetFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
-  el.innerHTML = `
-    <div class="schema-title">Source · ${esc(data.sourceSimple)}</div>${src}
-    <div class="schema-group">Target · ${esc(data.targetSimple)}</div>${tgt}
-    <div class="schema-group" style="margin-top:12px;font-size:11px;color:var(--ink-faint)">From indexer + labeler. Read-only.</div>`;
+function renderSchemaTree(node, depth = 0) {
+  if (!node) return '';
+  const kids = node.children || [];
+  const req = node.required ? ' <span style="color:var(--cond)">*</span>' : '';
+  const type = node.type === 'array' ? `array[${node.itemType || ''}]` : node.type;
+  let html = `<li><span class="node-name">${esc(node.name)}</span>${req} <span style="opacity:.65">${esc(type)}</span>`;
+  if (kids.length) {
+    html += `<ul>${kids.map(c => renderSchemaTree(c, depth + 1)).join('')}</ul>`;
+  }
+  html += '</li>';
+  return html;
 }
 
-function render(data) {
+function renderSchemaPanel(data, schemaDoc) {
+  const el = document.getElementById('schemaPanel');
+  const sourceRoot = data.sourceSchema || schemaDoc?.source?.root;
+  const targetRoot = data.targetSchema || schemaDoc?.target?.root;
+
+  let srcHtml;
+  let tgtHtml;
+
+  if (sourceRoot?.children?.length) {
+    srcHtml = `<ul class="schema-tree">${sourceRoot.children.map(c => renderSchemaTree(c)).join('')}</ul>`;
+  } else {
+    srcHtml = (data.sourceFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
+  }
+
+  if (targetRoot?.children?.length) {
+    tgtHtml = `<ul class="schema-tree">${targetRoot.children.map(c => renderSchemaTree(c)).join('')}</ul>`;
+  } else {
+    tgtHtml = (data.targetFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
+  }
+
+  const schemaNote = data.schemaRef || schemaDoc
+    ? `<div class="schema-ref">Schema: ${esc(data.schemaRef || schemaDoc.mapperId + '.schema.json')}</div>`
+    : `<div class="schema-ref">Fields from pipeline steps (no saved schema)</div>`;
+
+  el.innerHTML = `
+    <div class="schema-title">Source · ${esc(data.sourceSimple)}</div>${srcHtml}
+    <div class="schema-group">Target · ${esc(data.targetSimple)}</div>${tgtHtml}
+    ${schemaNote}`;
+}
+
+function render(data, schemaDoc) {
   document.getElementById('metaBar').innerHTML = [
     `<span class="pill">${esc(data.mapperId)}</span>`,
     data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
     data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
     data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
+    `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(data.mapperId)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
   ].join('');
-  renderSchema(data);
+  renderSchemaPanel(data, schemaDoc);
   document.getElementById('canvas').innerHTML = `
     <span class="target-name">${esc(data.target)}</span>
     <div class="pipeline">${(data.steps||[]).map(renderStep).join('')}</div>
@@ -167,9 +206,45 @@ async function load() {
   const params = new URLSearchParams(location.search);
   const mapper = params.get('mapper') || 'demo-ai-recognition-mapper';
   try {
-    const res = await fetch(`/data/${mapper}.view.json`);
-    if (!res.ok) throw new Error(`Missing data/${mapper}.view.json — run: npm run view:export -- --mapper ${mapper} --label`);
-    render(await res.json());
+    const [viewRes, schemaRes] = await Promise.all([
+      fetch(`/data/${mapper}.view.json`),
+      fetch(`/api/schemas/${encodeURIComponent(mapper)}`),
+    ]);
+
+    let viewData = null;
+    if (viewRes.ok) {
+      viewData = await viewRes.json();
+    }
+
+    let schemaDoc = null;
+    if (schemaRes.ok) {
+      schemaDoc = await schemaRes.json();
+    }
+
+    if (!viewData && !schemaDoc) {
+      throw new Error(`No view data or schema for ${mapper}. Run view:export or build a schema first.`);
+    }
+
+    if (!viewData) {
+      viewData = {
+        mapperId: mapper,
+        sourceSimple: schemaDoc.source?.root?.name || 'Source',
+        targetSimple: schemaDoc.target?.root?.name || 'Target',
+        target: schemaDoc.target?.root?.name || 'Target',
+        sourceFields: [],
+        targetFields: [],
+        steps: [],
+        sourceSchema: schemaDoc.source?.root,
+        targetSchema: schemaDoc.target?.root,
+        schemaRef: `${mapper}.schema.json`,
+      };
+      document.getElementById('canvas').innerHTML = `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Schema saved for <strong>${esc(mapper)}</strong>. No pipeline export yet — run <span class="mono">npm run view:export -- --mapper ${esc(mapper)}</span> to see mapping steps.</p>`;
+      renderSchemaPanel(viewData, schemaDoc);
+      document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(mapper)}</span><span class="pill">schema only</span>`;
+      return;
+    }
+
+    render(viewData, schemaDoc);
   } catch (e) {
     document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }

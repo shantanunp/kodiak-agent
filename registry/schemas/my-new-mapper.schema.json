@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "mapperId": "my-new-mapper",
+  "source": {
+    "method": "manual",
+    "root": {
+      "id": "n3",
+      "name": "source",
+      "type": "object",
+      "itemType": "string",
+      "description": "",
+      "required": false,
+      "children": [
+        {
+          "id": "n5",
+          "name": "new_field",
+          "type": "string",
+          "itemType": "string",
+          "description": "",
+          "required": false,
+          "children": []
+        }
+      ]
+    }
+  },
+  "target": {
+    "method": "manual",
+    "root": {
+      "id": "n4",
+      "name": "target",
+      "type": "object",
+      "itemType": "string",
+      "description": "",
+      "required": false,
+      "children": [
+        {
+          "id": "n6",
+          "name": "new_field",
+          "type": "string",
+          "itemType": "string",
+          "description": "",
+          "required": false,
+          "children": []
+        }
+      ]
+    }
+  },
+  "savedAt": "2026-07-30T17:40:14.679Z"
+}

@@ -16,7 +16,7 @@ npm run scan -- --mapper demo-ai-recognition-mapper --remote
 npm run scan -- --mapper lpa-request-mapper --remote
 npm run label -- --mapper demo-ai-recognition-mapper   # Phase 2: Gemini labels RAW steps
 npm run view:export -- --mapper demo-ai-recognition-mapper --label
-npm run view:serve   # http://localhost:4173/?mapper=demo-ai-recognition-mapper
+npm run view:serve   # or: npm run ui:serve
 npm run scan:incremental      # re-scan only when main advances
 npm run poll                  # poll every 15 min
 ```
@@ -73,7 +73,25 @@ npm run view:export -- --mapper demo-ai-recognition-mapper --label
 npm run view:serve
 ```
 
-Open **http://localhost:4173/?mapper=demo-ai-recognition-mapper** for the read-only pipeline viewer.
+Open **http://localhost:4173/pipeline-viewer/?mapper=demo-ai-recognition-mapper** for the read-only pipeline viewer.
+
+## Schema builder
+
+Define source/target structures before mapping. Saved to `registry/schemas/{mapperId}.schema.json`.
+
+```bash
+npm run ui:serve
+```
+
+- **Page 1:** http://localhost:4173/structure-setup/?mapper=my-new-mapper
+- **Page 2 (manual build):** http://localhost:4173/schema-builder/?mapper=my-new-mapper
+- **Viewer:** http://localhost:4173/pipeline-viewer/?mapper=my-new-mapper
+
+Export/import uses Kodiak JSON (`.schema.json`). Import also accepts JSON/XML samples, JSON Schema, and XSD.
+
+```bash
+npm run schema:validate -- registry/schemas/my-new-mapper.schema.json
+```
 
 ## Pipeline viewer (Phase 2)
 

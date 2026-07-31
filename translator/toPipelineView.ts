@@ -4,6 +4,9 @@
  */
 
 import type { PipelineJson, PipelineStep } from "./labeler.js";
+import { loadSchema } from "../schema/io.js";
+import { flattenPaths } from "../schema/flatten.js";
+import type { SchemaNode } from "../schema/types.js";
 
 export type ViewStepKind =
   | "read"
@@ -48,6 +51,9 @@ export interface PipelineViewModel {
   labeledAt?: string;
   labelModel?: string;
   readOnly: true;
+  schemaRef?: string;
+  sourceSchema?: SchemaNode;
+  targetSchema?: SchemaNode;
 }
 
 /** Known field hints when registry does not list them explicitly. */
@@ -253,16 +259,22 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const targetSimple = simpleTypeName(targetType);
 
   const hints = MAPPER_SCHEMA_HINTS[mapperId];
+  const savedSchema = loadSchema(mapperId);
 
   const steps = pipeline.steps.flatMap((s) =>
     convertStep(s, sourceSimple, targetSimple),
   );
 
   const collected = collectFields(steps);
-  const sourceFields =
-    hints?.sourceFields ?? [...collected.source].sort();
-  const targetFields =
-    hints?.targetFields ?? [...collected.target].sort();
+  const schemaSourceFields = savedSchema ? flattenPaths(savedSchema.source.root) : [];
+  const schemaTargetFields = savedSchema ? flattenPaths(savedSchema.target.root) : [];
+
+  const sourceFields = schemaSourceFields.length
+    ? schemaSourceFields
+    : hints?.sourceFields ?? [...collected.source].sort();
+  const targetFields = schemaTargetFields.length
+    ? schemaTargetFields
+    : hints?.targetFields ?? [...collected.target].sort();
 
   return {
     mapperId,
@@ -281,5 +293,8 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
     labeledAt: pipeline.labeledAt,
     labelModel: pipeline.labelModel,
     readOnly: true,
+    schemaRef: savedSchema ? `${mapperId}.schema.json` : undefined,
+    sourceSchema: savedSchema?.source.root,
+    targetSchema: savedSchema?.target.root,
   };
 }

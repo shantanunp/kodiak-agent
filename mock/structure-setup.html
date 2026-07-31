@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Define structures</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EEF1EC; --panel:#FFFFFF; --ink:#17201C; --ink-soft:#5C665F; --ink-faint:#8B948D; --line:#DADFD9;
+    --source:#0F6E56; --source-bg:#E1F3EC;
+    --target:#9A5B0A; --target-bg:#FBEFDC;
+    --op:#4A3F8C; --op-bg:#ECE9F8;
+    --cond:#A32B4B; --cond-bg:#FBE7ED;
+    --font-display:'Space Grotesk', sans-serif; --font-body:'Inter', sans-serif; --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);}
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 60px;}
+  header{margin-bottom:20px;}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:4px;}
+  .brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink);display:flex;align-items:center;justify-content:center;}
+  .brand-mark span{width:10px;height:10px;border-radius:2px;background:var(--bg);}
+  h1{font-family:var(--font-display);font-weight:600;font-size:20px;margin:0;letter-spacing:-0.01em;}
+  .tagline{color:var(--ink-soft);font-size:13.5px;margin:0 0 0 36px;}
+
+  .columns{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:22px;align-items:start;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 18px 20px;}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .panel-title{font-family:var(--font-display);font-weight:600;font-size:15px;}
+  .panel-title.src{color:var(--source);}
+  .panel-title.dst{color:var(--target);}
+  .fmt-pill{font-family:var(--font-mono);font-size:11px;padding:3px 8px;border-radius:20px;background:var(--bg);color:var(--ink-soft);border:1px solid var(--line);}
+
+  .method-grid{display:grid;grid-template-columns:1fr;gap:10px;}
+  .method-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;display:flex;gap:12px;align-items:flex-start;}
+  .method-card:hover{border-color:var(--ink-faint);}
+  .method-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:var(--bg);color:var(--ink-soft);}
+  .method-title{font-size:13.5px;font-weight:600;color:var(--ink);}
+  .method-desc{font-size:12px;color:var(--ink-soft);margin-top:2px;line-height:1.4;}
+
+  .back-link{font-size:12px;color:var(--ink-faint);cursor:pointer;margin-bottom:12px;display:inline-block;}
+  .back-link:hover{color:var(--ink);}
+
+  .dropzone{border:1.5px dashed var(--line);border-radius:10px;padding:22px 16px;text-align:center;margin-bottom:14px;}
+  .dropzone-icon{font-size:20px;color:var(--ink-faint);margin-bottom:6px;}
+  .dropzone-text{font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;}
+  .file-btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:12.5px;padding:7px 14px;border-radius:7px;cursor:pointer;font-family:var(--font-body);}
+  .file-btn:hover{border-color:var(--ink-faint);}
+  .parse-status{font-size:12px;margin-top:10px;}
+  .parse-status.ok{color:var(--source);}
+  .parse-status.warn{color:var(--target);}
+  .parse-status.error{color:var(--cond);}
+
+  .tree{margin-top:4px;}
+  .node-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+  .node-row input[type="text"]{font-family:var(--font-mono);font-size:12px;padding:5px 7px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);width:120px;}
+  .node-row select{font-family:var(--font-mono);font-size:11.5px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);}
+  .node-remove{border:none;background:transparent;color:var(--ink-faint);font-size:14px;cursor:pointer;padding:2px 4px;}
+  .node-remove:hover{color:var(--cond);}
+  .doc-toggle{border:1px solid var(--line);background:transparent;color:var(--ink-faint);font-size:10.5px;padding:4px 8px;border-radius:20px;cursor:pointer;font-family:var(--font-body);white-space:nowrap;}
+  .doc-toggle:hover{border-color:var(--ink-faint);color:var(--ink-soft);}
+  .doc-toggle.has-doc{background:var(--op-bg);border-color:var(--op-bg);color:var(--op);font-weight:600;}
+  .doc-row{margin:-2px 0 8px 0;}
+  .doc-row textarea{width:100%;max-width:420px;font-family:var(--font-body);font-size:12px;color:var(--ink);padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);resize:vertical;min-height:40px;}
+  .doc-preview{font-size:11.5px;color:var(--ink-faint);font-style:italic;margin:-2px 0 8px 0;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
+  .doc-preview:hover{color:var(--ink-soft);}
+  .node-add{border:1px dashed var(--line);background:transparent;color:var(--ink-soft);font-size:11.5px;padding:4px 9px;border-radius:6px;cursor:pointer;margin:2px 0 8px;}
+  .node-add:hover{border-color:var(--ink-faint);color:var(--ink);}
+  .node-children{border-left:1.5px dashed var(--line);margin-left:10px;padding-left:14px;}
+
+  .root-add{border:1px dashed var(--line);background:transparent;color:var(--ink-soft);font-size:12.5px;padding:7px 12px;border-radius:7px;cursor:pointer;}
+  .root-add:hover{border-color:var(--ink-faint);color:var(--ink);}
+
+  .continue-row{display:flex;justify-content:flex-end;margin-top:24px;}
+  .continue-btn{border:none;background:var(--ink);color:var(--bg);font-family:var(--font-body);font-weight:600;font-size:13.5px;padding:11px 20px;border-radius:8px;cursor:pointer;}
+  .continue-btn:disabled{opacity:.4;cursor:default;}
+  .continue-hint{font-size:12px;color:var(--ink-faint);align-self:center;margin-right:12px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="brand-mark"><span></span></div><h1>New mapping</h1></div>
+    <p class="tagline">Define what a source record looks like, and what the target should look like — then map between them.</p>
+  </header>
+
+  <div class="columns">
+    <div class="panel" id="panel-source"></div>
+    <div class="panel" id="panel-destination"></div>
+  </div>
+
+  <div class="continue-row">
+    <span class="continue-hint" id="continueHint"></span>
+    <button class="continue-btn" id="continueBtn" disabled>Continue to mapping &rarr;</button>
+  </div>
+</div>
+
+<script>
+const TYPES = [
+  { v:'text', label:'Text (str)' },
+  { v:'number', label:'Number (int)' },
+  { v:'decimal', label:'Decimal (float)' },
+  { v:'boolean', label:'Boolean (bool)' },
+  { v:'date', label:'Date' },
+  { v:'list', label:'List (list)' },
+  { v:'object', label:'Object (dict)' }
+];
+
+const METHODS = [
+  { id:'schema', icon:'\u29C9', title:'Load a schema file', desc:'XSD or JSON Schema \u2014 fields, types and rules parsed from the definition.' },
+  { id:'sample', icon:'\u21E9', title:'Load a sample payload', desc:'A real XML or JSON example \u2014 structure is inferred from the data.' },
+  { id:'manual', icon:'\u270E', title:'Build manually', desc:'Define fields yourself using simple types \u2014 text, number, list, object.' }
+];
+
+let uid = 1;
+function newNode(name, type){ return { id: uid++, name: name||'field', type: type||'text', itemType:'text', description:'', docOpen:false, children: [] }; }
+
+const state = {
+  source: { method:null, format:null, tree:[], filename:null, status:null },
+  destination: { method:null, format:null, tree:[], filename:null, status:null }
+};
+
+function needsChildren(node){
+  return node.type === 'object' || (node.type === 'list' && node.itemType === 'object');
+}
+
+function findNode(tree, id){
+  for(const n of tree){
+    if(n.id === id) return n;
+    if(n.children && n.children.length){ const f = findNode(n.children, id); if(f) return f; }
+  }
+  return null;
+}
+function findParentArray(tree, id){
+  for(const n of tree){
+    if(n.id === id) return tree;
+    if(n.children && n.children.length){ const f = findParentArray(n.children, id); if(f) return f; }
+  }
+  return null;
+}
+
+function renderMethodCards(side){
+  return `<div class="method-grid">${METHODS.map(m=>`
+    <div class="method-card" data-side="${side}" data-method="${m.id}">
+      <div class="method-icon">${m.icon}</div>
+      <div><div class="method-title">${m.title}</div><div class="method-desc">${m.desc}</div></div>
+    </div>`).join('')}</div>`;
+}
+
+function renderNodeRow(node, side, depth){
+  const s = state[side];
+  let html = `<div class="node-row" style="margin-left:${depth*0}px">
+    <input type="text" data-side="${side}" data-id="${node.id}" data-role="name" value="${node.name}" />
+    <select data-side="${side}" data-id="${node.id}" data-role="type">
+      ${TYPES.map(t=>`<option value="${t.v}" ${t.v===node.type?'selected':''}>${t.label}</option>`).join('')}
+    </select>`;
+  if(node.type === 'list'){
+    html += `<select data-side="${side}" data-id="${node.id}" data-role="itemtype">
+      ${TYPES.filter(t=>t.v!=='list').map(t=>`<option value="${t.v}" ${t.v===node.itemType?'selected':''}>item: ${t.label}</option>`).join('')}
+    </select>`;
+  }
+  html += `<button class="doc-toggle ${node.description ? 'has-doc' : ''}" data-side="${side}" data-id="${node.id}" title="Add a description">${node.description ? 'Doc \u2713' : '+ Doc'}</button>`;
+  html += `<button class="node-remove" data-side="${side}" data-id="${node.id}">&times;</button></div>`;
+
+  if(node.docOpen){
+    html += `<div class="doc-row" style="margin-left:${(depth+1)*0}px"><textarea data-side="${side}" data-id="${node.id}" data-role="description" placeholder="What is this field? Valid values, format, business rules...">${node.description}</textarea></div>`;
+  } else if(node.description){
+    html += `<div class="doc-preview" data-side="${side}" data-id="${node.id}" data-action="opendoc">${node.description}</div>`;
+  }
+
+  if(needsChildren(node)){
+    html += `<div class="node-children">`;
+    node.children.forEach(c=>{ html += renderNodeRow(c, side, depth+1); });
+    html += `<button class="node-add" data-side="${side}" data-parent="${node.id}">+ Add field</button>`;
+    html += `</div>`;
+  }
+  return html;
+}
+
+function renderTreeEditor(side){
+  const s = state[side];
+  let html = `<div class="tree">`;
+  s.tree.forEach(n=>{ html += renderNodeRow(n, side, 0); });
+  html += `</div><button class="root-add" data-side="${side}" data-parent="">+ Add field</button>`;
+  return html;
+}
+
+function renderPanel(side){
+  const s = state[side];
+  const el = document.getElementById('panel-' + side);
+  const title = side === 'source' ? 'Source structure' : 'Destination structure';
+  const cls = side === 'source' ? 'src' : 'dst';
+
+  let body = '';
+  if(!s.method){
+    body = renderMethodCards(side);
+  } else if(s.method === 'manual'){
+    body = `<div class="back-link" data-side="${side}" data-action="back">&larr; Change method</div>` + renderTreeEditor(side);
+  } else {
+    const label = s.method === 'schema' ? 'schema file (.xsd / .json)' : 'sample payload (.xml / .json)';
+    body = `<div class="back-link" data-side="${side}" data-action="back">&larr; Change method</div>
+      <div class="dropzone">
+        <div class="dropzone-icon">${s.method==='schema'?'\u29C9':'\u21E9'}</div>
+        <div class="dropzone-text">${s.filename ? s.filename : 'Choose a ' + label}</div>
+        <button class="file-btn" data-side="${side}">${s.filename ? 'Choose a different file' : 'Choose file'}</button>
+        <input type="file" accept=".json,.xml,.xsd,.txt" style="display:none" id="file-${side}" data-side="${side}" />
+        ${s.status ? `<div class="parse-status ${s.status.type}">${s.status.text}</div>` : ''}
+      </div>
+      ${s.tree.length ? renderTreeEditor(side) : ''}`;
+  }
+
+  el.innerHTML = `
+    <div class="panel-head">
+      <span class="panel-title ${cls}">${title}</span>
+      ${s.format ? `<span class="fmt-pill">${s.format}</span>` : ''}
+    </div>
+    ${body}`;
+
+  el.querySelectorAll('.method-card').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      const side = card.dataset.side, method = card.dataset.method;
+      state[side].method = method;
+      if(method === 'manual' && state[side].tree.length === 0){
+        state[side].tree = [ newNode('root', 'object') ];
+        state[side].format = null;
+      }
+      renderAll();
+    });
+  });
+
+  el.querySelectorAll('[data-action="back"]').forEach(link=>{
+    link.addEventListener('click', ()=>{
+      const side = link.dataset.side;
+      state[side].method = null; state[side].tree = []; state[side].filename = null; state[side].status = null; state[side].format = null;
+      renderAll();
+    });
+  });
+
+  el.querySelectorAll('.file-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ document.getElementById('file-' + btn.dataset.side).click(); });
+  });
+
+  el.querySelectorAll('input[type="file"]').forEach(input=>{
+    input.addEventListener('change', (e)=>handleFile(e.target.dataset.side, e.target.files[0]));
+  });
+
+  el.querySelectorAll('.node-row input, .node-row select').forEach(ctrl=>{
+    ctrl.addEventListener('change', (e)=>{
+      const side = e.target.dataset.side, id = parseInt(e.target.dataset.id), role = e.target.dataset.role;
+      const node = findNode(state[side].tree, id);
+      if(!node) return;
+      if(role === 'name') node.name = e.target.value || 'field';
+      if(role === 'type') node.type = e.target.value;
+      if(role === 'itemtype') node.itemType = e.target.value;
+      renderAll();
+    });
+  });
+
+  el.querySelectorAll('.doc-toggle').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const side = btn.dataset.side, id = parseInt(btn.dataset.id);
+      const node = findNode(state[side].tree, id);
+      if(!node) return;
+      node.docOpen = !node.docOpen;
+      renderAll();
+      setTimeout(()=>{ const ta = document.querySelector(`textarea[data-side="${side}"][data-id="${id}"]`); if(ta) ta.focus(); }, 0);
+    });
+  });
+
+  el.querySelectorAll('.doc-preview').forEach(prev=>{
+    prev.addEventListener('click', ()=>{
+      const side = prev.dataset.side, id = parseInt(prev.dataset.id);
+      const node = findNode(state[side].tree, id);
+      if(!node) return;
+      node.docOpen = true;
+      renderAll();
+    });
+  });
+
+  el.querySelectorAll('textarea[data-role="description"]').forEach(ta=>{
+    ta.addEventListener('change', (e)=>{
+      const side = e.target.dataset.side, id = parseInt(e.target.dataset.id);
+      const node = findNode(state[side].tree, id);
+      if(!node) return;
+      node.description = e.target.value;
+      renderAll();
+    });
+  });
+
+  el.querySelectorAll('.node-remove').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const side = btn.dataset.side, id = parseInt(btn.dataset.id);
+      const arr = findParentArray(state[side].tree, id);
+      if(arr){ const i = arr.findIndex(n=>n.id===id); arr.splice(i,1); }
+      renderAll();
+    });
+  });
+
+  el.querySelectorAll('.node-add, .root-add').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const side = btn.dataset.side, parentId = btn.dataset.parent;
+      const node = newNode('new_field', 'text');
+      if(parentId){
+        const parent = findNode(state[side].tree, parseInt(parentId));
+        parent.children.push(node);
+      } else {
+        state[side].tree.push(node);
+      }
+      renderAll();
+    });
+  });
+}
+
+function inferFromJsonValue(name, value){
+  if(Array.isArray(value)){
+    const node = newNode(name, 'list');
+    if(value.length && typeof value[0] === 'object' && value[0] !== null){
+      node.itemType = 'object';
+      node.children = Object.keys(value[0]).map(k=>inferFromJsonValue(k, value[0][k]));
+    } else if(value.length){
+      node.itemType = jsPrimitiveType(value[0]);
+    }
+    return node;
+  }
+  if(value !== null && typeof value === 'object'){
+    const node = newNode(name, 'object');
+    node.children = Object.keys(value).map(k=>inferFromJsonValue(k, value[k]));
+    return node;
+  }
+  return newNode(name, jsPrimitiveType(value));
+}
+function jsPrimitiveType(v){
+  if(typeof v === 'boolean') return 'boolean';
+  if(typeof v === 'number') return Number.isInteger(v) ? 'number' : 'decimal';
+  if(typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return 'date';
+  return 'text';
+}
+
+function inferFromXmlElement(el){
+  const node = newNode(el.tagName, 'object');
+  const attrNodes = Array.from(el.attributes || []).map(a=>newNode('@'+a.name, jsPrimitiveType(a.value)));
+  const childEls = Array.from(el.children || []);
+  const groups = {};
+  childEls.forEach(c=>{ (groups[c.tagName] = groups[c.tagName] || []).push(c); });
+  const childNodes = Object.keys(groups).map(tag=>{
+    const group = groups[tag];
+    if(group.length > 1){
+      const listNode = newNode(tag, 'list');
+      if(group[0].children.length || group[0].attributes.length){
+        listNode.itemType = 'object';
+        const sample = inferFromXmlElement(group[0]);
+        listNode.children = sample.children;
+      } else {
+        listNode.itemType = jsPrimitiveType(group[0].textContent.trim());
+      }
+      return listNode;
+    }
+    return inferFromXmlElement(group[0]);
+  });
+  if(childNodes.length === 0 && attrNodes.length === 0){
+    return newNode(el.tagName, jsPrimitiveType(el.textContent.trim()));
+  }
+  node.children = [...attrNodes, ...childNodes];
+  return node;
+}
+
+function handleFile(side, file){
+  if(!file) return;
+  state[side].filename = file.name;
+  state[side].status = { type:'ok', text:'Parsing...' };
+  renderPanel(side);
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const text = e.target.result;
+    try{
+      const trimmed = text.trim();
+      if(trimmed.startsWith('{') || trimmed.startsWith('[')){
+        const data = JSON.parse(trimmed);
+        let rootData = data;
+        let isJsonSchema = data.$schema || (data.type && data.properties);
+        if(isJsonSchema){
+          const props = data.properties || {};
+          const tree = Object.keys(props).map(k=>jsonSchemaPropToNode(k, props[k]));
+          state[side].tree = tree;
+          state[side].format = 'JSON Schema';
+          state[side].status = { type:'ok', text: 'Parsed ' + countNodes(tree) + ' fields from schema.' };
+        } else {
+          const root = inferFromJsonValue('root', rootData);
+          state[side].tree = root.children && root.children.length ? root.children : [root];
+          state[side].format = 'JSON sample';
+          state[side].status = { type:'ok', text: 'Inferred ' + countNodes(state[side].tree) + ' fields from this sample. Optional fields not shown here may exist.' };
+        }
+      } else if(trimmed.startsWith('<')){
+        const doc = new DOMParser().parseFromString(trimmed, 'text/xml');
+        const perr = doc.querySelector('parsererror');
+        if(perr) throw new Error('xml parse error');
+        const root = inferFromXmlElement(doc.documentElement);
+        state[side].tree = root.children.length ? root.children : [root];
+        state[side].format = 'XML';
+        state[side].status = { type:'warn', text: 'Best-effort structure from this file (' + countNodes(state[side].tree) + ' fields). Full XSD semantics (enums, optionality) need a dedicated schema parser.' };
+      } else {
+        throw new Error('unrecognized');
+      }
+    } catch(err){
+      state[side].status = { type:'error', text: "Couldn't parse this file. Try a valid JSON/XML sample, or build the structure manually." };
+      state[side].tree = [];
+    }
+    renderAll();
+  };
+  reader.readAsText(file);
+}
+
+function jsonSchemaPropToNode(name, schema){
+  const t = schema.type;
+  let node;
+  if(t === 'array'){
+    node = newNode(name, 'list');
+    const items = schema.items || {};
+    if(items.type === 'object'){
+      node.itemType = 'object';
+      node.children = Object.keys(items.properties||{}).map(k=>jsonSchemaPropToNode(k, items.properties[k]));
+    } else {
+      node.itemType = jsonSchemaType(items.type);
+    }
+  } else if(t === 'object'){
+    node = newNode(name, 'object');
+    node.children = Object.keys(schema.properties||{}).map(k=>jsonSchemaPropToNode(k, schema.properties[k]));
+  } else {
+    node = newNode(name, jsonSchemaType(t));
+  }
+  if(schema.description){ node.description = schema.description; }
+  return node;
+}
+function jsonSchemaType(t){
+  if(t === 'integer') return 'number';
+  if(t === 'number') return 'decimal';
+  if(t === 'boolean') return 'boolean';
+  return 'text';
+}
+
+function countNodes(tree){
+  let c = 0;
+  tree.forEach(n=>{ c += 1; if(n.children && n.children.length) c += countNodes(n.children); });
+  return c;
+}
+
+function renderAll(){
+  renderPanel('source');
+  renderPanel('destination');
+  const ready = state.source.tree.length > 0 && state.destination.tree.length > 0;
+  const btn = document.getElementById('continueBtn');
+  const hint = document.getElementById('continueHint');
+  btn.disabled = !ready;
+  hint.textContent = ready ? '' : 'Define both structures to continue.';
+}
+
+renderAll();
+</script>
+</body>
+</html>

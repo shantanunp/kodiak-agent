@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema builder — Kodiak Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/schema-builder/styles.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="brand-mark"><span></span></div><h1>Kodiak — build your schemas</h1></div>
+    <p class="tagline">Before mapping, define the data shape. Import a schema, infer it from a sample payload, or build the element tree by hand.</p>
+    <div class="mapper-bar">
+      <label for="mapperId">Mapper id</label>
+      <input id="mapperId" type="text" placeholder="e.g. my-new-mapper" />
+      <div class="toolbar-actions">
+        <button class="mini-btn" id="btnImportDoc">Import JSON</button>
+        <button class="mini-btn" id="btnExport">Export JSON</button>
+        <button class="mini-btn" id="btnSave">Save</button>
+      </div>
+    </div>
+    <div class="steps">
+      <span class="wstep active"><span class="n">1</span> Schemas</span>
+      <span class="wstep"><span class="n">2</span> Mapping</span>
+      <span class="wstep"><span class="n">3</span> Template</span>
+      <span class="wstep"><span class="n">4</span> Publish</span>
+    </div>
+  </header>
+
+  <div class="tabs-row">
+    <div class="tabs" id="tabs"></div>
+    <div class="view-toggle" id="viewToggle"></div>
+  </div>
+
+  <div class="ai-bar">
+    <span class="ai-bar-icon">&#10022;</span>
+    <input id="aiInput" type="text" placeholder="Describe the structure, e.g. a loan with borrowers (first name, last name, email) and a property address" />
+    <select id="aiTarget">
+      <option value="source">Draft into: Source</option>
+      <option value="target">Draft into: Target</option>
+    </select>
+    <button id="aiBtn">Draft with AI</button>
+  </div>
+  <div class="ai-status" id="aiStatus"></div>
+
+  <div class="layout" id="layoutTabs">
+    <div class="canvas">
+      <div class="canvas-head">
+        <div class="canvas-title" id="canvasTitleSingle">Element tree · <b>root</b></div>
+        <div class="tools">
+          <div class="search"><span style="color:var(--ink-faint);font-size:12px">&#128269;</span><input id="searchSingle" type="text" placeholder="filter elements"></div>
+          <button class="mini-btn" id="expandAllSingle">Expand all</button>
+          <button class="mini-btn" id="collapseAllSingle">Collapse all</button>
+        </div>
+      </div>
+      <div id="sourcesSingle"></div>
+      <div class="tree" id="treeSingle"></div>
+    </div>
+    <div class="detail" id="detailPanel"></div>
+  </div>
+
+  <div class="split-grid" id="layoutSplit" style="display:none">
+    <div class="pane pane-source">
+      <div class="canvas-head">
+        <div class="canvas-title" id="canvasTitle-source"></div>
+        <div class="tools">
+          <div class="search"><span style="color:var(--ink-faint);font-size:12px">&#128269;</span><input id="search-source" type="text" placeholder="filter"></div>
+          <button class="mini-btn" data-expand="source">Expand</button>
+          <button class="mini-btn" data-collapse="source">Collapse</button>
+        </div>
+      </div>
+      <div id="sources-source"></div>
+      <div class="tree" id="tree-source"></div>
+    </div>
+    <div class="pane pane-target">
+      <div class="canvas-head">
+        <div class="canvas-title" id="canvasTitle-target"></div>
+        <div class="tools">
+          <div class="search"><span style="color:var(--ink-faint);font-size:12px">&#128269;</span><input id="search-target" type="text" placeholder="filter"></div>
+          <button class="mini-btn" data-expand="target">Expand</button>
+          <button class="mini-btn" data-collapse="target">Collapse</button>
+        </div>
+      </div>
+      <div id="sources-target"></div>
+      <div class="tree" id="tree-target"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="summary-text" id="summary"></div>
+    <div class="footer-actions">
+      <a class="btn-ghost" href="/structure-setup/" style="text-decoration:none;display:inline-block">&#8592; Structures</a>
+      <button class="continue-btn" id="continueBtn">Continue to mapping &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="modalTitle">Import structure</h2>
+    <p class="sub" id="modalSub">Paste your content and Kodiak will build the element tree. You can edit everything afterwards.</p>
+    <div class="seg" id="modalSeg">
+      <button data-mode="payload-json">JSON payload</button>
+      <button data-mode="json-schema">JSON Schema</button>
+      <button data-mode="payload-xml">XML payload</button>
+      <button data-mode="xsd">XSD schema</button>
+      <button data-mode="kodiak">Kodiak JSON</button>
+    </div>
+    <textarea id="modalText" spellcheck="false" placeholder="Paste here..."></textarea>
+    <div class="modal-msg" id="modalMsg"></div>
+    <div class="modal-foot">
+      <div class="left">
+        <button class="link-btn" id="clearText">Clear</button>
+      </div>
+      <div>
+        <button class="btn-ghost" id="modalCancel">Cancel</button>
+        <button class="btn-primary" id="modalBuild">Build tree</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script type="module" src="/schema-builder/app.js"></script>
+</body>
+</html>

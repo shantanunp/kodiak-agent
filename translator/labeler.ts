@@ -8,6 +8,7 @@
 import { GeminiLabelProvider, type LabelResponse } from "./geminiProvider.js";
 import { loadGeminiConfig } from "./config.js";
 import { getLabelCache, setLabelCache } from "./cache/index.js";
+import { schemaContextForLabeler } from "../schema/io.js";
 
 export interface AstStep {
   kind: string;
@@ -48,9 +49,10 @@ export class StepLabeler {
   }
 
   async labelIndex(ast: IndexAst): Promise<PipelineJson> {
+    const schemaContext = ast.mapperId ? schemaContextForLabeler(ast.mapperId) : undefined;
     const steps: PipelineStep[] = [];
     for (const step of ast.steps) {
-      steps.push(await this.labelStepTree(step));
+      steps.push(await this.labelStepTree(step, schemaContext));
     }
     return {
       ...ast,
@@ -60,13 +62,13 @@ export class StepLabeler {
     };
   }
 
-  private async labelStepTree(step: AstStep): Promise<PipelineStep> {
+  private async labelStepTree(step: AstStep, schemaContext?: string): Promise<PipelineStep> {
     const labeled: PipelineStep = { ...step, labelSource: "deterministic" };
 
     if (step.children?.length) {
       labeled.children = [];
       for (const child of step.children) {
-        labeled.children.push(await this.labelStepTree(child));
+        labeled.children.push(await this.labelStepTree(child, schemaContext));
       }
     }
 
@@ -81,6 +83,7 @@ export class StepLabeler {
       (await this.provider.labelStep({
         sourceText,
         currentKind: step.kind,
+        context: schemaContext,
       }));
 
     if (!cached) {
