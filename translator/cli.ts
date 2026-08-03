@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "../src/config/env.js";
 import { StepLabeler } from "./labeler.js";
-import { isGeminiConfigured } from "./config.js";
+import { isGeminiConfigured } from "./gemini.js";
 import { resolveMapperAst } from "./resolvePipeline.js";
 import { filterMappingByFields, parseFieldSelectors } from "./filterByFields.js";
 import { clearAllTranslatorCaches } from "./cache/index.js";

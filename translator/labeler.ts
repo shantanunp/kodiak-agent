@@ -6,10 +6,10 @@
 
 import {
   GeminiLabelProvider,
+  loadGeminiConfig,
   type FieldMappingResponse,
   type PipelineOpLabel,
-} from "./geminiProvider.js";
-import { loadGeminiConfig } from "./config.js";
+} from "./gemini.js";
 import {
   getLabelCache,
   setLabelCache,

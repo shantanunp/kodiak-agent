@@ -3,7 +3,7 @@
  * Never drops AST targets; AI-only hits become RAW candidates.
  */
 
-import type { GeminiLabelProvider, DiscoverHit } from "./geminiProvider.js";
+import type { GeminiLabelProvider, DiscoverHit } from "./gemini.js";
 import { groupOperationsByTarget, type FieldMapping, type PipelineOp } from "./groupMapping.js";
 import type { AstStep, IndexAst } from "./labeler.js";
 import { operationsOf } from "./labeler.js";

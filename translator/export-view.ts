@@ -16,7 +16,7 @@ import type { PipelineJson } from "./labeler.js";
 import { operationsOf, StepLabeler } from "./labeler.js";
 import { groupOperationsByTarget } from "./groupMapping.js";
 import { resolveAstForMapper } from "./resolvePipeline.js";
-import { isGeminiConfigured } from "./config.js";
+import { isGeminiConfigured } from "./gemini.js";
 
 const { values } = parseArgs({
   options: {

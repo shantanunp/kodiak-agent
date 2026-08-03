@@ -1,6 +1,7 @@
 plugins {
     id 'java'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    // Gradle 9+: use GradleUp fork (old com.github.johnrengelman.shadow is Gradle 8-only)
+    id 'com.gradleup.shadow' version '8.3.6'
 }
 
 group = 'com.kodiak'
@@ -30,9 +31,17 @@ tasks.named('shadowJar') {
     archiveBaseName.set('kodiak-indexer')
     archiveClassifier.set('')
     archiveVersion.set('')
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
     mergeServiceFiles()
     manifest {
         attributes 'Main-Class': 'com.kodiak.indexer.IndexerCli'
+    }
+    // Avoid "Could not add META-INF to ZIP" when a previous run left a corrupt/empty jar.
+    doFirst {
+        def out = archiveFile.get().asFile
+        if (out.exists()) {
+            out.delete()
+        }
     }
 }
 

@@ -214,15 +214,14 @@ Today the app is wired to **Google Gemini Studio** only. Changing `GEMINI_MODEL`
 | `GEMINI_TEMPERATURE` | `.env` | default `0` |
 | `GEMINI_API_BASE_URL` | `.env` | default `https://generativelanguage.googleapis.com` |
 
-Loaded in [`translator/config.ts`](translator/config.ts).
+Loaded in [`translator/gemini.ts`](translator/gemini.ts).
 
 ### Files involved in the AI call path
 
 | File | Role |
 |------|------|
 | [`.env`](.env) / [`.env.example`](.env.example) | Keys and model name |
-| [`translator/config.ts`](translator/config.ts) | Reads env → `loadGeminiConfig()` |
-| [`translator/geminiProvider.ts`](translator/geminiProvider.ts) | HTTP call to Gemini (`generateContent`) |
+| [`translator/gemini.ts`](translator/gemini.ts) | Config (`loadGeminiConfig`) + HTTP (`GeminiLabelProvider`) |
 | [`translator/labeler.ts`](translator/labeler.ts) | Builds `GeminiLabelProvider`, runs label / cache |
 | [`translator/discoverMerge.ts`](translator/discoverMerge.ts) | Optional AI discovery (skipped by default with `--fields`) |
 | [`translator/cli.ts`](translator/cli.ts) | `npm run label` entry; checks `isGeminiConfigured()` |
@@ -234,7 +233,7 @@ POST {GEMINI_API_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent
 Header: X-goog-api-key: {GEMINI_API_KEY}
 ```
 
-in `GeminiLabelProvider.generateContent()` inside `translator/geminiProvider.ts`.
+in `GeminiLabelProvider.generateContent()` inside `translator/gemini.ts`.
 
 ### To switch to another provider (e.g. Copilot / OpenAI)
 
@@ -244,9 +243,9 @@ Not supported out of the box. You would need to:
    - `labelFieldMapping(...)`
    - `discoverMappings(...)`
    - (optional) `labelStep(...)`
-2. Return the **same JSON shapes** as today’s Gemini responses (see types in `geminiProvider.ts`).
+2. Return the **same JSON shapes** as today’s Gemini responses (see types in `gemini.ts`).
 3. Add env vars (e.g. `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`) in `.env` / `.env.example`.
-4. Change [`translator/config.ts`](translator/config.ts) (or add `translator/aiConfig.ts`) to load the right provider.
+4. Extend [`translator/gemini.ts`](translator/gemini.ts) (or add a sibling provider module) to load the right provider.
 5. Change [`translator/labeler.ts`](translator/labeler.ts) to construct the new provider instead of hard-coding `GeminiLabelProvider`.
 6. Update [`translator/cli.ts`](translator/cli.ts) “API key missing” check for the new env var.
 7. Document the new host in IT allowlist (e.g. `api.openai.com` or your Copilot/Azure endpoint).
