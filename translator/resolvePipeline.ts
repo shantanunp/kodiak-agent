@@ -1,9 +1,10 @@
 /**
- * Shared: resolve AST for a mapper (worktree → remote scan → local → cache).
+ * Shared: resolve AST + Java source bytes for a mapper
+ * (worktree → remote scan → local → cache).
  */
 
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { paths } from "../src/config/env.js";
 import { loadRegistry } from "../src/registry/loadRegistry.js";
 import { runIndexer, writeRuntimeRegistry } from "../src/indexer/runIndexer.js";
@@ -11,11 +12,32 @@ import { scanFiles } from "../src/orchestrator/scanRepo.js";
 import * as cache from "../src/cache/index.js";
 import type { IndexAst } from "./labeler.js";
 
+export interface ResolvedMapperAst {
+  ast: IndexAst;
+  /** Exact Java source bytes used for fingerprint + AI discovery (may be empty if unavailable). */
+  sourceJava: string;
+  sourcePath?: string;
+}
+
+function readJavaIfExists(path: string): string {
+  if (!existsSync(path)) return "";
+  return readFileSync(path, "utf8");
+}
+
 export async function resolveAstForMapper(
   mapperId: string,
   registryPath = paths.registry,
   options: { local?: boolean; remote?: boolean; worktree?: string } = {},
 ): Promise<IndexAst> {
+  const resolved = await resolveMapperAst(mapperId, registryPath, options);
+  return resolved.ast;
+}
+
+export async function resolveMapperAst(
+  mapperId: string,
+  registryPath = paths.registry,
+  options: { local?: boolean; remote?: boolean; worktree?: string } = {},
+): Promise<ResolvedMapperAst> {
   const registry = loadRegistry(registryPath);
   const mapper = registry.mappers.find((m) => m.id === mapperId);
   if (!mapper) {
@@ -30,14 +52,26 @@ export async function resolveAstForMapper(
     }
     const runtimeRegistry = join(paths.cacheDir, "runtime-registry.yaml");
     writeRuntimeRegistry([mapper], runtimeRegistry);
-    return runIndexer(mapper, worktree, runtimeRegistry) as IndexAst;
+    const ast = runIndexer(mapper, worktree, runtimeRegistry) as IndexAst;
+    return { ast, sourceJava: readJavaIfExists(sourcePath), sourcePath };
   }
 
   const forceRefresh = Boolean(options.remote || options.local);
   if (!forceRefresh) {
     const cached = cache.findLatestByFilePath(mapper.sourceFile);
     if (cached) {
-      return cached.ast as IndexAst;
+      const localPath = join(paths.root, mapper.sourceFile);
+      const wtPath = join(paths.cacheDir, "worktrees", cached.commitSha, mapper.sourceFile);
+      const sourcePath = existsSync(localPath)
+        ? localPath
+        : existsSync(wtPath)
+          ? wtPath
+          : undefined;
+      return {
+        ast: cached.ast as IndexAst,
+        sourceJava: sourcePath ? readJavaIfExists(sourcePath) : "",
+        sourcePath,
+      };
     }
   }
 
@@ -47,10 +81,21 @@ export async function resolveAstForMapper(
   if (useRemote) {
     const results = await scanFiles([mapperId], { remote: true, registryPath });
     if (!results[0]) throw new Error(`Scan produced no result for ${mapperId}`);
-    return results[0].ast as IndexAst;
+    const ast = results[0].ast as IndexAst;
+    const commitSha = results[0].commitSha as string | undefined;
+    const wtPath = commitSha
+      ? join(paths.cacheDir, "worktrees", commitSha, mapper.sourceFile)
+      : undefined;
+    const sourcePath = wtPath && existsSync(wtPath) ? wtPath : undefined;
+    return {
+      ast,
+      sourceJava: sourcePath ? readJavaIfExists(sourcePath) : "",
+      sourcePath,
+    };
   }
 
   const runtimeRegistry = join(paths.cacheDir, "runtime-registry.yaml");
   writeRuntimeRegistry([mapper], runtimeRegistry);
-  return runIndexer(mapper, paths.root, runtimeRegistry) as IndexAst;
+  const ast = runIndexer(mapper, paths.root, runtimeRegistry) as IndexAst;
+  return { ast, sourceJava: readJavaIfExists(localPath), sourcePath: localPath };
 }

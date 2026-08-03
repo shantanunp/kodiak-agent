@@ -3,7 +3,8 @@
  * AI-label mapper fields via Gemini → business/schema paths (no Java DTO paths).
  *
  *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
- *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DEAL.LOAN.LoanMaturityPeriodCount
+ *   --fields MESSAGE.DEAL.PARTY.FirstName
+ *   --no-cache | --clear-cache
  */
 
 import { parseArgs } from "node:util";
@@ -12,8 +13,9 @@ import { join } from "node:path";
 import { paths } from "../src/config/env.js";
 import { StepLabeler } from "./labeler.js";
 import { isGeminiConfigured } from "./config.js";
-import { resolveAstForMapper } from "./resolvePipeline.js";
+import { resolveMapperAst } from "./resolvePipeline.js";
 import { filterMappingByFields, parseFieldSelectors } from "./filterByFields.js";
+import { clearAllTranslatorCaches } from "./cache/index.js";
 import type { IndexAst } from "./labeler.js";
 
 const { values } = parseArgs({
@@ -26,26 +28,39 @@ const { values } = parseArgs({
     registry: { type: "string", default: paths.registry },
     field: { type: "string", multiple: true },
     fields: { type: "string" },
+    "no-cache": { type: "boolean", default: false },
+    "clear-cache": { type: "boolean", default: false },
   },
 });
 
 async function main(): Promise<void> {
+  if (values["clear-cache"]) {
+    const cleared = clearAllTranslatorCaches(values.mapper);
+    console.error(
+      `Cleared caches (pipelines=${cleared.pipelines}, discovery=${cleared.discovery}, fields=${cleared.fields}, labels=${cleared.labels})` +
+        (values.mapper ? ` for ${values.mapper}` : " (all)"),
+    );
+  }
+
   if (!isGeminiConfigured()) {
     console.error("Set GEMINI_API_KEY in .env (from https://aistudio.google.com/apikey)");
     process.exit(1);
   }
 
   let ast: IndexAst;
+  let sourceJava = "";
 
   if (values.file) {
     const raw = JSON.parse(readFileSync(values.file, "utf8")) as { ast?: IndexAst } | IndexAst;
     ast = ("ast" in raw && raw.ast ? raw.ast : raw) as IndexAst;
   } else if (values.mapper) {
-    ast = await resolveAstForMapper(values.mapper, values.registry!, {
+    const resolved = await resolveMapperAst(values.mapper, values.registry!, {
       local: values.local,
       remote: values.remote || undefined,
       worktree: values.worktree,
     });
+    ast = resolved.ast;
+    sourceJava = resolved.sourceJava;
   } else {
     const indexDir = join(paths.cacheDir, "index");
     if (!existsSync(indexDir)) {
@@ -70,9 +85,12 @@ async function main(): Promise<void> {
   });
 
   const labeler = new StepLabeler();
-  const pipeline = await labeler.labelIndex(ast, selectors);
+  const pipeline = await labeler.labelIndex(ast, {
+    fieldSelectors: selectors,
+    sourceJava,
+    noCache: Boolean(values["no-cache"]),
+  });
 
-  // Re-filter on business paths (AI may rename Java targets → MESSAGE.*)
   if (selectors.length > 0) {
     pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
   }
@@ -84,6 +102,11 @@ async function main(): Promise<void> {
         mapping: pipeline.mapping,
         labeledAt: pipeline.labeledAt,
         labelModel: pipeline.labelModel,
+        cacheHit: pipeline.cacheHit,
+        fieldsFromCache: pipeline.fieldsFromCache,
+        fieldsLabeled: pipeline.fieldsLabeled,
+        fingerprint: pipeline.fingerprint,
+        discoveryMeta: pipeline.discoveryMeta,
       },
       null,
       2,

@@ -1,6 +1,6 @@
 # Kodiak Agent
 
-Orchestrator for Java mapping discovery, indexing, and (future) pipeline visualization.
+Orchestrator for Java mapping discovery, indexing, and pipeline visualization.
 
 **Target mapping repo:** [shantanunp/Kmismomapper](https://github.com/shantanunp/Kmismomapper) (public)
 
@@ -18,17 +18,13 @@ Two independent commands (do not need to run both):
 | Command         | Role                                      | AI? |
 | --------------- | ----------------------------------------- | --- |
 | `npm run ast`   | Deterministic Java AST (Java DTO paths)   | No  |
-| `npm run label` | Index + Gemini → business/schema paths    | Yes (every field) |
+| `npm run label` | AST + AI discovery → business paths       | Yes |
 
 
 ```bash
 # 1) AST only — local checkout, no AI
 npm run ast -- --mapper lpa-request-mapper \
   --worktree /home/shantanu/Workspace/vscode/Kmismomapper
-
-npm run ast -- --mapper lpa-request-mapper \
-  --worktree /home/shantanu/Workspace/vscode/Kmismomapper \
-  --fields MESSAGE.MISMOReferenceModelIdentifier
 
 # 2) AI label — remote GitHub, or local worktree for unpushed mapper changes
 npm run label -- --mapper lpa-request-mapper --remote
@@ -38,10 +34,7 @@ npm run label -- --mapper lpa-request-mapper \
 
 npm run label -- --mapper lpa-request-mapper \
   --worktree /home/shantanu/Workspace/vscode/Kmismomapper \
-  --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
-
-# Optional: filter by business/JSON field paths (omit = all mappings)
---fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
+  --fields MESSAGE.DEAL.PARTY.FirstName,MESSAGE.DEAL.PARTY.FullName
 ```
 
 Prefer business `--fields` paths (`MESSAGE.…`). Leaf names and Java paths also match for filtering.
@@ -60,7 +53,68 @@ Registered mappers (see `registry/mapping-registry.yaml`):
 | `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` | Small canary — best first check                            |
 | `lpa-request-mapper`         | `LpaRequestMapper.java`        | LPA DTO mapper (helpers inlined; use `--fields` to filter) |
 
+## Label pipeline
 
+```mermaid
+flowchart TD
+  src[Java source file]
+  ast[AST indexer]
+  aiDisc[Gemini discovery]
+  merge[Deterministic merge]
+  label[Gemini business label]
+  cache[".cache/pipelines fingerprint"]
+  out[Business mapping JSON]
+
+  src --> ast
+  src --> aiDisc
+  ast --> merge
+  aiDisc --> merge
+  cache -->|"hit: same source+schema+model"| out
+  merge -->|"miss"| label
+  label --> cache
+  label --> out
+```
+
+1. **AST** — deterministic setters / constants / RAW blobs  
+2. **AI discovery** — second pass over the same Java (Optional, helpers AST may under-cover)  
+3. **Merge** — never drop AST targets; AI-only hits become RAW candidates  
+4. **Business label** — Gemini rewrites to schema paths (`MESSAGE.*`)  
+5. **Pipeline cache** — reuse until inputs change  
+
+### Cache invalidation
+
+Fingerprint = SHA-256 of:
+
+- mapper `.java` source bytes  
+- `registry/schemas/{mapperId}.schema.json` (or empty)  
+- `GEMINI_MODEL`  
+- `PIPELINE_CACHE_VERSION` (bumped when prompts/merge rules change)  
+
+Caches under `.cache/`:
+
+| Cache | When written | Purpose |
+|-------|--------------|---------|
+| `pipelines/` | Unfiltered `label` (no `--fields`) | Full business `mapping` |
+| `fields/` | Every labeled field | Field-level business mapping — `--fields` warm → `"cacheHit": true` |
+| `discovery/` | After AI discovery | Skip re-discovery when source unchanged |
+| `translator/.../labels/` | Raw Gemini JSON per op | Micro-cache inside a field label |
+
+```bash
+# Use cache (default)
+npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
+
+# Bypass cache for this run
+npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper --no-cache
+
+# Clear then run
+npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper --clear-cache
+
+# Clear all translator caches (pipelines + discovery + per-field labels)
+npm run cache:clear
+npm run cache:clear -- --mapper lpa-request-mapper
+```
+
+Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs still reuse discovery + per-field caches when the fingerprint matches.
 
 
 ## JDK note for indexer build
@@ -147,6 +201,6 @@ Or: `npm run view:export -- --mapper lpa-request-mapper --label && npm run view:
 
 ## Architecture
 
-See [CLAUDE.md](./CLAUDE.md) for phase boundaries and the no-AI-in-discovery rule.
+See [CLAUDE.md](./CLAUDE.md) for phase boundaries (indexer stays deterministic; AI lives in `translator/`).
 
 See [ABOUT.md](./ABOUT.md) for phase completion status and project overview.

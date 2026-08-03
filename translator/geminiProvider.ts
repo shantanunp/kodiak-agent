@@ -39,6 +39,22 @@ export interface FieldMappingResponse {
   reason?: string;
 }
 
+export interface DiscoverRequest {
+  sourceJava: string;
+  className?: string;
+  entryMethod?: string;
+}
+
+export interface DiscoverHit {
+  javaTargetHint: string;
+  codeSnippet: string;
+  note?: string;
+}
+
+export interface DiscoverResponse {
+  mappings: DiscoverHit[];
+}
+
 const FIELD_MAPPING_PROMPT = `You rewrite one already-parsed Java mapper field into a business pipeline.
 
 The JavaParser indexer already extracted operations (hints only). You own the final output:
@@ -71,6 +87,20 @@ Rules:
 Respond with JSON only:
 {"recognized":true,"targetField":"MESSAGE.…","pipeline":[{"kind":"read","sourceField":"…"},…],"reason":"…"}
 or {"recognized":false,"reason":"…"}`;
+
+const DISCOVER_PROMPT = `You discover field writes in a Java mapper class. You do NOT label business paths.
+
+Given the full Java source, list every place a target DTO field is set (setX(...), field = ..., builder puts).
+Include writes inside helpers, Optional chains, ternaries, switch arms, and loops when they set a field.
+
+Return JSON only:
+{"mappings":[{"javaTargetHint":"Party.firstName or setFirstName","codeSnippet":"relevant lines including helper if needed","note":"optional"}]}
+
+Rules:
+- Prefer one entry per distinct target field. If the same field is set twice, include both snippets in codeSnippet or two entries with the same hint.
+- codeSnippet must be real code from the file (abbreviate long helpers with ... only in the middle).
+- Do not invent mappings that are not in the source.
+- javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 
 /** Gemini REST API — same shape as AI Studio / curl generateContent. */
 interface GenerateContentResponse {
@@ -144,6 +174,35 @@ export class GeminiLabelProvider {
     }
   }
 
+  /** AI discovery: find target field writes in full Java source (complements AST). */
+  async discoverMappings(request: DiscoverRequest): Promise<DiscoverResponse> {
+    const userPrompt = JSON.stringify({
+      className: request.className ?? "",
+      entryMethod: request.entryMethod ?? "map",
+      sourceJava: request.sourceJava,
+    });
+
+    const text = await this.generateContent(DISCOVER_PROMPT, userPrompt);
+
+    try {
+      const parsed = JSON.parse(text) as DiscoverResponse;
+      if (!Array.isArray(parsed.mappings)) {
+        return { mappings: [] };
+      }
+      return {
+        mappings: parsed.mappings
+          .filter((m) => m && typeof m.javaTargetHint === "string")
+          .map((m) => ({
+            javaTargetHint: m.javaTargetHint,
+            codeSnippet: typeof m.codeSnippet === "string" ? m.codeSnippet : "",
+            note: typeof m.note === "string" ? m.note : undefined,
+          })),
+      };
+    } catch {
+      return { mappings: [] };
+    }
+  }
+
   /** POST .../models/{model}:generateContent with X-goog-api-key header. */
   async generateContent(systemPrompt: string, userText: string): Promise<string> {
     const url = `${this.baseUrl}/v1beta/models/${this.model}:generateContent`;
@@ -163,27 +222,37 @@ export class GeminiLabelProvider {
       },
     };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-goog-api-key": this.apiKey,
-      },
-      body: JSON.stringify(body),
-    });
+    const maxAttempts = 4;
+    let lastError = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-goog-api-key": this.apiKey,
+        },
+        body: JSON.stringify(body),
+      });
 
-    const payload = (await response.json()) as GenerateContentResponse;
+      const payload = (await response.json()) as GenerateContentResponse;
 
-    if (!response.ok) {
-      const msg = payload.error?.message ?? response.statusText;
-      throw new Error(`Gemini API ${response.status}: ${msg}`);
+      if (response.ok) {
+        const text = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (!text) {
+          throw new Error("Gemini API returned no text in candidates[0]");
+        }
+        return text;
+      }
+
+      lastError = payload.error?.message ?? response.statusText;
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === maxAttempts) {
+        throw new Error(`Gemini API ${response.status}: ${lastError}`);
+      }
+      const waitMs = Math.min(20_000, 2000 * attempt);
+      await new Promise((r) => setTimeout(r, waitMs));
     }
 
-    const text = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text) {
-      throw new Error("Gemini API returned no text in candidates[0]");
-    }
-
-    return text;
+    throw new Error(`Gemini API failed: ${lastError}`);
   }
 }

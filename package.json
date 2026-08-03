@@ -13,6 +13,7 @@
     "latest-sha": "tsx src/tools/getLatestCommitSha.ts",
     "golden:capture": "tsx validator/golden-dataset/capture.ts",
     "label": "tsx translator/cli.ts",
+    "cache:clear": "tsx translator/cache/clear-cli.ts",
     "view:export": "tsx translator/export-view.ts",
     "ui:serve": "tsx ui/serve.ts",
     "view:serve": "tsx ui/serve.ts",
