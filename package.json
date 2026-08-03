@@ -4,6 +4,7 @@
   "description": "Orchestrator for Java mapping discovery, indexing, and pipeline visualization",
   "type": "module",
   "scripts": {
+    "ast": "tsx indexer/cli.ts",
     "index-mappings": "tsx indexer/cli.ts",
     "scan": "tsx src/orchestrator/scanRepo.ts",
     "scan:incremental": "tsx src/orchestrator/incrementalScan.ts",

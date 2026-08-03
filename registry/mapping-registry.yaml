@@ -16,5 +16,5 @@ mappers:
     class: com.kodiakservice.mapper.LpaRequestMapper
     entryMethod: map
     sourceType: com.kodiakservice.dto.input.LoanApplicationRequest
-    targetType: com.kodiakservice.lpa.schema.lpa.LPALoanAssessmentServiceRequest
+    targetType: com.kodiakservice.dto.output.LpaMappedResponse
     goldenTests: src/test/java/com/kodiakservice/mapper/LpaRequestMapperTest.java

@@ -15,6 +15,7 @@ export type ViewStepKind =
   | "transform"
   | "build"
   | "write"
+  | "constant"
   | "raw";
 
 export interface ViewStep {
@@ -67,8 +68,36 @@ const MAPPER_SCHEMA_HINTS: Record<
     isList: false,
   },
   "lpa-request-mapper": {
-    sourceFields: ["LoanApplicationRequest.*"],
-    targetFields: ["LPALoanAssessmentServiceRequest.*"],
+    sourceFields: [
+      "LoanApplicationRequest.refNumber",
+      "LoanApplicationRequest.applicant.displayName",
+      "LoanApplicationRequest.applicant.dateOfBirth",
+      "LoanApplicationRequest.mortgage.amount",
+      "LoanApplicationRequest.mortgage.ratePercent",
+      "LoanApplicationRequest.mortgage.purpose",
+      "LoanApplicationRequest.mortgage.termYears",
+      "LoanApplicationRequest.property.street",
+      "LoanApplicationRequest.property.city",
+      "LoanApplicationRequest.property.state",
+      "LoanApplicationRequest.property.postalCode",
+    ],
+    targetFields: [
+      "MESSAGE.MISMOReferenceModelIdentifier",
+      "MESSAGE.DataVersionIdentifier",
+      "MESSAGE.DEAL.LOAN.LoanIdentifier",
+      "MESSAGE.DEAL.LOAN.NoteAmount",
+      "MESSAGE.DEAL.LOAN.LoanPurposeType",
+      "MESSAGE.DEAL.LOAN.LoanMaturityPeriodCount",
+      "MESSAGE.DEAL.PARTY.FirstName",
+      "MESSAGE.DEAL.PARTY.LastName",
+      "MESSAGE.DEAL.PARTY.FullName",
+      "MESSAGE.DEAL.PARTY.PartyRoleType",
+      "MESSAGE.DEAL.PARTY.BorrowerBirthDate",
+      "MESSAGE.DEAL.COLLATERAL.AddressLineText",
+      "MESSAGE.DEAL.COLLATERAL.CityName",
+      "MESSAGE.DEAL.COLLATERAL.StateCode",
+      "MESSAGE.DEAL.COLLATERAL.PostalCode",
+    ],
     isList: false,
   },
 };
@@ -83,15 +112,57 @@ function prefixField(typeSimple: string, field: string): string {
   return `${typeSimple}.${field}`;
 }
 
-function formatWriteTarget(targetField: string | undefined, targetSimple: string): string {
+function normalizeLeaf(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+function fieldLeaf(targetField: string): string {
+  const leaf = targetField.includes(".")
+    ? targetField.slice(targetField.lastIndexOf(".") + 1)
+    : targetField;
+  return leaf.replace(/\[\]$/, "");
+}
+
+function matchSchemaPath(targetField: string, schemaTargetFields: string[]): string | undefined {
+  const want = normalizeLeaf(fieldLeaf(targetField));
+  return schemaTargetFields.find((p) => {
+    const leaf = p.split(".").pop()?.replace(/\[\]$/, "") ?? "";
+    return normalizeLeaf(leaf) === want;
+  });
+}
+
+function formatWriteTarget(
+  targetField: string | undefined,
+  targetSimple: string,
+  schemaTargetFields: string[] = [],
+): string {
   if (!targetField) return targetSimple;
   if (targetField === "<return>") return `${targetSimple}.<return>`;
-  if (targetField.includes(".")) return targetField;
+
+  const schemaMatch = matchSchemaPath(targetField, schemaTargetFields);
+  if (schemaMatch) return schemaMatch;
+
+  // Already a path / Java FQN — keep as-is when no schema match
+  if (targetField.includes(".") || targetField.includes("$")) return targetField;
+
   return `${targetSimple}.${targetField}`;
 }
 
-function expandWriteStep(step: PipelineStep, sourceSimple: string, targetSimple: string): ViewStep[] {
-  const target = formatWriteTarget(step.targetField, targetSimple);
+function constantValue(step: PipelineStep): string | undefined {
+  const metaVal = step.meta?.value;
+  if (typeof metaVal === "string" || typeof metaVal === "number" || typeof metaVal === "boolean") {
+    return String(metaVal);
+  }
+  return undefined;
+}
+
+function expandWriteStep(
+  step: PipelineStep,
+  sourceSimple: string,
+  targetSimple: string,
+  schemaTargetFields: string[],
+): ViewStep[] {
+  const target = formatWriteTarget(step.targetField, targetSimple, schemaTargetFields);
   const text = step.sourceText ?? "";
 
   if (
@@ -154,6 +225,7 @@ function convertStep(
   step: PipelineStep,
   sourceSimple: string,
   targetSimple: string,
+  schemaTargetFields: string[] = [],
 ): ViewStep[] {
   const kind = (step.kind ?? "raw").toLowerCase();
 
@@ -172,10 +244,25 @@ function convertStep(
     return [];
   }
 
+  if (kind === "constant") {
+    const target = formatWriteTarget(step.targetField, targetSimple, schemaTargetFields);
+    return [
+      {
+        kind: "constant",
+        target,
+        value: constantValue(step),
+        sourceText: step.sourceText,
+        labelSource: step.labelSource,
+        labelReason: step.labelReason,
+      },
+    ];
+  }
+
   if (kind === "filter") {
     const children =
-      step.children?.flatMap((c) => convertStep(c as PipelineStep, sourceSimple, targetSimple)) ??
-      [];
+      step.children?.flatMap((c) =>
+        convertStep(c as PipelineStep, sourceSimple, targetSimple, schemaTargetFields),
+      ) ?? [];
     return [
       {
         kind: "filter",
@@ -204,7 +291,7 @@ function convertStep(
   }
 
   if (kind === "write") {
-    return expandWriteStep(step, sourceSimple, targetSimple);
+    return expandWriteStep(step, sourceSimple, targetSimple, schemaTargetFields);
   }
 
   if (kind === "read") {
@@ -222,7 +309,9 @@ function convertStep(
     {
       kind: kind as ViewStepKind,
       sourceText: step.sourceText,
-      target: step.targetField ? formatWriteTarget(step.targetField, targetSimple) : undefined,
+      target: step.targetField
+        ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
+        : undefined,
       field: step.sourceField,
       labelSource: step.labelSource,
       labelReason: step.labelReason,
@@ -261,13 +350,16 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const hints = MAPPER_SCHEMA_HINTS[mapperId];
   const savedSchema = loadSchema(mapperId);
 
+  const schemaSourceFields = savedSchema ? flattenPaths(savedSchema.source.root) : [];
+  const schemaTargetFields = savedSchema ? flattenPaths(savedSchema.target.root) : [];
+  const targetPathHints =
+    schemaTargetFields.length > 0 ? schemaTargetFields : hints?.targetFields ?? [];
+
   const steps = pipeline.steps.flatMap((s) =>
-    convertStep(s, sourceSimple, targetSimple),
+    convertStep(s, sourceSimple, targetSimple, targetPathHints),
   );
 
   const collected = collectFields(steps);
-  const schemaSourceFields = savedSchema ? flattenPaths(savedSchema.source.root) : [];
-  const schemaTargetFields = savedSchema ? flattenPaths(savedSchema.target.root) : [];
 
   const sourceFields = schemaSourceFields.length
     ? schemaSourceFields

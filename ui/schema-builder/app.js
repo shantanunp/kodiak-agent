@@ -142,10 +142,15 @@ function nodeRowHtml(node, key, isRoot) {
     ? `<span class="node-doc" title="${escAttr(node.doc)}">${escHtml(node.doc)}</span>`
     : "";
   const req = node.required ? `<span class="req-star" title="Required">*</span>` : "";
+  const rootActions = isRoot
+    ? `<span class="row-actions" style="display:flex">
+      <button class="act" data-add-child="${node.id}" title="Add child">+</button>
+    </span>`
+    : "";
   const actions = isRoot
-    ? ""
+    ? rootActions
     : `<span class="row-actions">
-      ${hasKids ? `<button class="act" data-add-child="${node.id}" title="Add child">+</button>` : ""}
+      <button class="act" data-add-child="${node.id}" title="Add child (converts to object if needed)">+</button>
       <button class="act" data-add-sib="${node.id}" title="Add sibling">&#8631;</button>
       <button class="act del" data-del="${node.id}" title="Delete">&times;</button>
     </span>`;
@@ -171,7 +176,7 @@ function inlineEditorHtml(key, node, isRoot) {
       <textarea id="fDoc-${key}" placeholder="What is this element? Notes, allowed values, source system...">${escHtml(node.doc || "")}</textarea>
     </div>
     <div class="inline-actions">
-      ${CONTAINER.has(node.type) ? `<button class="d-btn" id="btnChild-${key}"><span class="plus">+</span> Add child</button>` : ""}
+      <button class="d-btn" id="btnChild-${key}"><span class="plus">+</span> Add child</button>
       ${!isRoot ? `<button class="d-btn" id="btnSib-${key}"><span class="plus">+</span> Add sibling</button>` : ""}
       ${!isRoot ? `<button class="d-btn del" id="btnDel-${key}">&times;&nbsp; Delete${(node.children || []).length ? " + children" : ""}</button>` : ""}
     </div>
@@ -183,11 +188,11 @@ function renderNode(node, key, depth = 0, isRoot = false, inline = false) {
   if (inline && schemas[key].selectedId === node.id) {
     html += inlineEditorHtml(key, node, isRoot);
   }
-  const hasKids = CONTAINER.has(node.type) && (node.children || []).length;
-  if (hasKids && node.expanded) {
+  const isContainer = CONTAINER.has(node.type);
+  if (isContainer && node.expanded !== false) {
     html +=
       `<div class="children-wrap">` +
-      node.children.map((c) => renderNode(c, key, depth + 1, false, inline)).join("") +
+      (node.children || []).map((c) => renderNode(c, key, depth + 1, false, inline)).join("") +
       `</div>`;
   }
   return `<div class="node">${html}</div>`;
@@ -196,13 +201,18 @@ function renderNode(node, key, depth = 0, isRoot = false, inline = false) {
 function renderPaneTree(key, elId, inline = false) {
   const el = document.getElementById(elId);
   const root = schemas[key].root;
+  let html = renderNode(root, key, 0, true, inline);
   if (!root.children?.length) {
-    el.innerHTML =
-      `<div class="empty">This schema is empty.<br>Import a payload, a JSON Schema / XSD, or add a root element to begin.</div>`;
-  } else {
-    el.innerHTML = renderNode(root, key, 0, true, inline);
+    html +=
+      `<div class="empty" style="padding:28px 16px;margin-top:4px">No fields yet — use <b>+</b> on the root, the source buttons below, or import a schema.</div>`;
   }
+  el.innerHTML = html;
   bindPane(key, elId, inline);
+
+  if (!schemas[key].selectedId && viewMode === "tabs" && elId === "treeSingle" && side === key) {
+    schemas[key].selectedId = root.id;
+    renderDetailPanel(key);
+  }
 }
 
 function bindPane(key, elId, inline = false) {
@@ -210,6 +220,7 @@ function bindPane(key, elId, inline = false) {
   el.querySelectorAll("[data-sel]").forEach((row) => {
     row.addEventListener("click", (e) => {
       if (e.target.closest("[data-twist]") || e.target.closest(".row-actions")) return;
+      e.stopPropagation();
       if (inline) toggleInline(key, row.dataset.sel);
       else selectNode(key, row.dataset.sel);
     });
@@ -226,6 +237,7 @@ function bindPane(key, elId, inline = false) {
   el.querySelectorAll("[data-add-child]").forEach((b) =>
     b.addEventListener("click", (e) => {
       e.stopPropagation();
+      e.preventDefault();
       addChild(key, b.dataset.addChild);
     }),
   );
@@ -280,7 +292,12 @@ function bindInlineFields(key, container) {
 
   editorEl.querySelector(`#fType-${key}`).addEventListener("change", (e) => {
     node.type = e.target.value;
-    if (!CONTAINER.has(node.type)) node.children = [];
+    if (!CONTAINER.has(node.type)) {
+      node.children = [];
+    } else {
+      if (!Array.isArray(node.children)) node.children = [];
+      node.expanded = true;
+    }
     refreshInline();
   });
   editorEl.querySelector(`#fReq-${key}`).addEventListener("change", (e) => {
@@ -294,12 +311,16 @@ function bindInlineFields(key, container) {
   });
   docInput.addEventListener("blur", refreshInline);
 
-  editorEl.querySelector(`#btnChild-${key}`)?.addEventListener("click", () => addChild(key, node.id));
+  editorEl.querySelector(`#btnChild-${key}`)?.addEventListener("click", (e) => {
+    e.preventDefault();
+    addChild(key, node.id);
+  });
   editorEl.querySelector(`#btnSib-${key}`)?.addEventListener("click", () => addSibling(key, node.id));
   editorEl.querySelector(`#btnDel-${key}`)?.addEventListener("click", () => delNode(key, node.id));
 }
 
 function selectNode(key, id) {
+  if (side !== key && viewMode === "tabs") side = key;
   schemas[key].selectedId = id;
   renderTree();
 }
@@ -341,8 +362,12 @@ function detailBodyHtml(key) {
   }
   const { node, parent } = found;
   const isRoot = !parent;
+  const primitiveHint = !CONTAINER.has(node.type)
+    ? `<p class="detail-empty" style="margin-bottom:10px">Type is <b>${escHtml(node.type)}</b> — click <b>Add child</b> to convert this field to an <b>object</b> and add nested fields.</p>`
+    : "";
   return `
     <div class="detail-label">${isRoot ? "Root element" : "Element"}</div>
+    ${primitiveHint}
     <div class="field"><label>Name</label>
       <input type="text" id="fName-${key}" value="${escAttr(node.name)}"></div>
     <div class="field"><label>Data type</label>
@@ -353,7 +378,7 @@ function detailBodyHtml(key) {
       <textarea id="fDoc-${key}" placeholder="What is this element? Notes, allowed values, source system...">${escHtml(node.doc || "")}</textarea>
     </div>
     <div class="detail-actions">
-      ${CONTAINER.has(node.type) ? `<button class="d-btn" id="btnChild-${key}"><span class="plus">+</span> Add child element</button>` : ""}
+      <button class="d-btn" id="btnChild-${key}"><span class="plus">+</span> Add child element</button>
       ${!isRoot ? `<button class="d-btn" id="btnSib-${key}"><span class="plus">+</span> Add sibling element</button>` : ""}
       ${!isRoot ? `<button class="d-btn del" id="btnDel-${key}">&times;&nbsp; Delete element${(node.children || []).length ? " + children" : ""}</button>` : ""}
     </div>`;
@@ -370,7 +395,12 @@ function bindDetailFields(key, container) {
   });
   container.querySelector(`#fType-${key}`)?.addEventListener("change", (e) => {
     node.type = e.target.value;
-    if (!CONTAINER.has(node.type)) node.children = [];
+    if (!CONTAINER.has(node.type)) {
+      node.children = [];
+    } else {
+      if (!Array.isArray(node.children)) node.children = [];
+      node.expanded = true;
+    }
     renderTree();
   });
   container.querySelector(`#fReq-${key}`)?.addEventListener("change", (e) => {
@@ -381,7 +411,10 @@ function bindDetailFields(key, container) {
     node.doc = e.target.value;
     softRefresh(key);
   });
-  container.querySelector(`#btnChild-${key}`)?.addEventListener("click", () => addChild(key, node.id));
+  container.querySelector(`#btnChild-${key}`)?.addEventListener("click", (e) => {
+    e.preventDefault();
+    addChild(key, node.id);
+  });
   container.querySelector(`#btnSib-${key}`)?.addEventListener("click", () => addSibling(key, node.id));
   container.querySelector(`#btnDel-${key}`)?.addEventListener("click", () => delNode(key, node.id));
 }
@@ -398,15 +431,32 @@ function softRefresh(key) {
   renderSummary();
 }
 
+function ensureContainer(node) {
+  const wasPrimitive = !CONTAINER.has(node.type);
+  if (wasPrimitive) {
+    node.type = "object";
+  }
+  if (!Array.isArray(node.children)) {
+    node.children = [];
+  }
+  node.expanded = true;
+  return wasPrimitive;
+}
+
 function addChild(key, id) {
   const found = findNode(id, schemas[key].root);
-  if (!found) return;
+  if (!found) {
+    toast("Could not find element — try selecting it again");
+    return;
+  }
   const { node } = found;
-  if (!CONTAINER.has(node.type)) node.type = "object";
-  node.expanded = true;
+  const converted = ensureContainer(node);
   const child = makeNode("newField", "string");
   node.children.push(child);
   schemas[key].selectedId = child.id;
+  if (converted) {
+    toast(`Changed ${node.name} to object — add nested fields below`);
+  }
   if (viewMode === "split") {
     renderPaneTree(key, "tree-" + key, true);
     renderTabsRow();

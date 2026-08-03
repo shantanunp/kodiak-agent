@@ -126,7 +126,7 @@
     <div class="legend-item"><span class="dot" style="background:var(--source)"></span>Read (from source)</div>
     <div class="legend-item"><span class="dot" style="background:var(--op)"></span>Transform / select / build</div>
     <div class="legend-item"><span class="dot" style="background:var(--cond)"></span>Filter</div>
-    <div class="legend-item"><span class="dot" style="background:var(--target)"></span>Write (to target)</div>
+    <div class="legend-item"><span class="dot" style="background:var(--target)"></span>Write / Constant (to target)</div>
   </div>
 
   <div class="layout">
@@ -138,7 +138,8 @@
 <script>
 const OBJECT_FIELDS = {
   full_name: ['Customer.first_name','Customer.last_name','Customer.email','Customer.phone'],
-  masked_account: ['Account.number','Account.holder_name','Account.opened_on']
+  masked_account: ['Account.number','Account.holder_name','Account.opened_on'],
+  mismo_ref: []
 };
 const LIST_FIELDS = { items: ['Customer.orders'], completed_order: ['Customer.orders'] };
 const ITEM_FIELDS = {
@@ -163,11 +164,12 @@ const STEP_TYPES = [
   { kind:'select', label:'Select match', dotVar:'--op' },
   { kind:'transform', label:'Transform', dotVar:'--op' },
   { kind:'build', label:'Build object', dotVar:'--op' },
+  { kind:'constant', label:'Constant', dotVar:'--target' },
   { kind:'write', label:'Write to target', dotVar:'--target' }
 ];
-const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W' };
-const COLOR_VAR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', write:'--target' };
-const BG_VAR = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg' };
+const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', constant:'C', write:'W' };
+const COLOR_VAR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', constant:'--target', write:'--target' };
+const BG_VAR = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', constant:'--target-bg', write:'--target-bg' };
 
 const examples = {
   full_name: {
@@ -204,10 +206,16 @@ const examples = {
       { kind:'build', repeat:false, rows:[{source:'id',target:'order_id'},{source:'date',target:'completed_on'},{source:'amount',target:'total'}] },
       { kind:'write', target:'target.completed_order' }
     ]
+  },
+  mismo_ref: {
+    target:'MESSAGE.MISMOReferenceModelIdentifier', isList:false,
+    steps:[
+      { kind:'constant', target:'MESSAGE.MISMOReferenceModelIdentifier', value:'3.4[B324]' }
+    ]
   }
 };
 
-let current = 'completed_order';
+let current = 'mismo_ref';
 
 function itemPool(){ return ITEM_FIELDS[current] || []; }
 function objPool(){ return examples[current].isList ? itemPool() : (OBJECT_FIELDS[current] || []); }
@@ -234,6 +242,12 @@ function renderSchema(){
   const el = document.getElementById('schemaPanel');
   const ex = examples[current];
   let body = '';
+  if(current === 'mismo_ref'){
+    body = `<div class="schema-group">No source fields</div>
+      <div class="schema-hint" style="margin-top:0">This target is a hard-coded constant — nothing is read from the source.</div>`;
+    el.innerHTML = `<div class="schema-title">Source schema</div>${body}`;
+    return;
+  }
   if(ex.isList){
     body += `<div class="schema-group">Customer.orders[]</div>` + itemPool().map(f=>`
       <div class="schema-field"><span>${f}</span><button class="schema-add" data-field="${f}" data-pool="item" title="Insert as a Read step">+</button></div>
@@ -311,6 +325,15 @@ function stepCard(step, i){
     ${examples[current].isList ? `<label class="repeat-line"><input type="checkbox" data-i="${i}" data-role="repeat" ${step.repeat?'checked':''}/> Repeat for every item in the list</label>` : ''}`;
   }
 
+  else if(step.kind === 'constant'){
+    body = `<div class="form-line"><label>Target</label>
+      <input type="text" data-i="${i}" data-role="target" value="${step.target||''}" style="width:220px" />
+    </div>
+    <div class="form-line"><label>Value</label>
+      <input type="text" data-i="${i}" data-role="value" value="${step.value??''}" style="width:160px" />
+    </div>`;
+  }
+
   else if(step.kind === 'write'){
     body = `<div class="form-line"><label>Save result as</label>
       <input type="text" data-i="${i}" data-role="target" value="${step.target||''}" style="width:190px" />
@@ -341,6 +364,7 @@ function summarize(){
       return `apply <b>${s.op}</b> to <b>${s.field}${meta.fields===2?' and '+s.field2:''}</b>`;
     }
     if(s.kind==='build') return `build an object (<b>${(s.rows||[]).map(r=>r.source+' &rarr; '+r.target).join(', ')}</b>)${s.repeat?' for every item':''}`;
+    if(s.kind==='constant') return `set <b>${s.target}</b> to constant <b>${s.value??'...'}</b>`;
     if(s.kind==='write') return `save it as <b>${s.target}</b>`;
     return '';
   });
@@ -408,6 +432,7 @@ function appendStep(kind){
   if(kind==='select') step.mode = SELECT_MODES[0];
   if(kind==='transform') { step.op = TRANSFORM_OPS[0]; step.field = objPool()[0]; step.param = OP_META[TRANSFORM_OPS[0]].paramDefault; }
   if(kind==='build') { step.rows = [{ source:itemPool()[0], target:'' }]; step.repeat = ex.isList; }
+  if(kind==='constant') { step.target = ex.target; step.value = ''; }
   if(kind==='write') step.target = ex.target;
   ex.steps.push(step);
   renderCanvas();
@@ -456,17 +481,18 @@ async function generateFromIntent(){
 
   const system = `You convert a plain-English data mapping request into a JSON array of pipeline steps for a no-code field mapping tool.
 
-Allowed step shapes, in this exact JSON form (kind is always one of: read, filter, select, transform, build, write):
+Allowed step shapes, in this exact JSON form (kind is always one of: read, filter, select, transform, build, constant, write):
 {"kind":"read","field":"<field from the allowed list>"}
 {"kind":"filter","field":"<item field>","op":"equals|not equals|contains|greater than|less than","value":"<string>"}
 {"kind":"select","mode":"First match|Last match|All matches"}
 {"kind":"transform","op":"Join text|Mask characters|Uppercase|Lowercase|Trim spaces|Round number","field":"<field>","field2":"<field, only include for Join text>","param":<separator string for Join text, number of characters for Mask characters, decimal places for Round number, omit otherwise>}
 {"kind":"build","rows":[{"source":"<item field>","target":"<short target field name>"}],"repeat":true|false}
+{"kind":"constant","target":"<target field path>","value":"<literal string>"}
 {"kind":"write","target":"<target field path>"}
 
 Rules:
 - Only use field names from the allowed list given to you. Never invent a field.
-- Steps must start with "read" and end with "write".
+- For hard-coded values use a single "constant" step (no read). Otherwise steps must start with "read" and end with "write".
 - Use "filter"/"select" only if the request implies narrowing down a list to specific item(s).
 - Use "build" only for list-based targets (it maps item fields into a new shape).
 - Use "transform" for text/number operations like combining, masking, casing, rounding.

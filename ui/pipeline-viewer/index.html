@@ -72,7 +72,7 @@
     <span><span class="dot" style="background:var(--source)"></span>Read</span>
     <span><span class="dot" style="background:var(--op)"></span>Transform / Build</span>
     <span><span class="dot" style="background:var(--cond)"></span>Filter</span>
-    <span><span class="dot" style="background:var(--target)"></span>Write</span>
+    <span><span class="dot" style="background:var(--target)"></span>Write / Constant</span>
     <span><span class="dot" style="background:var(--raw)"></span>Raw / unclassified</span>
   </div>
   <div class="layout">
@@ -81,10 +81,10 @@
   </div>
 </div>
 <script>
-const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W', raw:'?' };
-const COLOR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', write:'--target', raw:'--raw' };
-const BG = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg', raw:'--raw-bg' };
-const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Transform', build:'Build object', write:'Write to target', raw:'Unclassified (raw)' };
+const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W', constant:'C', raw:'?' };
+const COLOR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', write:'--target', constant:'--target', raw:'--raw' };
+const BG = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg', constant:'--target-bg', raw:'--raw-bg' };
+const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Transform', build:'Build object', write:'Write to target', constant:'Constant', raw:'Unclassified (raw)' };
 
 function badge(step) {
   if (step.kind === 'raw') return '<span class="badge badge-raw">needs review</span>';
@@ -111,6 +111,9 @@ function renderStepBody(step) {
     return rows ? `Map fields: ${rows}` : `Create object${step.sourceText ? '' : ''}`;
   }
   if (step.kind === 'write') return `Save to <span class="mono">${esc(step.target)}</span>`;
+  if (step.kind === 'constant') {
+    return `Set <span class="mono">${esc(step.target)}</span> to <span class="mono">${esc(step.value ?? '')}</span>`;
+  }
   if (step.kind === 'raw') return `Could not classify automatically`;
   return esc(step.sourceText || '');
 }
@@ -137,6 +140,7 @@ function summarize(steps) {
     if (s.kind === 'read') return `read ${s.field}`;
     if (s.kind === 'transform') return `${s.op}(${s.field}${s.field2?', '+s.field2:''})`;
     if (s.kind === 'write') return `write ${s.target}`;
+    if (s.kind === 'constant') return `constant ${s.target}=${s.value??''}`;
     if (s.kind === 'filter') return `filter ${s.value||''}`;
     if (s.kind === 'build') return 'build object';
     if (s.kind === 'raw') return 'raw (review)';

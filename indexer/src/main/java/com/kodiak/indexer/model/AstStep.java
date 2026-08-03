@@ -16,6 +16,7 @@ public class AstStep {
     TRANSFORM,
     BUILD,
     WRITE,
+    CONSTANT,
     RAW
   }
 
@@ -40,6 +41,22 @@ public class AstStep {
     step.targetField = targetField;
     step.sourceField = sourceField;
     step.sourceText = sourceText;
+    return step;
+  }
+
+  /**
+   * Constant assignment: type-relative path + literal value only.
+   *
+   * @param targetField path from outer class ({@code Outer.Inner.field}); package is on pipeline
+   *     {@code targetType}
+   * @param value resolved literal (stored in {@code meta.value})
+   */
+  public static AstStep constant(String targetField, String value) {
+    AstStep step = new AstStep();
+    step.kind = Kind.CONSTANT;
+    step.targetField = targetField;
+    step.children = null;
+    step.meta.put("value", value);
     return step;
   }
 

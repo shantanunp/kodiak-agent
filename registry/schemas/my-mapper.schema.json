@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "mapperId": "my-mapper",
+  "savedAt": "2026-07-31T06:22:15.790Z",
+  "source": {
+    "method": "manual",
+    "root": {
+      "id": "n5",
+      "name": "LoanApplicationRequest",
+      "type": "object",
+      "required": false,
+      "description": "",
+      "children": [
+        {
+          "id": "n6",
+          "name": "refNumber",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "children": []
+        },
+        {
+          "id": "n7",
+          "name": "applicant",
+          "type": "object",
+          "required": false,
+          "description": "",
+          "children": [
+            {
+              "id": "n9",
+              "name": "displayName",
+              "type": "string",
+              "required": false,
+              "description": "",
+              "children": []
+            },
+            {
+              "id": "n10",
+              "name": "dateOfBirth",
+              "type": "string",
+              "required": false,
+              "description": "",
+              "children": []
+            },
+            {
+              "id": "n11",
+              "name": "governmentId",
+              "type": "string",
+              "required": false,
+              "description": "",
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "target": {
+    "method": "manual",
+    "root": {
+      "id": "n8",
+      "name": "LPALoanAssessmentServiceRequest",
+      "type": "object",
+      "required": false,
+      "description": "",
+      "children": [
+        {
+          "id": "n12",
+          "name": "MESSAGE",
+          "type": "object",
+          "required": false,
+          "description": "",
+          "children": [
+            {
+              "id": "n13",
+              "name": "MISMOReferenceModelIdentifier",
+              "type": "string",
+              "required": false,
+              "description": "",
+              "children": []
+            },
+            {
+              "id": "n14",
+              "name": "ABOUT_VERSIONS",
+              "type": "object",
+              "required": false,
+              "description": "",
+              "children": [
+                {
+                  "id": "n15",
+                  "name": "ABOUT_VERSION",
+                  "type": "array",
+                  "required": false,
+                  "description": "",
+                  "children": [
+                    {
+                      "id": "n17",
+                      "name": "item",
+                      "type": "object",
+                      "required": false,
+                      "description": "",
+                      "children": [
+                        {
+                          "id": "n18",
+                          "name": "DataVersionIdentifier",
+                          "type": "object",
+                          "required": false,
+                          "description": "",
+                          "children": [
+                            {
+                              "id": "n19",
+                              "name": "Value",
+                              "type": "string",
+                              "required": false,
+                              "description": "",
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  "itemType": "object"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

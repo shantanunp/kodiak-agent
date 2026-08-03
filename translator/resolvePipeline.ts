@@ -1,5 +1,5 @@
 /**
- * Shared: resolve AST for a mapper (cache → remote scan → local).
+ * Shared: resolve AST for a mapper (worktree → remote scan → local → cache).
  */
 
 import { join } from "node:path";
@@ -14,7 +14,7 @@ import type { IndexAst } from "./labeler.js";
 export async function resolveAstForMapper(
   mapperId: string,
   registryPath = paths.registry,
-  options: { local?: boolean; remote?: boolean } = {},
+  options: { local?: boolean; remote?: boolean; worktree?: string } = {},
 ): Promise<IndexAst> {
   const registry = loadRegistry(registryPath);
   const mapper = registry.mappers.find((m) => m.id === mapperId);
@@ -22,9 +22,23 @@ export async function resolveAstForMapper(
     throw new Error(`Mapper not found: ${mapperId}`);
   }
 
-  const cached = cache.findLatestByFilePath(mapper.sourceFile);
-  if (cached) {
-    return cached.ast as IndexAst;
+  const worktree = options.worktree?.trim();
+  if (worktree) {
+    const sourcePath = join(worktree, mapper.sourceFile);
+    if (!existsSync(sourcePath)) {
+      throw new Error(`Source not found in worktree: ${sourcePath}`);
+    }
+    const runtimeRegistry = join(paths.cacheDir, "runtime-registry.yaml");
+    writeRuntimeRegistry([mapper], runtimeRegistry);
+    return runIndexer(mapper, worktree, runtimeRegistry) as IndexAst;
+  }
+
+  const forceRefresh = Boolean(options.remote || options.local);
+  if (!forceRefresh) {
+    const cached = cache.findLatestByFilePath(mapper.sourceFile);
+    if (cached) {
+      return cached.ast as IndexAst;
+    }
   }
 
   const localPath = join(paths.root, mapper.sourceFile);

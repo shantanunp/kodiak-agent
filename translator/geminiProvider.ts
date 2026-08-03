@@ -11,20 +11,24 @@ export interface LabelResponse {
   kind?: string;
   targetField?: string;
   sourceField?: string;
+  value?: string;
   reason?: string;
 }
 
 const SYSTEM_PROMPT = `You label already-parsed Java mapping AST steps. You do NOT parse code from scratch.
 
-Allowed step kinds (lowercase): read, filter, select, transform, build, write, raw.
+Allowed step kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
 
 Rules:
 - Only relabel when you are confident the construct matches a known kind.
 - Direct field assignment (obj.field = expr) is usually "write".
+- Assignments from a string/number/boolean literal or a static final constant are "constant". Never invent a "read" for constants.
+  For constant: targetField = dotted Java path of the DTO field (pkg.Outer.Inner.field), value = the literal. Omit sourceField.
 - if/else on a predicate is "filter" if already classified as filter — do not change unless clearly wrong.
 - Method calls creating objects are "build".
 - If unsure, return recognized=false and keep raw.
 - Respond with JSON only: {"recognized":true,"kind":"write","targetField":"...","sourceField":"...","reason":"..."}
+  or {"recognized":true,"kind":"constant","targetField":"pkg.Outer.Inner.field","value":"...","reason":"..."}
   or {"recognized":false,"reason":"..."}`;
 
 /** Gemini REST API — same shape as AI Studio / curl generateContent. */

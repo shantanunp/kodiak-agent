@@ -73,6 +73,18 @@ export class StepLabeler {
     }
 
     if (step.kind !== "RAW" && step.kind !== "raw") {
+      if (step.kind === "CONSTANT" || step.kind === "constant") {
+        labeled.sourceField = undefined;
+        labeled.sourceText = undefined;
+        if (!labeled.labelReason) {
+          const value =
+            typeof step.meta?.value === "string" || typeof step.meta?.value === "number"
+              ? String(step.meta.value)
+              : undefined;
+          labeled.labelReason =
+            value != null ? `Constant value: ${value}` : "Constant value";
+        }
+      }
       return labeled;
     }
 
@@ -95,10 +107,18 @@ export class StepLabeler {
       });
     }
 
-    if (response.recognized && response.kind) {
+      if (response.recognized && response.kind) {
       labeled.kind = response.kind.toUpperCase();
       if (response.targetField) labeled.targetField = response.targetField;
-      if (response.sourceField) labeled.sourceField = response.sourceField;
+      if (response.kind.toLowerCase() === "constant") {
+        labeled.sourceField = undefined;
+        labeled.sourceText = undefined;
+        if (response.value != null) {
+          labeled.meta = { ...(labeled.meta ?? {}), value: response.value };
+        }
+      } else if (response.sourceField) {
+        labeled.sourceField = response.sourceField;
+      }
       labeled.labelSource = "gemini";
       labeled.labelReason = response.reason;
     } else {

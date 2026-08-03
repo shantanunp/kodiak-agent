@@ -1,6 +1,12 @@
 #!/usr/bin/env tsx
 /**
  * Label RAW AST steps via Gemini (Phase 2).
+ *
+ * Independent of `npm run ast` — resolves/indexes then labels.
+ *
+ *   npm run label -- --mapper lpa-request-mapper --remote
+ *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
+ *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
  */
 
 import { parseArgs } from "node:util";
@@ -10,6 +16,7 @@ import { paths } from "../src/config/env.js";
 import { StepLabeler } from "./labeler.js";
 import { isGeminiConfigured } from "./config.js";
 import { resolveAstForMapper } from "./resolvePipeline.js";
+import { filterStepsByFields, parseFieldSelectors } from "./filterByFields.js";
 import type { IndexAst } from "./labeler.js";
 
 const { values } = parseArgs({
@@ -18,7 +25,10 @@ const { values } = parseArgs({
     mapper: { type: "string", short: "m" },
     local: { type: "boolean", default: false },
     remote: { type: "boolean", default: false },
+    worktree: { type: "string" },
     registry: { type: "string", default: paths.registry },
+    field: { type: "string", multiple: true },
+    fields: { type: "string" },
   },
 });
 
@@ -37,16 +47,19 @@ async function main(): Promise<void> {
     ast = await resolveAstForMapper(values.mapper, values.registry!, {
       local: values.local,
       remote: values.remote || undefined,
+      worktree: values.worktree,
     });
   } else {
     const indexDir = join(paths.cacheDir, "index");
     if (!existsSync(indexDir)) {
-      console.error("Usage: label --mapper <id> | --file <cache.json>");
+      console.error(
+        "Usage: label --mapper <id> [--remote | --worktree <path>] | --file <cache.json>",
+      );
       process.exit(1);
     }
     const files = readdirSync(indexDir).filter((f) => f.endsWith(".json"));
     if (files.length === 0) {
-      console.error("No cached index entries. Run: npm run scan -- --mapper <id> --remote");
+      console.error("No cached index entries. Run: npm run label -- --mapper <id> --remote");
       process.exit(1);
     }
     const latest = join(indexDir, files[files.length - 1]!);
@@ -56,6 +69,13 @@ async function main(): Promise<void> {
 
   const labeler = new StepLabeler();
   const pipeline = await labeler.labelIndex(ast);
+  const selectors = parseFieldSelectors({
+    field: values.field,
+    fields: values.fields,
+  });
+  if (selectors.length > 0) {
+    pipeline.steps = filterStepsByFields(pipeline.steps, selectors);
+  }
   console.log(JSON.stringify(pipeline, null, 2));
 }
 
