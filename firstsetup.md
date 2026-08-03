@@ -287,9 +287,34 @@ MODEL_API_KEY=...
 
 **Important:** set `MODEL_API_STYLE` to match the API shape of your endpoint. Changing only the model name while leaving `STYLE=gemini` against an OpenAI URL will fail.
 
+### Offline office workflow (no model API)
+
+When the office network blocks Gemini/OpenAI, use a VS Code / Cursor custom agent instead. Same JSON contract as the live API; next stages read field cache.
+
+```powershell
+# 1) Export AST + schema job packet (no API key needed)
+npm run label:export -- --mapper lpa-request-mapper `
+  --worktree C:\Users\<you>\Workspace\Kmismomapper `
+  --fields MESSAGE.DEAL.PARTY.LastName
+
+# 2) In VS Code/Cursor: open .cache\agent-jobs\<mapper>\<fingerprint>\job.json
+#    Ask your custom agent to write result.json beside it (see job instructions).
+
+# 3) Import agent JSON into field cache (still no API key)
+npm run label:import -- --mapper lpa-request-mapper `
+  --worktree C:\Users\<you>\Workspace\Kmismomapper `
+  --fields MESSAGE.DEAL.PARTY.LastName
+
+# 4) Next stage — cache hit, no MODEL_API_KEY
+npm run label -- --mapper lpa-request-mapper `
+  --worktree C:\Users\<you>\Workspace\Kmismomapper `
+  --fields MESSAGE.DEAL.PARTY.LastName `
+  --from-cache-only
+```
+
+Job files live under `.cache/agent-jobs/{mapperId}/{fingerprint}/` (`job.json`, `result.json`, `README.md`).
+
 ---
-
-
 
 ## 5. Quick checklist (Windows)
 
@@ -299,6 +324,6 @@ MODEL_API_KEY=...
 - [ ] `npm install` && `npm run build:indexer`  
 - [ ] Mapper repo on disk (e.g. `C:\Users\...\Kmismomapper`)  
 - [ ] `npm run ast -- --mapper … --worktree C:\...\Kmismomapper` works  
-- [ ] `npm run label -- … --worktree … --fields …` works (model endpoint allowed)  
+- [ ] `npm run label -- … --worktree … --fields …` works (model endpoint) **or** offline `label:export` → agent → `label:import` → `label -- --from-cache-only`  
 - [ ] Know how to point `--worktree` / edit `mapping-registry.yaml` for another repo (§3E)  
 - [ ] Know §4 env vars to switch Gemini ↔ OpenAI-compatible gateway  

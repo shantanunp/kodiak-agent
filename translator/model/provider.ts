@@ -63,7 +63,8 @@ export interface ModelProvider {
   labelStep(request: LabelRequest): Promise<LabelResponse>;
 }
 
-const FIELD_MAPPING_PROMPT = `You rewrite one already-parsed Java mapper field into a business pipeline.
+/** Shared with offline VS Code agent jobs — do not diverge. */
+export const FIELD_MAPPING_PROMPT = `You rewrite one already-parsed Java mapper field into a business pipeline.
 
 The JavaParser indexer already extracted operations (hints only). You own the final output:
 kinds, pipeline steps, and business/schema field paths.

@@ -12,6 +12,8 @@
     "read-source": "tsx src/tools/readSource.ts",
     "latest-sha": "tsx src/tools/getLatestCommitSha.ts",
     "label": "tsx translator/cli.ts",
+    "label:export": "tsx translator/agent/exportJob.ts",
+    "label:import": "tsx translator/agent/importJob.ts",
     "cache:clear": "tsx translator/cache/clear-cli.ts",
     "view:export": "tsx translator/export-view.ts",
     "ui:serve": "tsx ui/serve.ts",

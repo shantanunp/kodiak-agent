@@ -43,6 +43,9 @@ npm run scan -- --mapper example-mapper
 npm run scan:incremental
 npm run poll
 npm run label -- --mapper example-mapper   # Phase 2: model provider labels RAW steps
+npm run label:export -- --mapper … --worktree … --fields …   # offline job for VS Code agent
+npm run label:import -- --mapper …                             # seed cache from agent result.json
+npm run label -- --from-cache-only --mapper … --fields …       # no MODEL_API_KEY
 ```
 
 ## Registry

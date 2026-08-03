@@ -8,9 +8,9 @@ import {
   createModelProvider,
   type ModelProvider,
   type FieldMappingResponse,
-  type PipelineOpLabel,
 } from "./provider.js";
 import { loadModelConfig } from "./config.js";
+import { applyFieldMappingResponse } from "./applyResponse.js";
 import {
   getLabelCache,
   setLabelCache,
@@ -100,13 +100,7 @@ export function operationsOf(ast: IndexAst | { operations?: AstStep[]; steps?: A
   return ast.operations ?? ast.steps ?? [];
 }
 
-function stripCodeMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
-  if (!meta) return undefined;
-  const { code: _c, ...rest } = meta;
-  return Object.keys(rest).length ? rest : undefined;
-}
-
-function loadSchemaJson(mapperId: string | undefined): string {
+export function loadSchemaJson(mapperId: string | undefined): string {
   if (!mapperId) return "";
   const file = schemaFilePath(mapperId);
   if (!existsSync(file)) return "";
@@ -310,58 +304,6 @@ export class StepLabeler {
       });
     }
 
-    if (response.recognized && response.pipeline?.length && response.targetField) {
-      return {
-        targetField: response.targetField,
-        pipeline: response.pipeline.map((op) =>
-          this.fromPipelineOp(op, response.reason),
-        ),
-      };
-    }
-
-    return {
-      targetField: entry.targetField,
-      pipeline: entry.pipeline.map((op) => ({
-        kind: op.kind,
-        sourceField: typeof op.sourceField === "string" ? op.sourceField : undefined,
-        condition: typeof op.condition === "string" ? op.condition : undefined,
-        meta: stripCodeMeta(
-          op.meta && typeof op.meta === "object"
-            ? (op.meta as Record<string, unknown>)
-            : undefined,
-        ),
-        labelSource: "deterministic",
-        labelReason: response.reason ?? "model did not rewrite field",
-      })),
-    };
-  }
-
-  private fromPipelineOp(op: PipelineOpLabel, reason: string | undefined): PipelineStep {
-    const kind = (op.kind ?? "raw").toUpperCase();
-    const step: PipelineStep = {
-      kind,
-      labelSource: "model",
-      labelReason: reason,
-    };
-
-    if (kind === "READ" || kind === "WRITE" || kind === "BUILD") {
-      if (op.sourceField) step.sourceField = op.sourceField;
-    }
-    if (kind === "FILTER" && op.condition) {
-      step.condition = op.condition;
-    }
-    if (kind === "CONSTANT") {
-      if (op.value != null) {
-        step.meta = { value: op.value };
-      }
-    }
-    if (kind === "TRANSFORM") {
-      step.meta = {};
-      if (op.op) step.meta.op = op.op;
-      if (op.value != null) step.meta.value = op.value;
-      if (op.sourceField) step.sourceField = op.sourceField;
-    }
-
-    return step;
+    return applyFieldMappingResponse(entry, response, "model");
   }
 }

@@ -5,16 +5,33 @@
  *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
  *   --fields MESSAGE.DEAL.PARTY.FirstName
  *   --no-cache | --clear-cache
+ *   --from-cache-only   # offline: read agent-seeded field cache (no MODEL_API_KEY)
  */
 
 import { parseArgs } from "node:util";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "../src/config/env.js";
-import { StepLabeler, isModelConfigured, type IndexAst } from "./model/index.js";
+import {
+  StepLabeler,
+  isModelConfigured,
+  loadSchemaJson,
+  type FieldMappingJson,
+  type IndexAst,
+} from "./model/index.js";
 import { resolveMapperAst } from "./resolvePipeline.js";
-import { filterMappingByFields, parseFieldSelectors } from "./filterByFields.js";
-import { clearAllTranslatorCaches } from "./cache/index.js";
+import {
+  filterMappingByFields,
+  matchesTargetField,
+  parseFieldSelectors,
+} from "./filterByFields.js";
+import {
+  clearAllTranslatorCaches,
+  computePipelineFingerprint,
+  listFieldPipelineCaches,
+  PIPELINE_CACHE_VERSION,
+} from "./cache/index.js";
+import { AGENT_OFFLINE_MODEL } from "./agent/types.js";
 
 const { values } = parseArgs({
   options: {
@@ -30,8 +47,82 @@ const { values } = parseArgs({
     "clear-cache": { type: "boolean", default: false },
     /** With --fields, also run model discovery (default: AST-only to save quota). */
     "discover-ai": { type: "boolean", default: false },
+    /** Read agent/offline field cache only — no MODEL_API_KEY required. */
+    "from-cache-only": { type: "boolean", default: false },
   },
 });
+
+function fieldEntryMatchesSelectors(
+  entry: { javaTargetField: string; mapping: { targetField: string } },
+  selectors: string[],
+): boolean {
+  return (
+    matchesTargetField(entry.mapping.targetField, selectors) ||
+    matchesTargetField(entry.javaTargetField, selectors)
+  );
+}
+
+async function labelFromAgentCache(
+  ast: IndexAst,
+  sourceJava: string,
+  selectors: string[],
+): Promise<void> {
+  const mapperId = ast.mapperId ?? "unknown";
+  const fingerprint = computePipelineFingerprint({
+    sourceJava,
+    schemaJson: loadSchemaJson(mapperId),
+    model: AGENT_OFFLINE_MODEL,
+    version: PIPELINE_CACHE_VERSION,
+  });
+
+  const cachedFields = listFieldPipelineCaches(mapperId, fingerprint);
+  let mapping: FieldMappingJson[] = [];
+
+  if (selectors.length > 0) {
+    const missing = selectors.filter(
+      (sel) => !cachedFields.some((e) => fieldEntryMatchesSelectors(e, [sel])),
+    );
+    if (missing.length > 0) {
+      console.error(
+        `Cache miss for fields: ${missing.join(", ")}. Run label:export → agent → label:import first.`,
+      );
+      process.exit(1);
+    }
+    const seen = new Set<string>();
+    for (const e of cachedFields) {
+      if (!fieldEntryMatchesSelectors(e, selectors)) continue;
+      const m = e.mapping as FieldMappingJson;
+      if (seen.has(m.targetField)) continue;
+      seen.add(m.targetField);
+      mapping.push(m);
+    }
+  } else {
+    mapping = cachedFields.map((e) => e.mapping as FieldMappingJson);
+    if (mapping.length === 0) {
+      console.error(
+        `No agent field cache for ${mapperId}. Run label:export → agent → label:import first.`,
+      );
+      process.exit(1);
+    }
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        mapperId,
+        mapping,
+        labeledAt: new Date().toISOString(),
+        labelModel: AGENT_OFFLINE_MODEL,
+        cacheHit: true,
+        fieldsFromCache: mapping.length,
+        fieldsLabeled: 0,
+        fingerprint,
+      },
+      null,
+      2,
+    ),
+  );
+}
 
 async function main(): Promise<void> {
   if (values["clear-cache"]) {
@@ -42,9 +133,11 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!isModelConfigured()) {
+  const fromCacheOnly = Boolean(values["from-cache-only"]);
+  if (!fromCacheOnly && !isModelConfigured()) {
     console.error(
-      "Set MODEL_API_KEY (or GEMINI_API_KEY) in .env. Optional: MODEL_BASE_URL, MODEL_NAME, MODEL_API_STYLE=gemini|openai",
+      "Set MODEL_API_KEY (or GEMINI_API_KEY) in .env, or use --from-cache-only after label:import.\n" +
+        "Offline: npm run label:export → VS Code agent → npm run label:import → npm run label -- --from-cache-only",
     );
     process.exit(1);
   }
@@ -85,6 +178,11 @@ async function main(): Promise<void> {
     field: values.field,
     fields: values.fields,
   });
+
+  if (fromCacheOnly) {
+    await labelFromAgentCache(ast, sourceJava, selectors);
+    return;
+  }
 
   const labeler = new StepLabeler();
   const pipeline = await labeler.labelIndex(ast, {

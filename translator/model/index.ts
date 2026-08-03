@@ -19,6 +19,7 @@ export {
   HttpModelProvider,
   createModelProvider,
   GeminiLabelProvider,
+  FIELD_MAPPING_PROMPT,
   type LabelRequest,
   type FieldMappingRequest,
   type PipelineOpLabel,
@@ -30,8 +31,15 @@ export {
 } from "./provider.js";
 
 export {
+  applyFieldMappingResponse,
+  normalizeFieldMappingResponse,
+  fromPipelineOp,
+} from "./applyResponse.js";
+
+export {
   StepLabeler,
   operationsOf,
+  loadSchemaJson,
   type AstStep,
   type IndexAst,
   type PipelineStep,
