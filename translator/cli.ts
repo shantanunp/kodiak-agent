@@ -30,6 +30,8 @@ const { values } = parseArgs({
     fields: { type: "string" },
     "no-cache": { type: "boolean", default: false },
     "clear-cache": { type: "boolean", default: false },
+    /** With --fields, also run Gemini discovery (default: AST-only to save quota). */
+    "discover-ai": { type: "boolean", default: false },
   },
 });
 
@@ -89,6 +91,7 @@ async function main(): Promise<void> {
     fieldSelectors: selectors,
     sourceJava,
     noCache: Boolean(values["no-cache"]),
+    discoverAi: Boolean(values["discover-ai"]),
   });
 
   if (selectors.length > 0) {

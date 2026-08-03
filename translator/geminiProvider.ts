@@ -249,7 +249,10 @@ export class GeminiLabelProvider {
       if (!retryable || attempt === maxAttempts) {
         throw new Error(`Gemini API ${response.status}: ${lastError}`);
       }
-      const waitMs = Math.min(20_000, 2000 * attempt);
+      // Honor "Please retry in 59.2s" from Gemini free-tier errors
+      const retryMatch = lastError.match(/retry in ([\d.]+)\s*s/i);
+      const hintedMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1]!) * 1000) + 500 : 0;
+      const waitMs = Math.min(90_000, Math.max(hintedMs, 2000 * attempt));
       await new Promise((r) => setTimeout(r, waitMs));
     }
 

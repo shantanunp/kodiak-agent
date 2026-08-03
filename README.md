@@ -114,7 +114,9 @@ npm run cache:clear
 npm run cache:clear -- --mapper lpa-request-mapper
 ```
 
-Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs still reuse discovery + per-field caches when the fingerprint matches.
+Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs reuse field cache when the fingerprint matches (`"cacheHit": true`).
+
+**Quota tip:** With `--fields`, AI discovery is **off by default** (AST only + one label call). Full dual discovery: omit `--fields`, or pass `--discover-ai`.
 
 
 ## JDK note for indexer build

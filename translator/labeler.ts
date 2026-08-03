@@ -88,6 +88,11 @@ export interface LabelIndexOptions {
   sourceJava?: string;
   /** Skip pipeline / field / discovery cache read/write */
   noCache?: boolean;
+  /**
+   * Force Gemini discovery even with --fields.
+   * Default: skip AI discovery when --fields is set (1 Gemini call per uncached field).
+   */
+  discoverAi?: boolean;
 }
 
 export function operationsOf(ast: IndexAst | { operations?: AstStep[]; steps?: AstStep[] }): AstStep[] {
@@ -137,7 +142,10 @@ export class StepLabeler {
     const fieldSelectors = options.fieldSelectors ?? [];
     const sourceJava = options.sourceJava ?? "";
     const noCache = Boolean(options.noCache);
+    const discoverAi = Boolean(options.discoverAi);
     const mapperId = ast.mapperId ?? "unknown";
+    // --fields: AST-only discovery by default (avoids a second Gemini call / rate limits)
+    const skipAiDiscovery = fieldSelectors.length > 0 && !discoverAi;
 
     const schemaJson = loadSchemaJson(ast.mapperId);
     const fingerprint = computePipelineFingerprint({
@@ -205,6 +213,7 @@ export class StepLabeler {
     const { groups, meta } = await discoverAndMerge(ast, sourceJava, this.provider, {
       fingerprint,
       noCache,
+      skipAiDiscovery,
     });
 
     const toLabel =

@@ -149,10 +149,19 @@ export async function discoverAndMerge(
   ast: IndexAst,
   sourceJava: string,
   provider: GeminiLabelProvider,
-  options: { fingerprint?: string; noCache?: boolean } = {},
+  options: {
+    fingerprint?: string;
+    noCache?: boolean;
+    /** When true, skip Gemini discovery (AST groups only). */
+    skipAiDiscovery?: boolean;
+  } = {},
 ): Promise<DiscoverMergeResult> {
   const astGroups = groupOperationsByTarget(operationsOf(ast) as PipelineOp[]);
   const mapperId = ast.mapperId ?? "unknown";
+
+  if (options.skipAiDiscovery) {
+    return mergeAstAndAiDiscovery(astGroups, []);
+  }
 
   let aiHits: DiscoverHit[] = [];
   if (sourceJava.trim()) {
