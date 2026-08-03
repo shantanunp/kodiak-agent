@@ -119,13 +119,14 @@ Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs reuse fiel
 **Quota tip:** With `--fields`, AI discovery is **off by default** (AST only + one label call). Full dual discovery: omit `--fields`, or pass `--discover-ai`.
 
 
-## JDK note for indexer build
+## Indexer build (local Gradle)
 
-Gradle requires JDK 21. If your system default is newer:
+Uses your machine's `gradle` and `JAVA_HOME` (office artifactory / JDK). No Gradle Wrapper in-repo.
 
 ```bash
-curl -fsSL "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" | tar -xz -C .jdk --strip-components=1
+# requires JDK 17+ on PATH / JAVA_HOME, and `gradle` installed
 npm run build:indexer
+# or: cd indexer && gradle shadowJar
 ```
 
 

@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pipeline Viewer — Kodiak Agent</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#EEF1EC; --panel:#FFFFFF; --ink:#17201C; --ink-soft:#5C665F; --ink-faint:#8B948D; --line:#DADFD9;
@@ -14,7 +12,9 @@
     --op:#4A3F8C; --op-bg:#ECE9F8;
     --cond:#A32B4B; --cond-bg:#FBE7ED;
     --raw:#6B7280; --raw-bg:#F3F4F6;
-    --font-display:'Space Grotesk', sans-serif; --font-body:'Inter', sans-serif; --font-mono:'IBM Plex Mono', monospace;
+    --font-display:ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-body:ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono:ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);}

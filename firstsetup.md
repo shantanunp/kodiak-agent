@@ -4,14 +4,17 @@ Quick guide after you check out this repo on a **Windows** laptop: install, run 
 
 Use **PowerShell** or **Git Bash**. Examples below use PowerShell unless noted.
 
+This project has **no Gradle Wrapper** (`gradlew`). Builds use your machine’s `gradle` and office package mirrors (Artifactory / internal npm / Maven). The UI does **not** load Google Fonts or other CDNs.
+
 ---
 
 ## 1. Prerequisites
 
 | Tool | Version | Why |
 |------|---------|-----|
-| Node.js | ≥ 20 | App / CLIs — [nodejs.org](https://nodejs.org) LTS |
-| JDK | 17+ (21 preferred) | Build JavaParser indexer — Temurin/Oracle, set `JAVA_HOME` |
+| Node.js | ≥ 20 | App / CLIs — office Node install or [nodejs.org](https://nodejs.org) LTS |
+| JDK | 17+ (21 preferred) | Build JavaParser indexer — set `JAVA_HOME` to your office JDK |
+| Gradle | 8.x (on `PATH`) | `npm run build:indexer` → `cd indexer && gradle shadowJar` |
 | Git for Windows | any | Checkout repos + optional Git Bash |
 
 Also clone the **mapper** repo locally (e.g. `Kmismomapper`) so you can use `--worktree` and avoid needing GitHub for daily runs.
@@ -22,6 +25,7 @@ Also clone the **mapper** repo locally (e.g. `Kmismomapper`) so you can use `--w
 node -v          # v20+
 npm -v
 java -version    # 17+
+gradle -v        # 8.x — must be on PATH (office install)
 echo $env:JAVA_HOME
 ```
 
@@ -31,7 +35,7 @@ If `java` works but Gradle fails, set `JAVA_HOME` to your JDK folder, e.g.:
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.x.x-hotspot"
 ```
 
-(Or set it permanently in System Properties → Environment Variables.)
+(Or set it permanently in System Properties → Environment Variables. Prefer the **office-provided** JDK if your laptop uses corporate tooling.)
 
 ---
 
@@ -65,18 +69,22 @@ npm install
 npm run build:indexer
 ```
 
-`build:indexer` runs Gradle under `indexer\`. First run downloads dependencies (needs Maven Central).
+`build:indexer` runs **local** `gradle shadowJar` under `indexer\` (no `./gradlew`).  
+Gradle/Maven deps should resolve via your **office Artifactory** / init scripts / `settings.xml` — same as other Java projects on your laptop.
 
-**Network allowlist (if outbound traffic is restricted):**
+**Office network / mirrors (typical):**
 
-| Host | Needed for |
-|------|------------|
-| `registry.npmjs.org` | `npm install` (once) |
-| Maven Central | `npm run build:indexer` (once) |
-| `generativelanguage.googleapis.com` | `npm run label` |
-| `api.github.com` | only if you use `--remote` / scan |
+| Source | Needed for |
+|--------|------------|
+| Office npm registry / Artifactory npm | `npm install` |
+| Office Maven / Artifactory | Java deps during `gradle shadowJar` |
+| Office Gradle distribution (if IT manages it) | Running `gradle` itself |
+| `generativelanguage.googleapis.com` | `npm run label` (Gemini) — only if AI Studio is allowed |
+| `api.github.com` | only if you use `--remote` / `scan` / `poll` |
 
 Prefer `--worktree` so you do **not** need GitHub daily.
+
+If `npm install` or `gradle` still hits the public internet, ask IT for the office npm/Maven/Gradle mirror config (`.npmrc`, Gradle `init.gradle`, Maven `settings.xml`). This repo does not vendor those credentials.
 
 ---
 
@@ -114,7 +122,10 @@ npm run cache:clear -- --mapper lpa-request-mapper
 ```powershell
 npm run ui:serve
 # Browser: http://localhost:4173/structure-setup/?mapper=lpa-request-mapper
+# Also: /schema-builder/?mapper=...  and  /pipeline-viewer/?mapper=...
 ```
+
+UI pages use **system fonts only** — no Google Fonts / CDN requests from the browser. API calls from the UI go only to the local server (`localhost`).
 
 ### Avoid if network is restricted
 
@@ -186,7 +197,7 @@ npm run cache:clear -- --mapper my-test-mapper
 | Git Bash | Same `npm` commands; paths like `/c/Users/.../Kmismomapper` also work |
 | Antivirus | First `npm install` / Gradle may be slow if Defender scans `node_modules` |
 | Execution policy | If scripts are blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| Proxy | If corporate proxy: set `HTTP_PROXY` / `HTTPS_PROXY` / `npm config set proxy ...` per IT |
+| Proxy / Artifactory | Use office `HTTP_PROXY` / `HTTPS_PROXY`, `.npmrc`, and Gradle/Maven mirror settings from IT — do not add `gradlew` back |
 
 ---
 
@@ -246,7 +257,8 @@ Not supported out of the box. You would need to:
 
 ## 5. Quick checklist (Windows)
 
-- [ ] `node -v` ≥ 20, `java -version` 17+, `JAVA_HOME` set if needed  
+- [ ] `node -v` ≥ 20, `java -version` 17+, `gradle -v` works, `JAVA_HOME` set if needed  
+- [ ] Office npm / Maven / Gradle mirrors configured (Artifactory) — no `gradlew` in this repo  
 - [ ] `Copy-Item .env.example .env` + set `GEMINI_API_KEY`  
 - [ ] `npm install` && `npm run build:indexer`  
 - [ ] Mapper repo on disk (e.g. `C:\Users\...\Kmismomapper`)  

@@ -3,9 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Field Mapper — builder</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#EEF1EC; --panel:#FFFFFF; --ink:#17201C; --ink-soft:#5C665F; --ink-faint:#8B948D; --line:#DADFD9;
@@ -13,7 +10,9 @@
     --target:#9A5B0A; --target-bg:#FBEFDC;
     --op:#4A3F8C; --op-bg:#ECE9F8;
     --cond:#A32B4B; --cond-bg:#FBE7ED;
-    --font-display:'Space Grotesk', sans-serif; --font-body:'Inter', sans-serif; --font-mono:'IBM Plex Mono', monospace;
+    --font-display:ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-body:ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono:ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);}
@@ -459,68 +458,63 @@ function onFieldChange(e){
 
 function renderAll(){ renderTabs(); renderSchema(); renderCanvas(); }
 
-function schemaDescription(){
+function localStepsFromIntent(intent){
   const ex = examples[current];
-  if(ex.isList){
-    return `This target field is a list-based mapping.
-- The source list field is: ${listPool().join(', ')}
-- Each item in that list has these fields available for "filter", "transform" and "build" steps: ${itemPool().join(', ')}`;
+  const lower = intent.toLowerCase();
+  if(/\b(constant|hard.?coded|literal|fixed)\b/.test(lower)){
+    const valueMatch = intent.match(/["']([^"']+)["']/) || intent.match(/\b(?:to|as|value)\s+(\S+)/i);
+    return [{ kind:'constant', target:ex.target, value: valueMatch ? valueMatch[1] : 'example' }];
   }
-  return `This target field is a single-value mapping.
-- Available source fields: ${objPool().join(', ')}`;
+  if(ex.isList){
+    const listField = listPool()[0];
+    const itemFields = itemPool();
+    const rows = itemFields.slice(0, Math.min(3, itemFields.length)).map(f => ({
+      source: f,
+      target: f.split('.').pop()
+    }));
+    const steps = [{ kind:'read', field:listField }];
+    if(/\b(filter|where|only|match)\b/.test(lower) && itemFields.length){
+      steps.push({ kind:'filter', field:itemFields[0], op:'equals', value:'' });
+      steps.push({ kind:'select', mode:'First match' });
+    }
+    steps.push({ kind:'build', rows, repeat:true });
+    steps.push({ kind:'write', target:ex.target });
+    return steps;
+  }
+  const fields = objPool();
+  const field = fields.find(f => lower.includes(f.toLowerCase().split('.').pop())) || fields[0];
+  const steps = [{ kind:'read', field }];
+  if(/\b(upper|lower|trim|mask|join|round)\b/.test(lower)){
+    let op = 'Trim spaces';
+    if(/\bupper/.test(lower)) op = 'Uppercase';
+    else if(/\blower/.test(lower)) op = 'Lowercase';
+    else if(/\bmask/.test(lower)) op = 'Mask characters';
+    else if(/\bjoin/.test(lower)) op = 'Join text';
+    else if(/\bround/.test(lower)) op = 'Round number';
+    const step = { kind:'transform', op, field };
+    if(op === 'Join text' && fields[1]) step.field2 = fields[1];
+    if(op === 'Mask characters') step.param = 4;
+    if(op === 'Round number') step.param = 2;
+    if(op === 'Join text') step.param = ' ';
+    steps.push(step);
+  }
+  steps.push({ kind:'write', target:ex.target });
+  return steps;
 }
 
-async function generateFromIntent(){
+function generateFromIntent(){
   const intent = document.getElementById('aiInput').value.trim();
   const statusEl = document.getElementById('aiStatus');
   const btn = document.getElementById('aiBtn');
   if(!intent){ statusEl.textContent = 'Describe what you want first.'; statusEl.classList.add('error'); return; }
   statusEl.classList.remove('error');
-  statusEl.textContent = 'AI is building the pipeline...';
   btn.disabled = true;
-
-  const system = `You convert a plain-English data mapping request into a JSON array of pipeline steps for a no-code field mapping tool.
-
-Allowed step shapes, in this exact JSON form (kind is always one of: read, filter, select, transform, build, constant, write):
-{"kind":"read","field":"<field from the allowed list>"}
-{"kind":"filter","field":"<item field>","op":"equals|not equals|contains|greater than|less than","value":"<string>"}
-{"kind":"select","mode":"First match|Last match|All matches"}
-{"kind":"transform","op":"Join text|Mask characters|Uppercase|Lowercase|Trim spaces|Round number","field":"<field>","field2":"<field, only include for Join text>","param":<separator string for Join text, number of characters for Mask characters, decimal places for Round number, omit otherwise>}
-{"kind":"build","rows":[{"source":"<item field>","target":"<short target field name>"}],"repeat":true|false}
-{"kind":"constant","target":"<target field path>","value":"<literal string>"}
-{"kind":"write","target":"<target field path>"}
-
-Rules:
-- Only use field names from the allowed list given to you. Never invent a field.
-- For hard-coded values use a single "constant" step (no read). Otherwise steps must start with "read" and end with "write".
-- Use "filter"/"select" only if the request implies narrowing down a list to specific item(s).
-- Use "build" only for list-based targets (it maps item fields into a new shape).
-- Use "transform" for text/number operations like combining, masking, casing, rounding.
-- Output ONLY the raw JSON array. No markdown fences, no prose, no explanation.
-
-${schemaDescription()}
-The target field path to write to is: ${examples[current].target}`;
-
   try{
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        system: system,
-        messages: [{ role: "user", content: intent }]
-      })
-    });
-    const data = await response.json();
-    const text = (data.content || []).map(b=>b.text||'').join('');
-    const clean = text.replace(/```json|```/g,'').trim();
-    const steps = JSON.parse(clean);
+    const steps = localStepsFromIntent(intent);
     if(!Array.isArray(steps) || steps.length === 0) throw new Error('empty');
-
     examples[current].steps = steps;
     examples[current].aiGenerated = true;
-    statusEl.textContent = '';
+    statusEl.textContent = 'Built locally (offline). Adjust steps below if needed.';
     renderCanvas();
   } catch(err){
     statusEl.textContent = "Couldn't build a pipeline from that description. Try rephrasing, or build it manually below.";

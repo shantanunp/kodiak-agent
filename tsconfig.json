@@ -11,6 +11,6 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["src/**/*", "indexer/cli.ts", "translator/**/*", "validator/**/*", "schema/**/*", "ui/serve.ts"],
+  "include": ["src/**/*", "indexer/cli.ts", "translator/**/*", "schema/**/*", "ui/serve.ts"],
   "exclude": ["node_modules", "dist", "ui"]
 }

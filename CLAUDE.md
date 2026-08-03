@@ -14,15 +14,15 @@ deterministic and test-gated. Business users never get direct write access to pr
 
 | Phase | Component | AI allowed? |
 |-------|-----------|-------------|
-| 0 | registry/, validator/golden-dataset/, GitHub MCP read | No |
+| 0 | registry/, GitHub MCP read | No |
 | 1 | indexer/ (JavaParser), cache, scan orchestrator | No |
 | 2 | translator/labeler.ts, ui/pipeline-viewer/ | Labeling only |
-| 3 | patcher/, pr-bot/ | Suggestion + PR creation |
-| 4 | validator/shadow-runner.ts | No |
-| 5 | audit/log-store.ts | Logging only |
+| 3 | Suggestion + PR creation (deferred) | Suggestion + PR creation |
+| 4 | Shadow validation (deferred) | No |
+| 5 | Audit logging (deferred) | Logging only |
 | 6 | Rollout metrics | No |
 
-**Do not add LLM calls to indexer/, scanRepo.ts, or validator/ until Phase 2.**
+**Do not add LLM calls to indexer/ or scanRepo.ts until Phase 2.**
 
 ## Language boundary
 
@@ -42,7 +42,6 @@ npm run latest-sha
 npm run scan -- --mapper example-mapper
 npm run scan:incremental
 npm run poll
-npm run golden:capture
 npm run label -- --mapper example-mapper   # Phase 2: Gemini labels RAW steps only
 ```
 
