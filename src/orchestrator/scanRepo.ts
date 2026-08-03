@@ -137,7 +137,10 @@ async function main(): Promise<void> {
           blobSha: entry.blobSha,
           commitSha: entry.commitSha,
           cached: entry.indexedAt,
-          stepCount: (entry.ast as { steps?: unknown[] })?.steps?.length ?? 0,
+          stepCount:
+            (entry.ast as { operations?: unknown[]; steps?: unknown[] })?.operations?.length ??
+            (entry.ast as { steps?: unknown[] })?.steps?.length ??
+            0,
         },
         null,
         2,

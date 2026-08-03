@@ -46,6 +46,8 @@ npm run label -- --mapper lpa-request-mapper \
 
 Also accepts Java FQNs or bare leaf names (`MISMOReferenceModelIdentifier`). Prefer `MESSAGE.…` paths — they match the transform JSON.
 
+Output uses `mapping`: one element per target field, each with a `pipeline` of ops (`READ`, `TRANSFORM`, `CONSTANT`, …). No `sourceText` / `children`.
+
 After changing indexer Java, rebuild once: `npm run build:indexer`.
 
 Registered mappers (see `registry/mapping-registry.yaml`):

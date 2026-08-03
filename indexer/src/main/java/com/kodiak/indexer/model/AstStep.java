@@ -1,9 +1,7 @@
 package com.kodiak.indexer.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -21,69 +19,78 @@ public class AstStep {
   }
 
   private Kind kind;
-  private String sourceText;
   private String targetField;
   private String sourceField;
   private String condition;
-  private List<AstStep> children = new ArrayList<>();
-  private Map<String, Object> meta = new LinkedHashMap<>();
+  private Map<String, Object> meta;
 
-  public static AstStep raw(String sourceText) {
+  public static AstStep raw(String code) {
     AstStep step = new AstStep();
     step.kind = Kind.RAW;
-    step.sourceText = sourceText;
+    step.meta = new LinkedHashMap<>();
+    step.meta.put("code", code);
     return step;
   }
 
-  public static AstStep write(String targetField, String sourceField, String sourceText) {
+  public static AstStep write(String targetField, String sourceField) {
     AstStep step = new AstStep();
     step.kind = Kind.WRITE;
     step.targetField = targetField;
     step.sourceField = sourceField;
-    step.sourceText = sourceText;
     return step;
   }
 
   /**
-   * Constant assignment: type-relative path + literal value only.
-   *
-   * @param targetField path from outer class ({@code Outer.Inner.field}); package is on pipeline
-   *     {@code targetType}
-   * @param value resolved literal (stored in {@code meta.value})
+   * Direct field mapping: source path → target path.
    */
-  public static AstStep constant(String targetField, String value) {
+  public static AstStep read(String targetField, String sourceField) {
     AstStep step = new AstStep();
-    step.kind = Kind.CONSTANT;
+    step.kind = Kind.READ;
     step.targetField = targetField;
-    step.children = null;
+    step.sourceField = sourceField;
+    return step;
+  }
+
+  /**
+   * Numeric/text transform with an editable constant (e.g. multiply by 12).
+   */
+  public static AstStep transform(String op, String value, String targetField) {
+    AstStep step = new AstStep();
+    step.kind = Kind.TRANSFORM;
+    step.targetField = targetField;
+    step.meta = new LinkedHashMap<>();
+    step.meta.put("op", op);
     step.meta.put("value", value);
     return step;
   }
 
-  public static AstStep filter(String condition, List<AstStep> children, String sourceText) {
+  public static AstStep constant(String targetField, String value) {
     AstStep step = new AstStep();
-    step.kind = Kind.FILTER;
-    step.condition = condition;
-    step.children = children;
-    step.sourceText = sourceText;
+    step.kind = Kind.CONSTANT;
+    step.targetField = targetField;
+    step.meta = new LinkedHashMap<>();
+    step.meta.put("value", value);
     return step;
   }
 
-  public static AstStep build(String targetField, String sourceField, String sourceText) {
+  /** Flat filter marker — following operations are in the then-branch (no children). */
+  public static AstStep filter(String condition) {
+    AstStep step = new AstStep();
+    step.kind = Kind.FILTER;
+    step.condition = condition;
+    return step;
+  }
+
+  public static AstStep build(String targetField, String sourceField) {
     AstStep step = new AstStep();
     step.kind = Kind.BUILD;
     step.targetField = targetField;
     step.sourceField = sourceField;
-    step.sourceText = sourceText;
     return step;
   }
 
   public Kind getKind() {
     return kind;
-  }
-
-  public String getSourceText() {
-    return sourceText;
   }
 
   public String getTargetField() {
@@ -96,10 +103,6 @@ public class AstStep {
 
   public String getCondition() {
     return condition;
-  }
-
-  public List<AstStep> getChildren() {
-    return children;
   }
 
   public Map<String, Object> getMeta() {

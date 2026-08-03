@@ -4,9 +4,20 @@
  */
 
 import type { PipelineJson, PipelineStep } from "./labeler.js";
+import { operationsOf } from "./labeler.js";
 import { loadSchema } from "../schema/io.js";
 import { flattenPaths } from "../schema/flatten.js";
 import type { SchemaNode } from "../schema/types.js";
+
+/** Flatten grouped mapping back to ops with targetField for the view adapter. */
+function flattenPipeline(pipeline: PipelineJson): PipelineStep[] {
+  if (pipeline.mapping?.length) {
+    return pipeline.mapping.flatMap((m) =>
+      m.pipeline.map((op) => ({ ...op, targetField: m.targetField })),
+    );
+  }
+  return operationsOf(pipeline) as PipelineStep[];
+}
 
 export type ViewStepKind =
   | "read"
@@ -229,17 +240,6 @@ function convertStep(
 ): ViewStep[] {
   const kind = (step.kind ?? "raw").toLowerCase();
 
-  if (kind === "raw") {
-    return [
-      {
-        kind: "raw",
-        sourceText: step.sourceText,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason ?? "Unclassified Java — needs review",
-      },
-    ];
-  }
-
   if (kind === "write" && step.targetField === "<return>") {
     return [];
   }
@@ -251,7 +251,6 @@ function convertStep(
         kind: "constant",
         target,
         value: constantValue(step),
-        sourceText: step.sourceText,
         labelSource: step.labelSource,
         labelReason: step.labelReason,
       },
@@ -259,18 +258,39 @@ function convertStep(
   }
 
   if (kind === "filter") {
-    const children =
-      step.children?.flatMap((c) =>
-        convertStep(c as PipelineStep, sourceSimple, targetSimple, schemaTargetFields),
-      ) ?? [];
     return [
       {
         kind: "filter",
         op: "matches",
-        value: step.condition ?? step.sourceText,
-        sourceText: step.sourceText,
+        value: step.condition,
         labelSource: step.labelSource,
-        children,
+        labelReason: step.labelReason,
+      },
+    ];
+  }
+
+  if (kind === "transform") {
+    const opRaw = typeof step.meta?.op === "string" ? step.meta.op : "transform";
+    const opLabel =
+      opRaw === "multiply"
+        ? "Multiply"
+        : opRaw === "add"
+          ? "Add"
+          : opRaw === "subtract"
+            ? "Subtract"
+            : opRaw === "divide"
+              ? "Divide"
+              : opRaw;
+    const param = step.meta?.value;
+    return [
+      {
+        kind: "transform",
+        op: opLabel,
+        param: param != null ? (Number.isNaN(Number(param)) ? String(param) : Number(param)) : undefined,
+        target: formatWriteTarget(step.targetField, targetSimple, schemaTargetFields),
+        field: step.sourceField,
+        labelSource: step.labelSource,
+        labelReason: step.labelReason,
       },
     ];
   }
@@ -283,7 +303,6 @@ function convertStep(
           ? [{ source: step.sourceField ?? "", target: step.targetField }]
           : [],
         repeat: false,
-        sourceText: step.sourceText,
         labelSource: step.labelSource,
         labelReason: step.labelReason,
       },
@@ -298,9 +317,24 @@ function convertStep(
     return [
       {
         kind: "read",
-        field: prefixField(sourceSimple, step.sourceField ?? step.targetField ?? ""),
-        sourceText: step.sourceText,
+        field: step.sourceField ?? prefixField(sourceSimple, step.targetField ?? ""),
+        target: step.targetField
+          ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
+          : undefined,
         labelSource: step.labelSource,
+        labelReason: step.labelReason,
+      },
+    ];
+  }
+
+  if (kind === "raw") {
+    const code = typeof step.meta?.code === "string" ? step.meta.code : step.sourceText;
+    return [
+      {
+        kind: "raw",
+        sourceText: code,
+        labelSource: step.labelSource,
+        labelReason: step.labelReason ?? "Unclassified Java — needs review",
       },
     ];
   }
@@ -308,7 +342,6 @@ function convertStep(
   return [
     {
       kind: kind as ViewStepKind,
-      sourceText: step.sourceText,
       target: step.targetField
         ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
         : undefined,
@@ -355,7 +388,7 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const targetPathHints =
     schemaTargetFields.length > 0 ? schemaTargetFields : hints?.targetFields ?? [];
 
-  const steps = pipeline.steps.flatMap((s) =>
+  const steps = flattenPipeline(pipeline).flatMap((s) =>
     convertStep(s, sourceSimple, targetSimple, targetPathHints),
   );
 

@@ -59,11 +59,14 @@ export function filterStepsByFields<T extends FieldFilterableStep>(
       typeof step.targetField === "string" &&
       matchesTargetField(step.targetField, selectors);
 
-    if (selfMatch || (childFiltered && childFiltered.length > 0)) {
+    if (selfMatch) {
       out.push({
         ...step,
         ...(childFiltered ? { children: childFiltered } : {}),
       });
+    } else if (childFiltered && childFiltered.length > 0) {
+      // Prefer matching leaf steps over wrapper FILTER/BUILD parents
+      out.push(...childFiltered);
     }
   }
   return out;
@@ -83,4 +86,16 @@ export function parseFieldSelectors(options: {
     ? options.fields.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
   return [...fromRepeat, ...fromList];
+}
+
+/** Filter grouped mapping entries by targetField. */
+export function filterMappingByFields<T extends { targetField?: string }>(
+  mapping: T[],
+  fields: string[],
+): T[] {
+  const selectors = fields.map((f) => f.trim()).filter(Boolean);
+  if (selectors.length === 0) return mapping;
+  return mapping.filter(
+    (m) => typeof m.targetField === "string" && matchesTargetField(m.targetField, selectors),
+  );
 }

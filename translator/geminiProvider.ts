@@ -17,7 +17,8 @@ export interface LabelResponse {
 
 const SYSTEM_PROMPT = `You label already-parsed Java mapping AST steps. You do NOT parse code from scratch.
 
-Allowed step kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
+Allowed operation kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
+Pipeline uses a flat "operations" list (no children, no sourceText).
 
 Rules:
 - Only relabel when you are confident the construct matches a known kind.

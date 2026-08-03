@@ -13,7 +13,7 @@ public class IndexResult {
   private String sourceType;
   private String targetType;
   private String sourceFile;
-  private List<AstStep> steps = new ArrayList<>();
+  private List<AstStep> operations = new ArrayList<>();
 
   public String getMapperId() {
     return mapperId;
@@ -63,11 +63,11 @@ public class IndexResult {
     this.sourceFile = sourceFile;
   }
 
-  public List<AstStep> getSteps() {
-    return steps;
+  public List<AstStep> getOperations() {
+    return operations;
   }
 
-  public void setSteps(List<AstStep> steps) {
-    this.steps = steps;
+  public void setOperations(List<AstStep> operations) {
+    this.operations = operations;
   }
 }

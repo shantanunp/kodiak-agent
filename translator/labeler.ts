@@ -1,5 +1,5 @@
 /**
- * Phase 2 — AST step labeler (Gemini Studio).
+ * Phase 2 — AST operation labeler (Gemini Studio).
  *
  * Labels only already-parsed constructs from the JavaParser indexer.
  * Never free-form parses Java source.
@@ -9,22 +9,30 @@ import { GeminiLabelProvider, type LabelResponse } from "./geminiProvider.js";
 import { loadGeminiConfig } from "./config.js";
 import { getLabelCache, setLabelCache } from "./cache/index.js";
 import { schemaContextForLabeler } from "../schema/io.js";
+import { groupOperationsByTarget } from "./groupMapping.js";
 
 export interface AstStep {
   kind: string;
-  sourceText?: string;
   targetField?: string;
   sourceField?: string;
   condition?: string;
-  children?: AstStep[];
   meta?: Record<string, unknown>;
+  /** @deprecated use meta.code — kept for old cache entries */
+  sourceText?: string;
+  children?: AstStep[];
 }
 
 export interface IndexAst {
   mapperId?: string;
   className?: string;
   entryMethod?: string;
-  steps: AstStep[];
+  sourceType?: string;
+  targetType?: string;
+  sourceFile?: string;
+  /** Preferred flat pipeline list */
+  operations?: AstStep[];
+  /** @deprecated use operations */
+  steps?: AstStep[];
 }
 
 export interface PipelineStep extends AstStep {
@@ -32,10 +40,22 @@ export interface PipelineStep extends AstStep {
   labelReason?: string;
 }
 
-export interface PipelineJson extends Omit<IndexAst, "steps"> {
-  steps: PipelineStep[];
+export interface FieldMappingJson {
+  targetField: string;
+  pipeline: PipelineStep[];
+}
+
+export interface PipelineJson extends Omit<IndexAst, "steps" | "operations"> {
+  /** @deprecated flat list — prefer mapping */
+  operations?: PipelineStep[];
+  /** One entry per target field; pipeline holds READ/TRANSFORM/CONSTANT/… */
+  mapping: FieldMappingJson[];
   labeledAt?: string;
   labelModel?: string;
+}
+
+export function operationsOf(ast: IndexAst | PipelineJson): AstStep[] {
+  return ast.operations ?? ast.steps ?? [];
 }
 
 export class StepLabeler {
@@ -50,48 +70,64 @@ export class StepLabeler {
 
   async labelIndex(ast: IndexAst): Promise<PipelineJson> {
     const schemaContext = ast.mapperId ? schemaContextForLabeler(ast.mapperId) : undefined;
-    const steps: PipelineStep[] = [];
-    for (const step of ast.steps) {
-      steps.push(await this.labelStepTree(step, schemaContext));
+    const operations: PipelineStep[] = [];
+    for (const step of operationsOf(ast)) {
+      operations.push(await this.labelOperation(step, schemaContext));
     }
+    const { steps: _legacy, operations: _ops, ...rest } = ast;
     return {
-      ...ast,
-      steps,
+      ...rest,
+      mapping: groupOperationsByTarget(operations),
       labeledAt: new Date().toISOString(),
       labelModel: this.model,
     };
   }
 
-  private async labelStepTree(step: AstStep, schemaContext?: string): Promise<PipelineStep> {
-    const labeled: PipelineStep = { ...step, labelSource: "deterministic" };
+  private async labelOperation(step: AstStep, schemaContext?: string): Promise<PipelineStep> {
+    const labeled: PipelineStep = {
+      kind: step.kind,
+      targetField: step.targetField,
+      sourceField: step.sourceField,
+      condition: step.condition,
+      meta: step.meta,
+      labelSource: "deterministic",
+    };
 
-    if (step.children?.length) {
-      labeled.children = [];
-      for (const child of step.children) {
-        labeled.children.push(await this.labelStepTree(child, schemaContext));
-      }
-    }
+    const kind = (step.kind ?? "").toUpperCase();
 
-    if (step.kind !== "RAW" && step.kind !== "raw") {
-      if (step.kind === "CONSTANT" || step.kind === "constant") {
-        labeled.sourceField = undefined;
-        labeled.sourceText = undefined;
-        if (!labeled.labelReason) {
-          const value =
-            typeof step.meta?.value === "string" || typeof step.meta?.value === "number"
-              ? String(step.meta.value)
-              : undefined;
-          labeled.labelReason =
-            value != null ? `Constant value: ${value}` : "Constant value";
-        }
-      }
+    if (kind === "CONSTANT") {
+      const value =
+        typeof step.meta?.value === "string" || typeof step.meta?.value === "number"
+          ? String(step.meta.value)
+          : undefined;
+      labeled.labelReason = value != null ? `Constant value: ${value}` : "Constant value";
       return labeled;
     }
 
-    const sourceText = step.sourceText ?? "";
+    if (kind === "READ") {
+      labeled.labelReason = "Direct field mapping";
+      return labeled;
+    }
+
+    if (kind === "TRANSFORM") {
+      const op = typeof step.meta?.op === "string" ? step.meta.op : "transform";
+      const value = step.meta?.value != null ? String(step.meta.value) : undefined;
+      labeled.labelReason =
+        value != null ? `${op} by ${value}` : op;
+      return labeled;
+    }
+
+    if (kind !== "RAW") {
+      return labeled;
+    }
+
+    const sourceText =
+      (typeof step.meta?.code === "string" ? step.meta.code : undefined) ??
+      step.sourceText ??
+      "";
     const cached = getLabelCache(sourceText, this.model);
     const response: LabelResponse =
-      cached?.response as LabelResponse ??
+      (cached?.response as LabelResponse) ??
       (await this.provider.labelStep({
         sourceText,
         currentKind: step.kind,
@@ -107,12 +143,11 @@ export class StepLabeler {
       });
     }
 
-      if (response.recognized && response.kind) {
+    if (response.recognized && response.kind) {
       labeled.kind = response.kind.toUpperCase();
       if (response.targetField) labeled.targetField = response.targetField;
       if (response.kind.toLowerCase() === "constant") {
         labeled.sourceField = undefined;
-        labeled.sourceText = undefined;
         if (response.value != null) {
           labeled.meta = { ...(labeled.meta ?? {}), value: response.value };
         }
@@ -121,6 +156,11 @@ export class StepLabeler {
       }
       labeled.labelSource = "gemini";
       labeled.labelReason = response.reason;
+      labeled.meta = labeled.meta?.code ? { ...labeled.meta } : labeled.meta;
+      if (labeled.meta && "code" in labeled.meta) {
+        const { code: _c, ...rest } = labeled.meta;
+        labeled.meta = Object.keys(rest).length ? rest : undefined;
+      }
     } else {
       labeled.labelSource = "deterministic";
       labeled.labelReason = response.reason ?? "left as raw";

@@ -1,11 +1,10 @@
 #!/usr/bin/env tsx
 /**
  * ast / index-mappings — deterministic JavaParser AST (no AI).
+ * Emits grouped `mapping` (one entry per target field).
  *
- * Usage:
  *   npm run ast -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
- *   npm run ast -- --mapper lpa-request-mapper --worktree … \
- *     --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
+ *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
  */
 
 import { parseArgs } from "node:util";
@@ -18,7 +17,8 @@ import {
   runIndexer,
   writeRuntimeRegistry,
 } from "../src/indexer/runIndexer.js";
-import { filterStepsByFields, parseFieldSelectors } from "../translator/filterByFields.js";
+import { filterMappingByFields, parseFieldSelectors } from "../translator/filterByFields.js";
+import { groupOperationsByTarget } from "../translator/groupMapping.js";
 
 const { values } = parseArgs({
   options: {
@@ -61,11 +61,18 @@ const selectors = parseFieldSelectors({
 
 for (const mapper of mappers) {
   const result = runIndexer(mapper, worktree, runtimeRegistry) as {
-    steps: Array<Record<string, unknown>>;
+    operations?: Array<Record<string, unknown>>;
+    steps?: Array<Record<string, unknown>>;
+    mapping?: unknown;
     [key: string]: unknown;
   };
+  const ops = result.operations ?? result.steps ?? [];
+  let mapping = groupOperationsByTarget(ops);
   if (selectors.length > 0) {
-    result.steps = filterStepsByFields(result.steps, selectors);
+    mapping = filterMappingByFields(mapping, selectors);
   }
+  delete result.steps;
+  delete result.operations;
+  result.mapping = mapping;
   console.log(JSON.stringify(result, null, 2));
 }

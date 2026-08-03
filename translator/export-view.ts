@@ -13,8 +13,9 @@ import { join } from "node:path";
 import { paths } from "../src/config/env.js";
 import { toPipelineView } from "./toPipelineView.js";
 import type { PipelineJson } from "./labeler.js";
+import { operationsOf, StepLabeler } from "./labeler.js";
+import { groupOperationsByTarget } from "./groupMapping.js";
 import { resolveAstForMapper } from "./resolvePipeline.js";
-import { StepLabeler } from "./labeler.js";
 import { isGeminiConfigured } from "./config.js";
 
 const { values } = parseArgs({
@@ -42,7 +43,15 @@ async function main(): Promise<void> {
     pipeline = await new StepLabeler().labelIndex(ast);
   } else {
     const ast = await resolveAstForMapper(values.mapper, values.registry);
-    pipeline = { ...ast, steps: ast.steps.map((s) => ({ ...s, labelSource: "deterministic" as const })) };
+    pipeline = {
+      ...ast,
+      mapping: groupOperationsByTarget(
+        operationsOf(ast).map((s) => ({
+          ...s,
+          labelSource: "deterministic" as const,
+        })),
+      ),
+    };
   }
 
   const view = toPipelineView(pipeline);

@@ -8,6 +8,7 @@ import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
@@ -33,8 +34,10 @@ import java.util.Set;
 /**
  * Deterministic JavaParser walk of a mapper entry method into AST steps.
  * Unrecognized shapes become RAW — never guessed.
- * Same-class private helpers are inlined; literals/static finals become CONSTANT
- * with Java-FQN target/source fields.
+ *
+ * <p>Tracks containment paths so nested targets look like {@code Outer.Mid.Leaf.field}. Direct
+ * getter→setter mappings become READ with path source/target (no sourceText). Literals/static
+ * finals become CONSTANT.
  */
 public class MapperIndexer {
 
@@ -76,23 +79,29 @@ public class MapperIndexer {
     visited.add(entry.getEntryMethod());
 
     Map<String, String> locals = new HashMap<>();
-    bindParameters(entryMethod, locals);
+    Map<String, String> varPaths = new HashMap<>();
+    bindParameters(entryMethod, locals, varPaths);
 
     result
-        .getSteps()
+        .getOperations()
         .addAll(
             indexBlock(
                 classDecl,
                 entryMethod.getBody().orElse(new BlockStmt()),
                 visited,
                 locals,
+                varPaths,
+                null,
                 false));
     return result;
   }
 
-  private void bindParameters(MethodDeclaration method, Map<String, String> locals) {
+  private void bindParameters(
+      MethodDeclaration method, Map<String, String> locals, Map<String, String> varPaths) {
     for (Parameter param : method.getParameters()) {
-      locals.put(param.getNameAsString(), resolveTypeFqcn(param.getType().asString()));
+      String typeFqcn = resolveTypeFqcn(param.getType().asString());
+      locals.put(param.getNameAsString(), typeFqcn);
+      varPaths.put(param.getNameAsString(), typePathFromSimpleClass(typeFqcn));
     }
   }
 
@@ -101,10 +110,13 @@ public class MapperIndexer {
       BlockStmt block,
       Set<String> visited,
       Map<String, String> locals,
+      Map<String, String> varPaths,
+      String nestRoot,
       boolean inlining) {
     List<AstStep> steps = new ArrayList<>();
     for (Statement stmt : block.getStatements()) {
-      steps.addAll(classify(classDecl, stmt, visited, locals, inlining));
+      steps.addAll(
+          classify(classDecl, stmt, visited, locals, varPaths, nestRoot, inlining));
     }
     return steps;
   }
@@ -114,11 +126,14 @@ public class MapperIndexer {
       Statement stmt,
       Set<String> visited,
       Map<String, String> locals,
+      Map<String, String> varPaths,
+      String nestRoot,
       boolean inlining) {
     if (stmt.isBlockStmt()) {
-      return indexBlock(classDecl, stmt.asBlockStmt(), visited, locals, inlining);
+      return indexBlock(
+          classDecl, stmt.asBlockStmt(), visited, locals, varPaths, nestRoot, inlining);
     }
-    return classify(classDecl, stmt, visited, locals, inlining);
+    return classify(classDecl, stmt, visited, locals, varPaths, nestRoot, inlining);
   }
 
   private List<AstStep> classify(
@@ -126,6 +141,8 @@ public class MapperIndexer {
       Statement stmt,
       Set<String> visited,
       Map<String, String> locals,
+      Map<String, String> varPaths,
+      String nestRoot,
       boolean inlining) {
     if (stmt.isReturnStmt()) {
       if (inlining) {
@@ -133,22 +150,32 @@ public class MapperIndexer {
       }
       ReturnStmt ret = stmt.asReturnStmt();
       return ret.getExpression()
-          .map(expr -> List.of(AstStep.write("<return>", expr.toString(), stmt.toString())))
+          .map(expr -> List.of(AstStep.write("<return>", expr.toString())))
           .orElse(List.of(AstStep.raw(stmt.toString())));
     }
 
     if (stmt.isIfStmt()) {
       IfStmt ifStmt = stmt.asIfStmt();
       Map<String, String> branchLocals = new HashMap<>(locals);
-      List<AstStep> thenSteps =
+      Map<String, String> branchPaths = new HashMap<>(varPaths);
+      List<AstStep> thenOps =
           indexStatement(
               classDecl,
               ifStmt.getThenStmt(),
               new HashSet<>(visited),
               branchLocals,
+              branchPaths,
+              nestRoot,
               inlining);
-      return List.of(
-          AstStep.filter(ifStmt.getCondition().toString(), thenSteps, stmt.toString()));
+      // Null guards (x != null / x == null) are implicit — flatten, do not emit FILTER
+      if (isNullGuard(ifStmt.getCondition())) {
+        return thenOps;
+      }
+      // Flat pipeline: FILTER marker then then-branch ops (no children)
+      List<AstStep> flat = new ArrayList<>();
+      flat.add(AstStep.filter(ifStmt.getCondition().toString()));
+      flat.addAll(thenOps);
+      return flat;
     }
 
     if (stmt.isExpressionStmt()) {
@@ -162,12 +189,14 @@ public class MapperIndexer {
       if (expr.isMethodCallExpr()) {
         MethodCallExpr call = expr.asMethodCallExpr();
         Optional<List<AstStep>> inlined =
-            tryInlineHelper(classDecl, call, visited, locals, stmt.toString());
+            tryInlineHelper(
+                classDecl, call, visited, locals, varPaths, null, stmt.toString());
         if (inlined.isPresent()) {
           return inlined.get();
         }
         if (call.getNameAsString().startsWith("set") && call.getArguments().size() == 1) {
-          return classifySetter(classDecl, call, visited, locals, stmt.toString());
+          return classifySetter(
+              classDecl, call, visited, locals, varPaths, stmt.toString());
         }
       }
 
@@ -175,26 +204,33 @@ public class MapperIndexer {
         VariableDeclarationExpr varDecl = expr.asVariableDeclarationExpr();
         List<AstStep> steps = new ArrayList<>();
         for (VariableDeclarator var : varDecl.getVariables()) {
-          recordLocalType(var, locals);
           if (var.getInitializer().isEmpty()) {
+            recordLocal(var, null, locals, varPaths, nestRoot);
             continue;
           }
           Expression init = var.getInitializer().get();
-          String buildTarget = buildTargetPath(var.getNameAsString(), locals);
+          recordLocal(var, init, locals, varPaths, nestRoot);
+          String buildTarget = varPaths.getOrDefault(var.getNameAsString(), var.getNameAsString());
+
           if (init.isMethodCallExpr()) {
             MethodCallExpr initCall = init.asMethodCallExpr();
             Optional<List<AstStep>> inlined =
-                tryInlineHelper(classDecl, initCall, visited, locals, stmt.toString());
+                tryInlineHelper(
+                    classDecl, initCall, visited, locals, varPaths, null, stmt.toString());
             if (inlined.isPresent()) {
               steps.addAll(inlined.get());
               continue;
             }
-            steps.add(AstStep.build(buildTarget, init.toString(), stmt.toString()));
+            // Getter/init into a local — not a target BUILD object
+            if (resolveSourceFieldPath(init, locals, varPaths) != null) {
+              continue;
+            }
+            steps.add(AstStep.build(buildTarget, init.toString()));
             continue;
           }
           if (init.isObjectCreationExpr()) {
             ObjectCreationExpr created = init.asObjectCreationExpr();
-            steps.add(AstStep.build(buildTarget, created.toString(), stmt.toString()));
+            steps.add(AstStep.build(buildTarget, created.toString()));
             continue;
           }
           steps.add(AstStep.raw(stmt.toString()));
@@ -202,65 +238,250 @@ public class MapperIndexer {
         if (!steps.isEmpty()) {
           return steps;
         }
+        return List.of();
       }
     }
 
     return List.of(AstStep.raw(stmt.toString()));
   }
 
-  private void recordLocalType(VariableDeclarator var, Map<String, String> locals) {
+  private void recordLocal(
+      VariableDeclarator var,
+      Expression init,
+      Map<String, String> locals,
+      Map<String, String> varPaths,
+      String nestRoot) {
     String typeName = var.getType().asString();
-    if (var.getInitializer().isPresent() && var.getInitializer().get().isObjectCreationExpr()) {
-      typeName = var.getInitializer().get().asObjectCreationExpr().getType().asString();
+    if (init != null && init.isObjectCreationExpr()) {
+      typeName = init.asObjectCreationExpr().getType().asString();
     }
-    locals.put(var.getNameAsString(), resolveTypeFqcn(typeName));
+    String typeFqcn = resolveTypeFqcn(typeName);
+    locals.put(var.getNameAsString(), typeFqcn);
+
+    String typePath = typePathFromSimpleClass(typeFqcn);
+    String simple = simpleName(typePath);
+
+    if (init != null) {
+      String sourcePath = resolveSourceFieldPath(init, locals, varPaths);
+      if (sourcePath != null) {
+        varPaths.put(var.getNameAsString(), sourcePath);
+        return;
+      }
+    }
+
+    if (nestRoot != null && (nestRoot.equals(simple) || nestRoot.endsWith("." + simple))) {
+      varPaths.put(var.getNameAsString(), nestRoot);
+      return;
+    }
+
+    varPaths.put(var.getNameAsString(), typePath);
   }
 
-  /** setFoo(arg) → CONSTANT when arg is literal/static final; else WRITE. Helpers flatten in. */
+  /**
+   * setFoo(arg) → CONSTANT / READ (path mapping) / WRITE. Helpers flatten in with nest path.
+   */
   private List<AstStep> classifySetter(
       ClassOrInterfaceDeclaration classDecl,
       MethodCallExpr call,
       Set<String> visited,
       Map<String, String> locals,
+      Map<String, String> varPaths,
       String sourceText) {
-    String leafField = setterFieldName(call.getNameAsString());
+    String leafField = accessorFieldName(call.getNameAsString(), "set");
     Expression arg = call.getArgument(0);
 
     if (arg.isMethodCallExpr()) {
       MethodCallExpr argCall = arg.asMethodCallExpr();
+      String nestRoot = nestRootForSetterArg(call, argCall, classDecl, locals, varPaths);
       Optional<List<AstStep>> inlined =
-          tryInlineHelper(classDecl, argCall, visited, locals, sourceText);
+          tryInlineHelper(
+              classDecl, argCall, visited, locals, varPaths, nestRoot, sourceText);
       if (inlined.isPresent()) {
         return inlined.get();
       }
     }
 
-    String targetPath = qualifyTargetField(call, locals, leafField);
+    String targetPath = qualifyTargetField(call, locals, varPaths, leafField);
     String constantValue = resolveConstantValue(classDecl, arg);
     if (constantValue != null) {
       return List.of(AstStep.constant(targetPath, constantValue));
     }
 
-    return List.of(AstStep.write(targetPath, arg.toString(), sourceText));
+    List<AstStep> arithmetic = classifyArithmeticSetter(arg, targetPath, locals, varPaths);
+    if (arithmetic != null) {
+      return arithmetic;
+    }
+
+    String sourcePath = resolveSourceFieldPath(arg, locals, varPaths);
+    if (sourcePath != null) {
+      return List.of(AstStep.read(targetPath, sourcePath));
+    }
+
+    return List.of(AstStep.write(targetPath, arg.toString()));
   }
 
-  /** BUILD target: type-relative path when known, else local var name. */
-  private String buildTargetPath(String varName, Map<String, String> locals) {
-    String typeFqcn = locals.get(varName);
-    if (typeFqcn != null && !typeFqcn.isBlank()) {
-      return typePathFromSimpleClass(typeFqcn);
+  /**
+   * {@code setX(fieldExpr * 12)} → READ source path + TRANSFORM multiply (editable constant).
+   * Same for + - /. Generic — any mapper.
+   */
+  private List<AstStep> classifyArithmeticSetter(
+      Expression arg,
+      String targetPath,
+      Map<String, String> locals,
+      Map<String, String> varPaths) {
+    if (!arg.isBinaryExpr()) {
+      return null;
     }
-    return varName;
+    BinaryExpr bin = arg.asBinaryExpr();
+    String op = arithmeticOp(bin.getOperator());
+    if (op == null) {
+      return null;
+    }
+    Expression left = bin.getLeft();
+    Expression right = bin.getRight();
+    String literal = literalToString(right);
+    Expression fieldExpr = left;
+    if (literal == null) {
+      literal = literalToString(left);
+      fieldExpr = right;
+    }
+    if (literal == null) {
+      return null;
+    }
+    String sourcePath = resolveSourceFieldPath(fieldExpr, locals, varPaths);
+    if (sourcePath == null) {
+      return null;
+    }
+    return List.of(
+        AstStep.read(targetPath, sourcePath), AstStep.transform(op, literal, targetPath));
+  }
+
+  private String arithmeticOp(BinaryExpr.Operator operator) {
+    return switch (operator) {
+      case MULTIPLY -> "multiply";
+      case PLUS -> "add";
+      case MINUS -> "subtract";
+      case DIVIDE -> "divide";
+      default -> null;
+    };
+  }
+
+  private String literalToString(Expression expr) {
+    if (expr.isIntegerLiteralExpr()) {
+      return expr.asIntegerLiteralExpr().getValue();
+    }
+    if (expr.isLongLiteralExpr()) {
+      return expr.asLongLiteralExpr().getValue();
+    }
+    if (expr.isDoubleLiteralExpr()) {
+      return expr.asDoubleLiteralExpr().getValue();
+    }
+    if (expr.isStringLiteralExpr()) {
+      return expr.asStringLiteralExpr().asString();
+    }
+    return null;
+  }
+
+  /** When setChild(buildChild()), nest root = receiverPath.ChildType. */
+  private String nestRootForSetterArg(
+      MethodCallExpr setterCall,
+      MethodCallExpr argCall,
+      ClassOrInterfaceDeclaration classDecl,
+      Map<String, String> locals,
+      Map<String, String> varPaths) {
+    if (!isSameClassHelperCall(classDecl, argCall)) {
+      return null;
+    }
+    String receiverPath = receiverPath(setterCall, locals, varPaths);
+    if (receiverPath == null) {
+      return null;
+    }
+    MethodDeclaration helper =
+        classDecl.getMethodsByName(argCall.getNameAsString()).stream().findFirst().orElse(null);
+    if (helper == null) {
+      return null;
+    }
+    String returnType = resolveTypeFqcn(helper.getType().asString());
+    String childSimple = simpleName(typePathFromSimpleClass(returnType));
+    if (childSimple == null || childSimple.isBlank() || childSimple.equals("void")) {
+      return null;
+    }
+    return receiverPath + "." + childSimple;
   }
 
   private String qualifyTargetField(
-      MethodCallExpr call, Map<String, String> locals, String leafField) {
-    String receiverType = resolveReceiverType(call, locals);
-    if (receiverType != null && !receiverType.isBlank()) {
-      // Package is already on pipeline targetType/sourceType — keep from OuterClass onward
-      return typePathFromSimpleClass(receiverType) + "." + leafField;
+      MethodCallExpr call,
+      Map<String, String> locals,
+      Map<String, String> varPaths,
+      String leafField) {
+    String path = receiverPath(call, locals, varPaths);
+    if (path != null && !path.isBlank()) {
+      return path + "." + leafField;
     }
     return leafField;
+  }
+
+  private String receiverPath(
+      MethodCallExpr call, Map<String, String> locals, Map<String, String> varPaths) {
+    if (call.getScope().isEmpty()) {
+      return null;
+    }
+    Expression scope = call.getScope().get();
+    if (!scope.isNameExpr()) {
+      return null;
+    }
+    String name = scope.asNameExpr().getNameAsString();
+    if (varPaths.containsKey(name)) {
+      return varPaths.get(name);
+    }
+    String type = locals.get(name);
+    if (type != null) {
+      return typePathFromSimpleClass(type);
+    }
+    return null;
+  }
+
+  /**
+   * Resolve {@code input.getRefNumber()} / chained getters to {@code
+   * LoanApplicationRequest.refNumber}.
+   */
+  private String resolveSourceFieldPath(
+      Expression expr, Map<String, String> locals, Map<String, String> varPaths) {
+    if (!expr.isMethodCallExpr()) {
+      return null;
+    }
+    MethodCallExpr call = expr.asMethodCallExpr();
+    if (!call.getArguments().isEmpty()) {
+      return null;
+    }
+    String accessor = call.getNameAsString();
+    String field = accessorFieldName(accessor, null);
+    if (field == null) {
+      return null;
+    }
+    if (call.getScope().isEmpty()) {
+      return null;
+    }
+    Expression scope = call.getScope().get();
+    if (scope.isNameExpr()) {
+      String var = scope.asNameExpr().getNameAsString();
+      String base = varPaths.get(var);
+      if (base == null && locals.containsKey(var)) {
+        base = typePathFromSimpleClass(locals.get(var));
+      }
+      if (base == null) {
+        return null;
+      }
+      return base + "." + field;
+    }
+    if (scope.isMethodCallExpr()) {
+      String parent = resolveSourceFieldPath(scope, locals, varPaths);
+      if (parent == null) {
+        return null;
+      }
+      return parent + "." + field;
+    }
+    return null;
   }
 
   /**
@@ -283,22 +504,13 @@ public class MapperIndexer {
     return fqcn;
   }
 
-  private String resolveReceiverType(MethodCallExpr call, Map<String, String> locals) {
-    if (call.getScope().isEmpty()) {
-      return null;
-    }
-    Expression scope = call.getScope().get();
-    if (scope.isNameExpr()) {
-      return locals.get(scope.asNameExpr().getNameAsString());
-    }
-    return null;
-  }
-
   private Optional<List<AstStep>> tryInlineHelper(
       ClassOrInterfaceDeclaration classDecl,
       MethodCallExpr call,
       Set<String> visited,
       Map<String, String> parentLocals,
+      Map<String, String> parentPaths,
+      String nestRoot,
       String sourceText) {
     if (!isSameClassHelperCall(classDecl, call)) {
       return Optional.empty();
@@ -316,31 +528,66 @@ public class MapperIndexer {
     nextVisited.add(name);
 
     Map<String, String> helperLocals = new HashMap<>();
+    Map<String, String> helperPaths = new HashMap<>();
     List<Parameter> params = helper.getParameters();
     for (int i = 0; i < params.size(); i++) {
       Parameter param = params.get(i);
       String typeFqcn = resolveTypeFqcn(param.getType().asString());
-      if (i < call.getArguments().size() && call.getArgument(i).isNameExpr()) {
-        String argName = call.getArgument(i).asNameExpr().getNameAsString();
-        if (parentLocals.containsKey(argName)) {
-          typeFqcn = parentLocals.get(argName);
+      String path = typePathFromSimpleClass(typeFqcn);
+      if (i < call.getArguments().size()) {
+        Expression argExpr = call.getArgument(i);
+        if (argExpr.isNameExpr()) {
+          String argName = argExpr.asNameExpr().getNameAsString();
+          if (parentLocals.containsKey(argName)) {
+            typeFqcn = parentLocals.get(argName);
+          }
+          if (parentPaths.containsKey(argName)) {
+            path = parentPaths.get(argName);
+          } else {
+            path = typePathFromSimpleClass(typeFqcn);
+          }
+        } else {
+          String fromGetter = resolveSourceFieldPath(argExpr, parentLocals, parentPaths);
+          if (fromGetter != null) {
+            path = fromGetter;
+          }
         }
       }
       helperLocals.put(param.getNameAsString(), typeFqcn);
+      helperPaths.put(param.getNameAsString(), path);
     }
 
     List<AstStep> inlined =
-        indexBlock(classDecl, helper.getBody().get(), nextVisited, helperLocals, true);
+        indexBlock(
+            classDecl,
+            helper.getBody().get(),
+            nextVisited,
+            helperLocals,
+            helperPaths,
+            nestRoot,
+            true);
     if (inlined.isEmpty()) {
-      return Optional.of(List.of(AstStep.build(name, call.toString(), sourceText)));
+      return Optional.of(List.of(AstStep.build(name, call.toString())));
     }
     return Optional.of(inlined);
   }
 
   /**
-   * Same-class helper: unqualified call (or this.foo) whose name matches a method on this class.
-   * Excludes setters handled separately.
+   * True for simple null checks: {@code x != null}, {@code x == null}, {@code
+   * expr.getFoo() != null}. These are treated as implicit and not surfaced as FILTER.
    */
+  private boolean isNullGuard(Expression condition) {
+    if (!condition.isBinaryExpr()) {
+      return false;
+    }
+    BinaryExpr bin = condition.asBinaryExpr();
+    BinaryExpr.Operator op = bin.getOperator();
+    if (op != BinaryExpr.Operator.NOT_EQUALS && op != BinaryExpr.Operator.EQUALS) {
+      return false;
+    }
+    return bin.getLeft().isNullLiteralExpr() || bin.getRight().isNullLiteralExpr();
+  }
+
   private boolean isSameClassHelperCall(
       ClassOrInterfaceDeclaration classDecl, MethodCallExpr call) {
     String name = call.getNameAsString();
@@ -355,12 +602,10 @@ public class MapperIndexer {
     return classDecl.getMethodsByName(name).stream().findFirst().isPresent();
   }
 
-  /** Resolve a simple/qualified type name to a binary Java FQN (nested types use {@code $}). */
   private String resolveTypeFqcn(String typeName) {
     if (typeName == null || typeName.isBlank()) {
       return typeName;
     }
-    // Strip generics
     int generic = typeName.indexOf('<');
     if (generic >= 0) {
       typeName = typeName.substring(0, generic).trim();
@@ -382,7 +627,6 @@ public class MapperIndexer {
       }
     }
 
-    // Nested type on mapper class itself
     if (unit.getClassByName(simpleName(mapperClassFqcn)).isPresent()) {
       ClassOrInterfaceDeclaration mapper =
           unit.getClassByName(simpleName(mapperClassFqcn)).get();
@@ -394,16 +638,13 @@ public class MapperIndexer {
       }
     }
 
-    // Same-package fallback
     if (!typeName.contains(".")) {
       return packageName.isEmpty() ? typeName : packageName + "." + typeName;
     }
 
-    // Already looks qualified — convert nested dots after first Class segment
     return importToBinaryName(typeName);
   }
 
-  /** Keep dotted source-style paths for nested types ({@code Outer.Inner}, not {@code Outer$Inner}). */
   static String importToBinaryName(String name) {
     return name;
   }
@@ -459,9 +700,24 @@ public class MapperIndexer {
     return null;
   }
 
-  private String setterFieldName(String setterName) {
-    String targetField = setterName.substring(3);
-    return Character.toLowerCase(targetField.charAt(0)) + targetField.substring(1);
+  /** setFoo / getFoo / isFoo → foo. Returns null if not an accessor. */
+  private String accessorFieldName(String methodName, String requiredPrefix) {
+    if (requiredPrefix != null) {
+      if (!methodName.startsWith(requiredPrefix) || methodName.length() <= requiredPrefix.length()) {
+        return null;
+      }
+      String rest = methodName.substring(requiredPrefix.length());
+      return Character.toLowerCase(rest.charAt(0)) + rest.substring(1);
+    }
+    if (methodName.startsWith("get") && methodName.length() > 3) {
+      String rest = methodName.substring(3);
+      return Character.toLowerCase(rest.charAt(0)) + rest.substring(1);
+    }
+    if (methodName.startsWith("is") && methodName.length() > 2) {
+      String rest = methodName.substring(2);
+      return Character.toLowerCase(rest.charAt(0)) + rest.substring(1);
+    }
+    return null;
   }
 
   private MethodDeclaration findMethod(ClassOrInterfaceDeclaration classDecl, String name) {
@@ -474,6 +730,9 @@ public class MapperIndexer {
   }
 
   private String simpleName(String fqcn) {
+    if (fqcn == null || fqcn.isBlank()) {
+      return fqcn;
+    }
     int dollar = fqcn.lastIndexOf('$');
     int dot = fqcn.lastIndexOf('.');
     int idx = Math.max(dollar, dot);

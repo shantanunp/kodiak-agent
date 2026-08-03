@@ -1,12 +1,9 @@
 #!/usr/bin/env tsx
 /**
- * Label RAW AST steps via Gemini (Phase 2).
+ * Label RAW AST ops via Gemini (Phase 2), emit grouped `mapping` (one per target field).
  *
- * Independent of `npm run ast` — resolves/indexes then labels.
- *
- *   npm run label -- --mapper lpa-request-mapper --remote
  *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
- *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
+ *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DEAL.LOAN.LoanMaturityPeriodCount
  */
 
 import { parseArgs } from "node:util";
@@ -16,7 +13,7 @@ import { paths } from "../src/config/env.js";
 import { StepLabeler } from "./labeler.js";
 import { isGeminiConfigured } from "./config.js";
 import { resolveAstForMapper } from "./resolvePipeline.js";
-import { filterStepsByFields, parseFieldSelectors } from "./filterByFields.js";
+import { filterMappingByFields, parseFieldSelectors } from "./filterByFields.js";
 import type { IndexAst } from "./labeler.js";
 
 const { values } = parseArgs({
@@ -74,9 +71,14 @@ async function main(): Promise<void> {
     fields: values.fields,
   });
   if (selectors.length > 0) {
-    pipeline.steps = filterStepsByFields(pipeline.steps, selectors);
+    pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
   }
-  console.log(JSON.stringify(pipeline, null, 2));
+
+  const { steps: _s, operations: _o, ...out } = pipeline as typeof pipeline & {
+    steps?: unknown;
+    operations?: unknown;
+  };
+  console.log(JSON.stringify(out, null, 2));
 }
 
 main().catch((err) => {
