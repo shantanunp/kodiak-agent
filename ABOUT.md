@@ -48,7 +48,7 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 ### Phase 2 — Read-only visualization — **Complete (v0)**
 
 - [x] AST → labeled pipeline JSON (`translator/labeler.ts`)
-- [x] Gemini REST labeling for `RAW` steps only (`translator/gemini.ts`, Google AI Studio)
+- [x] Gemini REST labeling for `RAW` steps only (`translator/gemini/`, Google AI Studio)
 - [x] Translation cache by content hash (`translator/cache/`)
 - [x] Step-type schema stub (`translator/schema/step-types.json`)
 - [x] UI mock spec (`mock/field-mapper-builder.html`) — reference only, not wired to live data

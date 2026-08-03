@@ -1,15 +1,16 @@
 /**
- * Phase 2 — AST + AI discovery merge, then Gemini business-path labeling.
+ * Phase 2 — AST + AI discovery merge, then model business-path labeling.
  *
  * Never free-form parses Java as the sole discovery source — AST is the spine.
  */
 
 import {
-  GeminiLabelProvider,
-  loadGeminiConfig,
+  createModelProvider,
+  type ModelProvider,
   type FieldMappingResponse,
   type PipelineOpLabel,
-} from "./gemini.js";
+} from "./provider.js";
+import { loadModelConfig } from "./config.js";
 import {
   getLabelCache,
   setLabelCache,
@@ -20,12 +21,12 @@ import {
   listFieldPipelineCaches,
   computePipelineFingerprint,
   PIPELINE_CACHE_VERSION,
-} from "./cache/index.js";
-import { schemaContextForLabeler, schemaFilePath } from "../schema/io.js";
-import { filterMappingByFields, matchesTargetField } from "./filterByFields.js";
+} from "../cache/index.js";
+import { schemaContextForLabeler, schemaFilePath } from "../../schema/io.js";
+import { filterMappingByFields, matchesTargetField } from "../filterByFields.js";
 import { discoverAndMerge, type DiscoveryMeta } from "./discoverMerge.js";
 import { existsSync, readFileSync } from "node:fs";
-import type { FieldMapping } from "./groupMapping.js";
+import type { FieldMapping } from "../groupMapping.js";
 
 export interface AstStep {
   kind: string;
@@ -52,7 +53,7 @@ export interface IndexAst {
 }
 
 export interface PipelineStep extends AstStep {
-  labelSource?: "deterministic" | "gemini";
+  labelSource?: "deterministic" | "model" | "gemini";
   labelReason?: string;
 }
 
@@ -89,8 +90,8 @@ export interface LabelIndexOptions {
   /** Skip pipeline / field / discovery cache read/write */
   noCache?: boolean;
   /**
-   * Force Gemini discovery even with --fields.
-   * Default: skip AI discovery when --fields is set (1 Gemini call per uncached field).
+   * Force model discovery even with --fields.
+   * Default: skip AI discovery when --fields is set (1 model call per uncached field).
    */
   discoverAi?: boolean;
 }
@@ -123,13 +124,16 @@ function fieldEntryMatchesSelectors(
 }
 
 export class StepLabeler {
-  private provider: GeminiLabelProvider;
+  private provider: ModelProvider;
   private model: string;
 
-  constructor(provider?: GeminiLabelProvider) {
-    const config = loadGeminiConfig();
-    this.provider = provider ?? new GeminiLabelProvider(config);
-    this.model = config.model;
+  private apiStyle: string;
+
+  constructor(provider?: ModelProvider) {
+    const config = loadModelConfig();
+    this.provider = provider ?? createModelProvider(config);
+    this.model = this.provider.model;
+    this.apiStyle = config.apiStyle;
   }
 
   async labelIndex(
@@ -144,14 +148,14 @@ export class StepLabeler {
     const noCache = Boolean(options.noCache);
     const discoverAi = Boolean(options.discoverAi);
     const mapperId = ast.mapperId ?? "unknown";
-    // --fields: AST-only discovery by default (avoids a second Gemini call / rate limits)
+    // --fields: AST-only discovery by default (avoids a second model call / rate limits)
     const skipAiDiscovery = fieldSelectors.length > 0 && !discoverAi;
 
     const schemaJson = loadSchemaJson(ast.mapperId);
     const fingerprint = computePipelineFingerprint({
       sourceJava,
       schemaJson,
-      model: this.model,
+      model: `${this.apiStyle}:${this.model}`,
       version: PIPELINE_CACHE_VERSION,
     });
 
@@ -177,7 +181,7 @@ export class StepLabeler {
       }
     }
 
-    // 2) Field-level cache: if --fields all present, skip discovery + Gemini
+    // 2) Field-level cache: if --fields all present, skip discovery + model
     if (!noCache && sourceJava && fieldSelectors.length > 0) {
       const cachedFields = listFieldPipelineCaches(mapperId, fingerprint);
       const selectorsCovered = fieldSelectors.every((sel) =>
@@ -327,7 +331,7 @@ export class StepLabeler {
             : undefined,
         ),
         labelSource: "deterministic",
-        labelReason: response.reason ?? "gemini did not rewrite field",
+        labelReason: response.reason ?? "model did not rewrite field",
       })),
     };
   }
@@ -336,7 +340,7 @@ export class StepLabeler {
     const kind = (op.kind ?? "raw").toUpperCase();
     const step: PipelineStep = {
       kind,
-      labelSource: "gemini",
+      labelSource: "model",
       labelReason: reason,
     };
 

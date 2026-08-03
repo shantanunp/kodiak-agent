@@ -16,7 +16,7 @@ deterministic and test-gated. Business users never get direct write access to pr
 |-------|-----------|-------------|
 | 0 | registry/, GitHub MCP read | No |
 | 1 | indexer/ (JavaParser), cache, scan orchestrator | No |
-| 2 | translator/labeler.ts, ui/pipeline-viewer/ | Labeling only |
+| 2 | translator/model/, ui/pipeline-viewer/ | Labeling only |
 | 3 | Suggestion + PR creation (deferred) | Suggestion + PR creation |
 | 4 | Shadow validation (deferred) | No |
 | 5 | Audit logging (deferred) | Logging only |
@@ -28,9 +28,9 @@ deterministic and test-gated. Business users never get direct write access to pr
 
 - **Java (`indexer/src/`)** — JavaParser AST walk only. No AI, no HTTP.
 - **TypeScript (`src/`, `indexer/cli.ts`)** — orchestration, MCP, cache, polling.
-- **Phase 2+ (`translator/`)** — LLM labeling of already-parsed constructs only.
-  **AI provider: Google Gemini Studio** (`GEMINI_API_KEY` from https://aistudio.google.com/apikey).
-  Model pinned via `GEMINI_MODEL`, temperature defaults to `0`.
+- **Phase 2+ (`translator/model/`)** — LLM labeling of already-parsed constructs only.
+  **Model provider** via `MODEL_API_KEY` + `MODEL_BASE_URL` + `MODEL_API_STYLE=gemini|openai`.
+  Model name via `MODEL_NAME`, temperature defaults to `0`. Legacy `GEMINI_*` env aliases still work.
 
 ## Key commands
 
@@ -42,7 +42,7 @@ npm run latest-sha
 npm run scan -- --mapper example-mapper
 npm run scan:incremental
 npm run poll
-npm run label -- --mapper example-mapper   # Phase 2: Gemini labels RAW steps only
+npm run label -- --mapper example-mapper   # Phase 2: model provider labels RAW steps
 ```
 
 ## Registry

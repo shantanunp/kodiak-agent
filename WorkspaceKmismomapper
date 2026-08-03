@@ -1,0 +1,4 @@
+
+> kodiak-agent@0.1.0 label
+> tsx translator/cli.ts --mapper lpa-request-mapper --worktree C:Users<you --fields MESSAGE.DEAL.PARTY.FirstName
+

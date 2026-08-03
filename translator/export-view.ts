@@ -12,11 +12,15 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "../src/config/env.js";
 import { toPipelineView } from "./toPipelineView.js";
-import type { PipelineJson } from "./labeler.js";
-import { operationsOf, StepLabeler } from "./labeler.js";
+import {
+  operationsOf,
+  StepLabeler,
+  isModelConfigured,
+  type FieldMappingJson,
+  type PipelineJson,
+} from "./model/index.js";
 import { groupOperationsByTarget } from "./groupMapping.js";
 import { resolveAstForMapper } from "./resolvePipeline.js";
-import { isGeminiConfigured } from "./gemini.js";
 
 const { values } = parseArgs({
   options: {
@@ -35,8 +39,8 @@ async function main(): Promise<void> {
   let pipeline: PipelineJson;
 
   if (values.label) {
-    if (!isGeminiConfigured()) {
-      console.error("GEMINI_API_KEY required for --label");
+    if (!isModelConfigured()) {
+      console.error("MODEL_API_KEY (or GEMINI_API_KEY) required for --label");
       process.exit(1);
     }
     const ast = await resolveAstForMapper(values.mapper, values.registry);
@@ -50,7 +54,7 @@ async function main(): Promise<void> {
           ...s,
           labelSource: "deterministic" as const,
         })),
-      ),
+      ) as FieldMappingJson[],
     };
   }
 

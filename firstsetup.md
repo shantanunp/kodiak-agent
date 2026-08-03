@@ -10,12 +10,14 @@ This project has **no Gradle Wrapper** (`gradlew`). Builds use your machine’s 
 
 ## 1. Prerequisites
 
-| Tool | Version | Why |
-|------|---------|-----|
-| Node.js | ≥ 20 | App / CLIs — office Node install or [nodejs.org](https://nodejs.org) LTS |
-| JDK | 17+ (21 preferred) | Build JavaParser indexer — set `JAVA_HOME` to your office JDK |
-| Gradle | 8.x (on `PATH`) | `npm run build:indexer` → `cd indexer && gradle shadowJar` |
-| Git for Windows | any | Checkout repos + optional Git Bash |
+
+| Tool            | Version            | Why                                                                      |
+| --------------- | ------------------ | ------------------------------------------------------------------------ |
+| Node.js         | ≥ 20               | App / CLIs — office Node install or [nodejs.org](https://nodejs.org) LTS |
+| JDK             | 17+ (21 preferred) | Build JavaParser indexer — set `JAVA_HOME` to your office JDK            |
+| Gradle          | 8.x (on `PATH`)    | `npm run build:indexer` → `cd indexer && gradle shadowJar`               |
+| Git for Windows | any                | Checkout repos + optional Git Bash                                       |
+
 
 Also clone the **mapper** repo locally (e.g. `Kmismomapper`) so you can use `--worktree` and avoid needing GitHub for daily runs.
 
@@ -39,6 +41,8 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.x.x-hotspot"
 
 ---
 
+
+
 ## 2. One-time setup
 
 ```powershell
@@ -51,12 +55,18 @@ Edit `.env` (same format on Windows; no quotes needed for simple values):
 
 ```env
 # Required for npm run label
-GEMINI_API_KEY=your-key-from-aistudio.google.com
+MODEL_API_KEY=your-key
 
-# Optional (defaults shown)
-GEMINI_MODEL=gemini-flash-latest
-GEMINI_TEMPERATURE=0
-# GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com
+# Optional (defaults shown) — swap vendor by changing these
+MODEL_API_STYLE=gemini
+MODEL_BASE_URL=https://generativelanguage.googleapis.com
+MODEL_NAME=gemini-flash-latest
+MODEL_TEMPERATURE=0
+
+# OpenAI-compatible office gateway example:
+# MODEL_API_STYLE=openai
+# MODEL_BASE_URL=https://your-gateway/v1
+# MODEL_NAME=gpt-4o-mini
 
 # Optional — only if you use --remote / scan / poll
 # GITHUB_TOKEN=ghp_...
@@ -74,19 +84,23 @@ Gradle/Maven deps should resolve via your **office Artifactory** / init scripts 
 
 **Office network / mirrors (typical):**
 
-| Source | Needed for |
-|--------|------------|
-| Office npm registry / Artifactory npm | `npm install` |
-| Office Maven / Artifactory | Java deps during `gradle shadowJar` |
-| Office Gradle distribution (if IT manages it) | Running `gradle` itself |
-| `generativelanguage.googleapis.com` | `npm run label` (Gemini) — only if AI Studio is allowed |
-| `api.github.com` | only if you use `--remote` / `scan` / `poll` |
+
+| Source                                        | Needed for                                                 |
+| --------------------------------------------- | ---------------------------------------------------------- |
+| Office npm registry / Artifactory npm         | `npm install`                                              |
+| Office Maven / Artifactory                    | Java deps during `gradle shadowJar`                        |
+| Office Gradle distribution (if IT manages it) | Running `gradle` itself                                    |
+| Your `MODEL_BASE_URL` host                    | `npm run label` (Gemini Studio, OpenAI, or office gateway) |
+| `api.github.com`                              | only if you use `--remote` / `scan` / `poll`               |
+
 
 Prefer `--worktree` so you do **not** need GitHub daily.
 
 If `npm install` or `gradle` still hits the public internet, ask IT for the office npm/Maven/Gradle mirror config (`.npmrc`, Gradle `init.gradle`, Maven `settings.xml`). This repo does not vendor those credentials.
 
 ---
+
+
 
 ## 3. How to run
 
@@ -100,15 +114,19 @@ Example mapper path: `C:\Users\<you>\Workspace\Kmismomapper`
 npm run ast -- --mapper lpa-request-mapper --worktree C:\Users\<you>\Workspace\Kmismomapper
 ```
 
-### B) Label one field (needs Gemini; uses local Java)
+
+
+### B) Label one field (needs model API key; uses local Java)
 
 ```powershell
 npm run label -- --mapper lpa-request-mapper --worktree C:\Users\<you>\Workspace\Kmismomapper --fields MESSAGE.DEAL.PARTY.FirstName
 ```
 
-- First run may call Gemini once (with `--fields`, AI discovery is off by default).
+- First run may call the model once (with `--fields`, AI discovery is off by default).
 - Second run should hit field cache (`"cacheHit": true`).
 - Cache files land under `.\.cache\` in the project folder.
+
+
 
 ### C) Clear caches if something looks stale
 
@@ -116,6 +134,8 @@ npm run label -- --mapper lpa-request-mapper --worktree C:\Users\<you>\Workspace
 npm run cache:clear
 npm run cache:clear -- --mapper lpa-request-mapper
 ```
+
+
 
 ### D) Optional local UI
 
@@ -130,11 +150,13 @@ UI pages use **system fonts only** — no Google Fonts / CDN requests from the b
 ### Avoid if network is restricted
 
 - `--remote`, `npm run scan`, `npm run poll` → GitHub  
-- Labeling **all** fields with no `--fields` → many Gemini calls / quota burn  
+- Labeling **all** fields with no `--fields` → many model calls / quota burn
+
+
 
 ### E) Point at another repo / mapper to test
 
-Scanning is scoped by [`registry/mapping-registry.yaml`](registry/mapping-registry.yaml). You never index arbitrary paths outside that registry + `--worktree` / remote checkout.
+Scanning is scoped by `[registry/mapping-registry.yaml](registry/mapping-registry.yaml)`. You never index arbitrary paths outside that registry + `--worktree` / remote checkout.
 
 #### Option 1 — Same registered mapper, different local folder
 
@@ -150,15 +172,17 @@ npm run label -- --mapper lpa-request-mapper --worktree D:\code\Kmismomapper-for
 #### Option 2 — Different GitHub repo (remote)
 
 1. Edit `registry/mapping-registry.yaml`:
-   - `repo: "owner/other-repo"`
-   - `branch: "main"` (or your branch)
-   - `scope:` globs for mapper Java files
+  - `repo: "owner/other-repo"`
+  - `branch: "main"` (or your branch)
+  - `scope:` globs for mapper Java files
 2. Keep or add a `mappers:` entry with correct `sourceFile`, `class`, `entryMethod`, `sourceType`, `targetType`.
 3. Run with remote (needs `api.github.com` + optional `GITHUB_TOKEN`):
 
 ```powershell
 npm run label -- --mapper <your-mapper-id> --remote
 ```
+
+
 
 #### Option 3 — New mapper class (local test)
 
@@ -174,9 +198,9 @@ npm run label -- --mapper <your-mapper-id> --remote
     targetType: com.example.dto.Target
 ```
 
-3. Update top-level `repo` / `scope` if the paths or GitHub repo differ.
-4. Optional: add `registry/schemas/my-test-mapper.schema.json` so label uses business field paths.
-5. Run:
+1. Update top-level `repo` / `scope` if the paths or GitHub repo differ.
+2. Optional: add `registry/schemas/my-test-mapper.schema.json` so label uses business field paths.
+3. Run:
 
 ```powershell
 npm run ast -- --mapper my-test-mapper --worktree C:\Users\<you>\Workspace\MyMapperRepo
@@ -189,79 +213,92 @@ Clear cache after switching repos/mappers if results look mixed:
 npm run cache:clear -- --mapper my-test-mapper
 ```
 
+
+
 ### Windows tips
 
-| Topic | Note |
-|-------|------|
-| Line breaks in PowerShell | Use `` ` `` at end of line, or keep the command on one line (as above) |
-| Git Bash | Same `npm` commands; paths like `/c/Users/.../Kmismomapper` also work |
-| Antivirus | First `npm install` / Gradle may be slow if Defender scans `node_modules` |
-| Execution policy | If scripts are blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| Proxy / Artifactory | Use office `HTTP_PROXY` / `HTTPS_PROXY`, `.npmrc`, and Gradle/Maven mirror settings from IT — do not add `gradlew` back |
+
+| Topic                     | Note                                                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Line breaks in PowerShell | Use ``` at end of line, or keep the command on one line (as above)                                                      |
+| Git Bash                  | Same `npm` commands; paths like `/c/Users/.../Kmismomapper` also work                                                   |
+| Antivirus                 | First `npm install` / Gradle may be slow if Defender scans `node_modules`                                               |
+| Execution policy          | If scripts are blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`                                           |
+| Proxy / Artifactory       | Use office `HTTP_PROXY` / `HTTPS_PROXY`, `.npmrc`, and Gradle/Maven mirror settings from IT — do not add `gradlew` back |
+
 
 ---
+
+
 
 ## 4. Change model / AI provider
 
-Today the app is wired to **Google Gemini Studio** only. Changing `GEMINI_MODEL` only switches Gemini models — it does **not** switch to Copilot / OpenAI.
+Labeling goes through a generic **model provider** in `[translator/model/](translator/model/)`.  
+Swap vendors by changing **endpoint + key + style** in `.env` — no code changes.
 
-### Env-only (same provider: Gemini)
+### Env vars
 
-| Variable | File | Effect |
-|----------|------|--------|
-| `GEMINI_API_KEY` | `.env` | API key |
-| `GEMINI_MODEL` | `.env` | e.g. `gemini-flash-latest`, `gemini-2.0-flash` |
-| `GEMINI_TEMPERATURE` | `.env` | default `0` |
-| `GEMINI_API_BASE_URL` | `.env` | default `https://generativelanguage.googleapis.com` |
 
-Loaded in [`translator/gemini.ts`](translator/gemini.ts).
+| Variable            | Effect                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `MODEL_API_KEY`     | API key (required)                                                                    |
+| `MODEL_BASE_URL`    | API host (no trailing slash)                                                          |
+| `MODEL_NAME`        | Model id                                                                              |
+| `MODEL_TEMPERATURE` | default `0`                                                                           |
+| `MODEL_API_STYLE`   | `gemini` (Google generateContent) or `openai` (OpenAI-compatible `/chat/completions`) |
 
-### Files involved in the AI call path
 
-| File | Role |
-|------|------|
-| [`.env`](.env) / [`.env.example`](.env.example) | Keys and model name |
-| [`translator/gemini.ts`](translator/gemini.ts) | Config (`loadGeminiConfig`) + HTTP (`GeminiLabelProvider`) |
-| [`translator/labeler.ts`](translator/labeler.ts) | Builds `GeminiLabelProvider`, runs label / cache |
-| [`translator/discoverMerge.ts`](translator/discoverMerge.ts) | Optional AI discovery (skipped by default with `--fields`) |
-| [`translator/cli.ts`](translator/cli.ts) | `npm run label` entry; checks `isGeminiConfigured()` |
+Legacy `GEMINI_*` env names still work as aliases.
 
-**Actual API call** (Gemini REST):
+### Examples
 
-```text
-POST {GEMINI_API_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent
-Header: X-goog-api-key: {GEMINI_API_KEY}
+**Google AI Studio (default):**
+
+```env
+MODEL_API_STYLE=gemini
+MODEL_BASE_URL=https://generativelanguage.googleapis.com
+MODEL_NAME=gemini-flash-latest
+MODEL_API_KEY=...
 ```
 
-in `GeminiLabelProvider.generateContent()` inside `translator/gemini.ts`.
+**OpenAI / office OpenAI-compatible gateway:**
 
-### To switch to another provider (e.g. Copilot / OpenAI)
+```env
+MODEL_API_STYLE=openai
+MODEL_BASE_URL=https://api.openai.com/v1
+# or https://your-office-llm-gateway/v1
+MODEL_NAME=gpt-4o-mini
+MODEL_API_KEY=...
+```
 
-Not supported out of the box. You would need to:
 
-1. Add a new provider module (e.g. `translator/openaiProvider.ts` or `copilotProvider.ts`) that implements the same methods:
-   - `labelFieldMapping(...)`
-   - `discoverMappings(...)`
-   - (optional) `labelStep(...)`
-2. Return the **same JSON shapes** as today’s Gemini responses (see types in `gemini.ts`).
-3. Add env vars (e.g. `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`) in `.env` / `.env.example`.
-4. Extend [`translator/gemini.ts`](translator/gemini.ts) (or add a sibling provider module) to load the right provider.
-5. Change [`translator/labeler.ts`](translator/labeler.ts) to construct the new provider instead of hard-coding `GeminiLabelProvider`.
-6. Update [`translator/cli.ts`](translator/cli.ts) “API key missing” check for the new env var.
-7. Document the new host in IT allowlist (e.g. `api.openai.com` or your Copilot/Azure endpoint).
 
-**Do not** only change `GEMINI_MODEL` to a Copilot/OpenAI model name — the request still goes to Google’s URL and will fail.
+### Files involved
+
+
+| File                                                           | Role                                         |
+| -------------------------------------------------------------- | -------------------------------------------- |
+| `[.env](.env)` / `[.env.example](.env.example)`                | Key, URL, style, model name                  |
+| `[translator/model/config.ts](translator/model/config.ts)`     | Reads env → `loadModelConfig()`              |
+| `[translator/model/provider.ts](translator/model/provider.ts)` | `HttpModelProvider` (gemini + openai styles) |
+| `[translator/model/labeler.ts](translator/model/labeler.ts)`   | Label / cache orchestration                  |
+| `[translator/cli.ts](translator/cli.ts)`                       | `npm run label` entry                        |
+
+
+**Important:** set `MODEL_API_STYLE` to match the API shape of your endpoint. Changing only the model name while leaving `STYLE=gemini` against an OpenAI URL will fail.
 
 ---
+
+
 
 ## 5. Quick checklist (Windows)
 
 - [ ] `node -v` ≥ 20, `java -version` 17+, `gradle -v` works, `JAVA_HOME` set if needed  
 - [ ] Office npm / Maven / Gradle mirrors configured (Artifactory) — no `gradlew` in this repo  
-- [ ] `Copy-Item .env.example .env` + set `GEMINI_API_KEY`  
+- [ ] `Copy-Item .env.example .env` + set `MODEL_API_KEY` (and style/URL if not Gemini)  
 - [ ] `npm install` && `npm run build:indexer`  
 - [ ] Mapper repo on disk (e.g. `C:\Users\...\Kmismomapper`)  
 - [ ] `npm run ast -- --mapper … --worktree C:\...\Kmismomapper` works  
-- [ ] `npm run label -- … --worktree … --fields …` works (Gemini allowed)  
+- [ ] `npm run label -- … --worktree … --fields …` works (model endpoint allowed)  
 - [ ] Know how to point `--worktree` / edit `mapping-registry.yaml` for another repo (§3E)  
-- [ ] Know files in §4 if switching AI provider later  
+- [ ] Know §4 env vars to switch Gemini ↔ OpenAI-compatible gateway  

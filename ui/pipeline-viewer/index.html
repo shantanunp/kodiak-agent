@@ -52,7 +52,7 @@
   .step-body{margin-top:8px;font-size:13px;line-height:1.55;}
   .mono{font-family:var(--font-mono);font-size:12px;background:var(--panel);padding:2px 6px;border-radius:4px;border:1px solid var(--line);}
   .badge{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;margin-left:6px;}
-  .badge-gemini{background:var(--op-bg);color:var(--op);}
+  .badge-gemini,.badge-model{background:var(--op-bg);color:var(--op);}
   .badge-det{background:var(--source-bg);color:var(--source);}
   .badge-raw{background:var(--raw-bg);color:var(--raw);}
   .code-block{font-family:var(--font-mono);font-size:11.5px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:6px;white-space:pre-wrap;word-break:break-word;}
@@ -88,7 +88,7 @@ const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Trans
 
 function badge(step) {
   if (step.kind === 'raw') return '<span class="badge badge-raw">needs review</span>';
-  if (step.labelSource === 'gemini') return '<span class="badge badge-gemini">AI labeled</span>';
+  if (step.labelSource === 'model' || step.labelSource === 'gemini') return '<span class="badge badge-model">AI labeled</span>';
   return '<span class="badge badge-det">deterministic</span>';
 }
 

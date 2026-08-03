@@ -3,8 +3,8 @@
  * (same step vocabulary as mock/field-mapper-builder.html).
  */
 
-import type { PipelineJson, PipelineStep } from "./labeler.js";
-import { operationsOf } from "./labeler.js";
+import type { PipelineJson, PipelineStep } from "./model/index.js";
+import { operationsOf } from "./model/index.js";
 import { loadSchema } from "../schema/io.js";
 import { flattenPaths } from "../schema/flatten.js";
 import type { SchemaNode } from "../schema/types.js";

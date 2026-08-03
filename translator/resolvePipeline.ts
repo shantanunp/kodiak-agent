@@ -10,7 +10,7 @@ import { loadRegistry } from "../src/registry/loadRegistry.js";
 import { runIndexer, writeRuntimeRegistry } from "../src/indexer/runIndexer.js";
 import { scanFiles } from "../src/orchestrator/scanRepo.js";
 import * as cache from "../src/cache/index.js";
-import type { IndexAst } from "./labeler.js";
+import type { IndexAst } from "./model/index.js";
 
 export interface ResolvedMapperAst {
   ast: IndexAst;

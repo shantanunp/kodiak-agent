@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * AI-label mapper fields via Gemini → business/schema paths (no Java DTO paths).
+ * AI-label mapper fields via model provider → business/schema paths (no Java DTO paths).
  *
  *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
  *   --fields MESSAGE.DEAL.PARTY.FirstName
@@ -11,12 +11,10 @@ import { parseArgs } from "node:util";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "../src/config/env.js";
-import { StepLabeler } from "./labeler.js";
-import { isGeminiConfigured } from "./gemini.js";
+import { StepLabeler, isModelConfigured, type IndexAst } from "./model/index.js";
 import { resolveMapperAst } from "./resolvePipeline.js";
 import { filterMappingByFields, parseFieldSelectors } from "./filterByFields.js";
 import { clearAllTranslatorCaches } from "./cache/index.js";
-import type { IndexAst } from "./labeler.js";
 
 const { values } = parseArgs({
   options: {
@@ -30,7 +28,7 @@ const { values } = parseArgs({
     fields: { type: "string" },
     "no-cache": { type: "boolean", default: false },
     "clear-cache": { type: "boolean", default: false },
-    /** With --fields, also run Gemini discovery (default: AST-only to save quota). */
+    /** With --fields, also run model discovery (default: AST-only to save quota). */
     "discover-ai": { type: "boolean", default: false },
   },
 });
@@ -44,8 +42,10 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!isGeminiConfigured()) {
-    console.error("Set GEMINI_API_KEY in .env (from https://aistudio.google.com/apikey)");
+  if (!isModelConfigured()) {
+    console.error(
+      "Set MODEL_API_KEY (or GEMINI_API_KEY) in .env. Optional: MODEL_BASE_URL, MODEL_NAME, MODEL_API_STYLE=gemini|openai",
+    );
     process.exit(1);
   }
 

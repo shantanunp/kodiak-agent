@@ -7,7 +7,7 @@ Orchestrator for Java mapping discovery, indexing, and pipeline visualization.
 ## Quick start
 
 ```bash
-cp .env.example .env          # GEMINI_API_KEY required for label; GITHUB_TOKEN optional
+cp .env.example .env          # MODEL_API_KEY required for label; GITHUB_TOKEN optional
 npm install
 npm run build:indexer         # JavaParser shadow jar (needs JDK 21 — see note below)
 ```
@@ -153,17 +153,19 @@ GITHUB_TOKEN=ghp_...
 
 
 
-## AI (Phase 2 — Gemini)
+## AI (Phase 2 — model provider)
 
-API key from [Google AI Studio](https://aistudio.google.com/apikey):
+Swap vendors via `.env` (see `translator/model/`):
 
 ```
-GEMINI_API_KEY=your-key
-GEMINI_MODEL=gemini-flash-latest
-GEMINI_TEMPERATURE=0
+MODEL_API_KEY=your-key
+MODEL_API_STYLE=gemini          # or openai
+MODEL_BASE_URL=https://generativelanguage.googleapis.com
+MODEL_NAME=gemini-flash-latest
+MODEL_TEMPERATURE=0
 ```
 
-Uses REST `generativelanguage.googleapis.com/v1beta/...:generateContent` with `X-goog-api-key`.
+`MODEL_API_STYLE=openai` uses OpenAI-compatible `/chat/completions` (office gateways, Azure, etc.). Legacy `GEMINI_*` env names still work.
 
 ```bash
 npm run label -- --mapper demo-ai-recognition-mapper --remote

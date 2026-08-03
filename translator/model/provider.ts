@@ -1,35 +1,4 @@
-import { config as loadDotenv } from "dotenv";
-
-loadDotenv();
-
-/** Google AI Studio (Gemini) — https://aistudio.google.com/apikey */
-export interface GeminiConfig {
-  apiKey: string;
-  model: string;
-  temperature: number;
-  baseUrl: string;
-}
-
-export function loadGeminiConfig(): GeminiConfig {
-  const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY is required. Create one at https://aistudio.google.com/apikey",
-    );
-  }
-
-  return {
-    apiKey,
-    model: process.env.GEMINI_MODEL ?? "gemini-flash-latest",
-    temperature: Number(process.env.GEMINI_TEMPERATURE ?? "0"),
-    baseUrl:
-      process.env.GEMINI_API_BASE_URL ?? "https://generativelanguage.googleapis.com",
-  };
-}
-
-export function isGeminiConfigured(): boolean {
-  return !!(process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY);
-}
+import { loadModelConfig, type ModelConfig, type ModelApiStyle } from "./config.js";
 
 export interface LabelRequest {
   sourceText: string;
@@ -86,6 +55,14 @@ export interface DiscoverResponse {
   mappings: DiscoverHit[];
 }
 
+/** Provider surface used by labeler / discovery — independent of vendor. */
+export interface ModelProvider {
+  readonly model: string;
+  labelFieldMapping(request: FieldMappingRequest): Promise<FieldMappingResponse>;
+  discoverMappings(request: DiscoverRequest): Promise<DiscoverResponse>;
+  labelStep(request: LabelRequest): Promise<LabelResponse>;
+}
+
 const FIELD_MAPPING_PROMPT = `You rewrite one already-parsed Java mapper field into a business pipeline.
 
 The JavaParser indexer already extracted operations (hints only). You own the final output:
@@ -133,11 +110,15 @@ Rules:
 - Do not invent mappings that are not in the source.
 - javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 
-/** Gemini REST API — same shape as AI Studio / curl generateContent. */
-interface GenerateContentResponse {
+interface GeminiGenerateContentResponse {
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
   }>;
+  error?: { message?: string };
+}
+
+interface OpenAiChatResponse {
+  choices?: Array<{ message?: { content?: string } }>;
   error?: { message?: string };
 }
 
@@ -150,17 +131,24 @@ function normalizePipeline(pipeline: PipelineOpLabel[] | undefined): PipelineOpL
   }));
 }
 
-export class GeminiLabelProvider {
+/**
+ * HTTP model provider. Swap vendor by changing MODEL_BASE_URL + MODEL_API_KEY + MODEL_API_STYLE.
+ * - gemini: Google AI Studio / compatible generateContent
+ * - openai: OpenAI-compatible /chat/completions (Azure, office gateways, Ollama, etc.)
+ */
+export class HttpModelProvider implements ModelProvider {
+  readonly model: string;
   private apiKey: string;
-  private model: string;
   private temperature: number;
   private baseUrl: string;
+  private apiStyle: ModelApiStyle;
 
-  constructor(config: GeminiConfig = loadGeminiConfig()) {
+  constructor(config: ModelConfig = loadModelConfig()) {
     this.apiKey = config.apiKey;
     this.model = config.model;
     this.temperature = config.temperature;
     this.baseUrl = config.baseUrl;
+    this.apiStyle = config.apiStyle;
   }
 
   /** @deprecated Prefer labelFieldMapping — kept for cache/tests of single RAW steps. */
@@ -172,7 +160,7 @@ export class GeminiLabelProvider {
       context: request.context ?? "",
     });
 
-    const text = await this.generateContent(FIELD_MAPPING_PROMPT, userPrompt);
+    const text = await this.generate(FIELD_MAPPING_PROMPT, userPrompt);
 
     try {
       const parsed = JSON.parse(text) as LabelResponse;
@@ -186,7 +174,6 @@ export class GeminiLabelProvider {
     }
   }
 
-  /** AI-own one field mapping: Java indexer ops → business target + pipeline. */
   async labelFieldMapping(request: FieldMappingRequest): Promise<FieldMappingResponse> {
     const userPrompt = JSON.stringify({
       javaTargetField: request.javaTargetField,
@@ -194,7 +181,7 @@ export class GeminiLabelProvider {
       context: request.schemaContext ?? "",
     });
 
-    const text = await this.generateContent(FIELD_MAPPING_PROMPT, userPrompt);
+    const text = await this.generate(FIELD_MAPPING_PROMPT, userPrompt);
 
     try {
       const parsed = JSON.parse(text) as FieldMappingResponse;
@@ -205,7 +192,6 @@ export class GeminiLabelProvider {
     }
   }
 
-  /** AI discovery: find target field writes in full Java source (complements AST). */
   async discoverMappings(request: DiscoverRequest): Promise<DiscoverResponse> {
     const userPrompt = JSON.stringify({
       className: request.className ?? "",
@@ -213,7 +199,7 @@ export class GeminiLabelProvider {
       sourceJava: request.sourceJava,
     });
 
-    const text = await this.generateContent(DISCOVER_PROMPT, userPrompt);
+    const text = await this.generate(DISCOVER_PROMPT, userPrompt);
 
     try {
       const parsed = JSON.parse(text) as DiscoverResponse;
@@ -234,59 +220,100 @@ export class GeminiLabelProvider {
     }
   }
 
-  /** POST .../models/{model}:generateContent with X-goog-api-key header. */
-  async generateContent(systemPrompt: string, userText: string): Promise<string> {
-    const url = `${this.baseUrl}/v1beta/models/${this.model}:generateContent`;
+  /** Low-level completion — routes by MODEL_API_STYLE. */
+  async generate(systemPrompt: string, userText: string): Promise<string> {
+    if (this.apiStyle === "openai") {
+      return this.generateOpenAi(systemPrompt, userText);
+    }
+    return this.generateGemini(systemPrompt, userText);
+  }
 
+  private async generateGemini(systemPrompt: string, userText: string): Promise<string> {
+    const url = `${this.baseUrl}/v1beta/models/${this.model}:generateContent`;
     const body = {
-      systemInstruction: {
-        parts: [{ text: systemPrompt }],
-      },
-      contents: [
-        {
-          parts: [{ text: userText }],
-        },
-      ],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userText }] }],
       generationConfig: {
         temperature: this.temperature,
         responseMimeType: "application/json",
       },
     };
 
+    return this.fetchText(url, {
+      "Content-Type": "application/json",
+      "X-goog-api-key": this.apiKey,
+    }, body, (payload) => {
+      const p = payload as GeminiGenerateContentResponse;
+      return p.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+        ?? null;
+    }, (payload) => (payload as GeminiGenerateContentResponse).error?.message);
+  }
+
+  private async generateOpenAi(systemPrompt: string, userText: string): Promise<string> {
+    const url = `${this.baseUrl}/chat/completions`;
+    const body = {
+      model: this.model,
+      temperature: this.temperature,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userText },
+      ],
+    };
+
+    return this.fetchText(url, {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    }, body, (payload) => {
+      const p = payload as OpenAiChatResponse;
+      return p.choices?.[0]?.message?.content?.trim() ?? null;
+    }, (payload) => (payload as OpenAiChatResponse).error?.message);
+  }
+
+  private async fetchText(
+    url: string,
+    headers: Record<string, string>,
+    body: unknown,
+    extractText: (payload: unknown) => string | null,
+    extractError: (payload: unknown) => string | undefined,
+  ): Promise<string> {
     const maxAttempts = 4;
     let lastError = "";
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-goog-api-key": this.apiKey,
-        },
+        headers,
         body: JSON.stringify(body),
       });
 
-      const payload = (await response.json()) as GenerateContentResponse;
+      const payload: unknown = await response.json();
 
       if (response.ok) {
-        const text = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        const text = extractText(payload);
         if (!text) {
-          throw new Error("Gemini API returned no text in candidates[0]");
+          throw new Error(`Model API returned no text (${this.apiStyle})`);
         }
         return text;
       }
 
-      lastError = payload.error?.message ?? response.statusText;
+      lastError = extractError(payload) ?? response.statusText;
       const retryable = response.status === 429 || response.status >= 500;
       if (!retryable || attempt === maxAttempts) {
-        throw new Error(`Gemini API ${response.status}: ${lastError}`);
+        throw new Error(`Model API ${response.status}: ${lastError}`);
       }
-      // Honor "Please retry in 59.2s" from Gemini free-tier errors
       const retryMatch = lastError.match(/retry in ([\d.]+)\s*s/i);
       const hintedMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1]!) * 1000) + 500 : 0;
       const waitMs = Math.min(90_000, Math.max(hintedMs, 2000 * attempt));
       await new Promise((r) => setTimeout(r, waitMs));
     }
 
-    throw new Error(`Gemini API failed: ${lastError}`);
+    throw new Error(`Model API failed: ${lastError}`);
   }
+}
+
+/** @deprecated use HttpModelProvider */
+export const GeminiLabelProvider = HttpModelProvider;
+
+export function createModelProvider(config?: ModelConfig): ModelProvider {
+  return new HttpModelProvider(config ?? loadModelConfig());
 }

@@ -1,13 +1,13 @@
 /**
- * Merge AST indexer groups with Gemini discovery hits.
+ * Merge AST indexer groups with model discovery hits.
  * Never drops AST targets; AI-only hits become RAW candidates.
  */
 
-import type { GeminiLabelProvider, DiscoverHit } from "./gemini.js";
-import { groupOperationsByTarget, type FieldMapping, type PipelineOp } from "./groupMapping.js";
+import type { ModelProvider, DiscoverHit } from "./provider.js";
+import { groupOperationsByTarget, type FieldMapping, type PipelineOp } from "../groupMapping.js";
 import type { AstStep, IndexAst } from "./labeler.js";
 import { operationsOf } from "./labeler.js";
-import { getDiscoveryCache, setDiscoveryCache } from "./cache/index.js";
+import { getDiscoveryCache, setDiscoveryCache } from "../cache/index.js";
 
 export interface DiscoveryMeta {
   astTargets: number;
@@ -148,11 +148,11 @@ export function mergeAstAndAiDiscovery(
 export async function discoverAndMerge(
   ast: IndexAst,
   sourceJava: string,
-  provider: GeminiLabelProvider,
+  provider: ModelProvider,
   options: {
     fingerprint?: string;
     noCache?: boolean;
-    /** When true, skip Gemini discovery (AST groups only). */
+    /** When true, skip model discovery (AST groups only). */
     skipAiDiscovery?: boolean;
   } = {},
 ): Promise<DiscoverMergeResult> {
