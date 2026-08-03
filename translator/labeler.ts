@@ -1,15 +1,20 @@
 /**
  * Phase 2 — AST operation labeler (Gemini Studio).
  *
- * Labels only already-parsed constructs from the JavaParser indexer.
+ * Indexer supplies Java-path ops; Gemini rewrites every field to business/schema paths.
  * Never free-form parses Java source.
  */
 
-import { GeminiLabelProvider, type LabelResponse } from "./geminiProvider.js";
+import {
+  GeminiLabelProvider,
+  type FieldMappingResponse,
+  type PipelineOpLabel,
+} from "./geminiProvider.js";
 import { loadGeminiConfig } from "./config.js";
 import { getLabelCache, setLabelCache } from "./cache/index.js";
 import { schemaContextForLabeler } from "../schema/io.js";
-import { groupOperationsByTarget } from "./groupMapping.js";
+import { groupOperationsByTarget, type FieldMapping, type PipelineOp } from "./groupMapping.js";
+import { filterMappingByFields } from "./filterByFields.js";
 
 export interface AstStep {
   kind: string;
@@ -45,17 +50,30 @@ export interface FieldMappingJson {
   pipeline: PipelineStep[];
 }
 
-export interface PipelineJson extends Omit<IndexAst, "steps" | "operations"> {
-  /** @deprecated flat list — prefer mapping */
-  operations?: PipelineStep[];
-  /** One entry per target field; pipeline holds READ/TRANSFORM/CONSTANT/… */
+/**
+ * Labeled pipeline. `npm run label` emits mapperId + mapping only (business paths).
+ * Optional Java envelope fields remain for view export / ast passthrough.
+ */
+export interface PipelineJson {
+  mapperId?: string;
   mapping: FieldMappingJson[];
   labeledAt?: string;
   labelModel?: string;
+  className?: string;
+  entryMethod?: string;
+  sourceType?: string;
+  targetType?: string;
+  sourceFile?: string;
 }
 
-export function operationsOf(ast: IndexAst | PipelineJson): AstStep[] {
+export function operationsOf(ast: IndexAst | { operations?: AstStep[]; steps?: AstStep[] }): AstStep[] {
   return ast.operations ?? ast.steps ?? [];
+}
+
+function stripCodeMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!meta) return undefined;
+  const { code: _c, ...rest } = meta;
+  return Object.keys(rest).length ? rest : undefined;
 }
 
 export class StepLabeler {
@@ -68,104 +86,110 @@ export class StepLabeler {
     this.model = config.model;
   }
 
-  async labelIndex(ast: IndexAst): Promise<PipelineJson> {
+  /**
+   * @param fieldSelectors optional `--fields` filters. Matches Java targets by leaf
+   *   before AI (saves calls), then result is business-path mapping.
+   */
+  async labelIndex(ast: IndexAst, fieldSelectors: string[] = []): Promise<PipelineJson> {
     const schemaContext = ast.mapperId ? schemaContextForLabeler(ast.mapperId) : undefined;
-    const operations: PipelineStep[] = [];
-    for (const step of operationsOf(ast)) {
-      operations.push(await this.labelOperation(step, schemaContext));
+    let grouped = groupOperationsByTarget(operationsOf(ast) as PipelineOp[]);
+    if (fieldSelectors.length > 0) {
+      grouped = filterMappingByFields(grouped, fieldSelectors);
     }
-    const { steps: _legacy, operations: _ops, ...rest } = ast;
+
+    const mapping: FieldMappingJson[] = [];
+    for (const entry of grouped) {
+      mapping.push(await this.labelFieldMapping(entry, schemaContext));
+    }
+
     return {
-      ...rest,
-      mapping: groupOperationsByTarget(operations),
+      mapperId: ast.mapperId,
+      mapping,
       labeledAt: new Date().toISOString(),
       labelModel: this.model,
     };
   }
 
-  private async labelOperation(step: AstStep, schemaContext?: string): Promise<PipelineStep> {
-    const labeled: PipelineStep = {
-      kind: step.kind,
-      targetField: step.targetField,
-      sourceField: step.sourceField,
-      condition: step.condition,
-      meta: step.meta,
-      labelSource: "deterministic",
-    };
-
-    const kind = (step.kind ?? "").toUpperCase();
-
-    if (kind === "CONSTANT") {
-      const value =
-        typeof step.meta?.value === "string" || typeof step.meta?.value === "number"
-          ? String(step.meta.value)
-          : undefined;
-      labeled.labelReason = value != null ? `Constant value: ${value}` : "Constant value";
-      return labeled;
-    }
-
-    if (kind === "READ") {
-      labeled.labelReason = "Direct field mapping";
-      return labeled;
-    }
-
-    if (kind === "TRANSFORM") {
-      const op = typeof step.meta?.op === "string" ? step.meta.op : "transform";
-      const value = step.meta?.value != null ? String(step.meta.value) : undefined;
-      labeled.labelReason =
-        value != null ? `${op} by ${value}` : op;
-      return labeled;
-    }
-
-    if (kind !== "RAW") {
-      return labeled;
-    }
-
-    const sourceText =
-      (typeof step.meta?.code === "string" ? step.meta.code : undefined) ??
-      step.sourceText ??
-      "";
-    const cached = getLabelCache(sourceText, this.model);
-    const response: LabelResponse =
-      (cached?.response as LabelResponse) ??
-      (await this.provider.labelStep({
-        sourceText,
-        currentKind: step.kind,
-        context: schemaContext,
+  private async labelFieldMapping(
+    entry: FieldMapping,
+    schemaContext?: string,
+  ): Promise<FieldMappingJson> {
+    const cacheKey = JSON.stringify({
+      javaTarget: entry.targetField,
+      ops: entry.pipeline,
+      schema: schemaContext ?? "",
+    });
+    const cached = getLabelCache(cacheKey, this.model);
+    const response: FieldMappingResponse =
+      (cached?.response as FieldMappingResponse) ??
+      (await this.provider.labelFieldMapping({
+        javaTargetField: entry.targetField,
+        indexerOps: entry.pipeline,
+        schemaContext,
       }));
 
     if (!cached) {
       setLabelCache({
-        sourceText,
+        sourceText: cacheKey,
         model: this.model,
         response,
         cachedAt: new Date().toISOString(),
       });
     }
 
-    if (response.recognized && response.kind) {
-      labeled.kind = response.kind.toUpperCase();
-      if (response.targetField) labeled.targetField = response.targetField;
-      if (response.kind.toLowerCase() === "constant") {
-        labeled.sourceField = undefined;
-        if (response.value != null) {
-          labeled.meta = { ...(labeled.meta ?? {}), value: response.value };
-        }
-      } else if (response.sourceField) {
-        labeled.sourceField = response.sourceField;
-      }
-      labeled.labelSource = "gemini";
-      labeled.labelReason = response.reason;
-      labeled.meta = labeled.meta?.code ? { ...labeled.meta } : labeled.meta;
-      if (labeled.meta && "code" in labeled.meta) {
-        const { code: _c, ...rest } = labeled.meta;
-        labeled.meta = Object.keys(rest).length ? rest : undefined;
-      }
-    } else {
-      labeled.labelSource = "deterministic";
-      labeled.labelReason = response.reason ?? "left as raw";
+    if (response.recognized && response.pipeline?.length && response.targetField) {
+      return {
+        targetField: response.targetField,
+        pipeline: response.pipeline.map((op) =>
+          this.fromPipelineOp(op, response.reason),
+        ),
+      };
     }
 
-    return labeled;
+    // Fallback: keep indexer ops under Java target (should be rare)
+    return {
+      targetField: entry.targetField,
+      pipeline: entry.pipeline.map((op) => ({
+        kind: op.kind,
+        sourceField: typeof op.sourceField === "string" ? op.sourceField : undefined,
+        condition: typeof op.condition === "string" ? op.condition : undefined,
+        meta: stripCodeMeta(
+          op.meta && typeof op.meta === "object"
+            ? (op.meta as Record<string, unknown>)
+            : undefined,
+        ),
+        labelSource: "deterministic",
+        labelReason: response.reason ?? "gemini did not rewrite field",
+      })),
+    };
+  }
+
+  private fromPipelineOp(op: PipelineOpLabel, reason: string | undefined): PipelineStep {
+    const kind = (op.kind ?? "raw").toUpperCase();
+    const step: PipelineStep = {
+      kind,
+      labelSource: "gemini",
+      labelReason: reason,
+    };
+
+    if (kind === "READ" || kind === "WRITE" || kind === "BUILD") {
+      if (op.sourceField) step.sourceField = op.sourceField;
+    }
+    if (kind === "FILTER" && op.condition) {
+      step.condition = op.condition;
+    }
+    if (kind === "CONSTANT") {
+      if (op.value != null) {
+        step.meta = { value: op.value };
+      }
+    }
+    if (kind === "TRANSFORM") {
+      step.meta = {};
+      if (op.op) step.meta.op = op.op;
+      if (op.value != null) step.meta.value = op.value;
+      if (op.sourceField) step.sourceField = op.sourceField;
+    }
+
+    return step;
   }
 }

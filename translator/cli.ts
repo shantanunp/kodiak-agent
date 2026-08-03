@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Label RAW AST ops via Gemini (Phase 2), emit grouped `mapping` (one per target field).
+ * AI-label mapper fields via Gemini → business/schema paths (no Java DTO paths).
  *
  *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
  *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DEAL.LOAN.LoanMaturityPeriodCount
@@ -64,21 +64,31 @@ async function main(): Promise<void> {
     ast = entry.ast;
   }
 
-  const labeler = new StepLabeler();
-  const pipeline = await labeler.labelIndex(ast);
   const selectors = parseFieldSelectors({
     field: values.field,
     fields: values.fields,
   });
+
+  const labeler = new StepLabeler();
+  const pipeline = await labeler.labelIndex(ast, selectors);
+
+  // Re-filter on business paths (AI may rename Java targets → MESSAGE.*)
   if (selectors.length > 0) {
     pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
   }
 
-  const { steps: _s, operations: _o, ...out } = pipeline as typeof pipeline & {
-    steps?: unknown;
-    operations?: unknown;
-  };
-  console.log(JSON.stringify(out, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        mapperId: pipeline.mapperId,
+        mapping: pipeline.mapping,
+        labeledAt: pipeline.labeledAt,
+        labelModel: pipeline.labelModel,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((err) => {

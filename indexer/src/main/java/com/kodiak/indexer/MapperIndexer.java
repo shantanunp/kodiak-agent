@@ -8,6 +8,7 @@ import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.expr.ArrayAccessExpr;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
@@ -80,6 +81,7 @@ public class MapperIndexer {
 
     Map<String, String> locals = new HashMap<>();
     Map<String, String> varPaths = new HashMap<>();
+    Map<String, Expression> varInits = new HashMap<>();
     bindParameters(entryMethod, locals, varPaths);
 
     result
@@ -91,6 +93,7 @@ public class MapperIndexer {
                 visited,
                 locals,
                 varPaths,
+                varInits,
                 null,
                 false));
     return result;
@@ -111,12 +114,13 @@ public class MapperIndexer {
       Set<String> visited,
       Map<String, String> locals,
       Map<String, String> varPaths,
+      Map<String, Expression> varInits,
       String nestRoot,
       boolean inlining) {
     List<AstStep> steps = new ArrayList<>();
     for (Statement stmt : block.getStatements()) {
       steps.addAll(
-          classify(classDecl, stmt, visited, locals, varPaths, nestRoot, inlining));
+          classify(classDecl, stmt, visited, locals, varPaths, varInits, nestRoot, inlining));
     }
     return steps;
   }
@@ -127,13 +131,14 @@ public class MapperIndexer {
       Set<String> visited,
       Map<String, String> locals,
       Map<String, String> varPaths,
+      Map<String, Expression> varInits,
       String nestRoot,
       boolean inlining) {
     if (stmt.isBlockStmt()) {
       return indexBlock(
-          classDecl, stmt.asBlockStmt(), visited, locals, varPaths, nestRoot, inlining);
+          classDecl, stmt.asBlockStmt(), visited, locals, varPaths, varInits, nestRoot, inlining);
     }
-    return classify(classDecl, stmt, visited, locals, varPaths, nestRoot, inlining);
+    return classify(classDecl, stmt, visited, locals, varPaths, varInits, nestRoot, inlining);
   }
 
   private List<AstStep> classify(
@@ -142,6 +147,7 @@ public class MapperIndexer {
       Set<String> visited,
       Map<String, String> locals,
       Map<String, String> varPaths,
+      Map<String, Expression> varInits,
       String nestRoot,
       boolean inlining) {
     if (stmt.isReturnStmt()) {
@@ -158,6 +164,7 @@ public class MapperIndexer {
       IfStmt ifStmt = stmt.asIfStmt();
       Map<String, String> branchLocals = new HashMap<>(locals);
       Map<String, String> branchPaths = new HashMap<>(varPaths);
+      Map<String, Expression> branchInits = new HashMap<>(varInits);
       List<AstStep> thenOps =
           indexStatement(
               classDecl,
@@ -165,6 +172,7 @@ public class MapperIndexer {
               new HashSet<>(visited),
               branchLocals,
               branchPaths,
+              branchInits,
               nestRoot,
               inlining);
       // Null guards (x != null / x == null) are implicit — flatten, do not emit FILTER
@@ -190,13 +198,13 @@ public class MapperIndexer {
         MethodCallExpr call = expr.asMethodCallExpr();
         Optional<List<AstStep>> inlined =
             tryInlineHelper(
-                classDecl, call, visited, locals, varPaths, null, stmt.toString());
+                classDecl, call, visited, locals, varPaths, varInits, null, stmt.toString());
         if (inlined.isPresent()) {
           return inlined.get();
         }
         if (call.getNameAsString().startsWith("set") && call.getArguments().size() == 1) {
           return classifySetter(
-              classDecl, call, visited, locals, varPaths, stmt.toString());
+              classDecl, call, visited, locals, varPaths, varInits, stmt.toString());
         }
       }
 
@@ -210,19 +218,26 @@ public class MapperIndexer {
           }
           Expression init = var.getInitializer().get();
           recordLocal(var, init, locals, varPaths, nestRoot);
+          varInits.put(var.getNameAsString(), init);
           String buildTarget = varPaths.getOrDefault(var.getNameAsString(), var.getNameAsString());
 
           if (init.isMethodCallExpr()) {
             MethodCallExpr initCall = init.asMethodCallExpr();
             Optional<List<AstStep>> inlined =
                 tryInlineHelper(
-                    classDecl, initCall, visited, locals, varPaths, null, stmt.toString());
+                    classDecl, initCall, visited, locals, varPaths, varInits, null, stmt.toString());
             if (inlined.isPresent()) {
               steps.addAll(inlined.get());
               continue;
             }
             // Getter/init into a local — not a target BUILD object
             if (resolveSourceFieldPath(init, locals, varPaths) != null) {
+              continue;
+            }
+            // Intermediate compute locals (splitName → String[], etc.) — track only for later RAW
+            if (isIntermediateLocalType(var.getType().asString())
+                || (isSameClassHelperCall(classDecl, initCall)
+                    && !isInlinableReturnType(initCall, classDecl))) {
               continue;
             }
             steps.add(AstStep.build(buildTarget, init.toString()));
@@ -279,6 +294,7 @@ public class MapperIndexer {
 
   /**
    * setFoo(arg) → CONSTANT / READ (path mapping) / WRITE. Helpers flatten in with nest path.
+   * Array-index from a helper (e.g. parts[0] from splitName) → RAW for Gemini labeling.
    */
   private List<AstStep> classifySetter(
       ClassOrInterfaceDeclaration classDecl,
@@ -286,6 +302,7 @@ public class MapperIndexer {
       Set<String> visited,
       Map<String, String> locals,
       Map<String, String> varPaths,
+      Map<String, Expression> varInits,
       String sourceText) {
     String leafField = accessorFieldName(call.getNameAsString(), "set");
     Expression arg = call.getArgument(0);
@@ -295,13 +312,26 @@ public class MapperIndexer {
       String nestRoot = nestRootForSetterArg(call, argCall, classDecl, locals, varPaths);
       Optional<List<AstStep>> inlined =
           tryInlineHelper(
-              classDecl, argCall, visited, locals, varPaths, nestRoot, sourceText);
+              classDecl, argCall, visited, locals, varPaths, varInits, nestRoot, sourceText);
       if (inlined.isPresent()) {
         return inlined.get();
       }
     }
 
     String targetPath = qualifyTargetField(call, locals, varPaths, leafField);
+
+    if (arg.isArrayAccessExpr()) {
+      return List.of(
+          rawForArrayDerivedSetter(
+              classDecl,
+              arg.asArrayAccessExpr(),
+              targetPath,
+              locals,
+              varPaths,
+              varInits,
+              sourceText));
+    }
+
     String constantValue = resolveConstantValue(classDecl, arg);
     if (constantValue != null) {
       return List.of(AstStep.constant(targetPath, constantValue));
@@ -318,6 +348,53 @@ public class MapperIndexer {
     }
 
     return List.of(AstStep.write(targetPath, arg.toString()));
+  }
+
+  /**
+   * Bundle assignment + setter + helper body so Gemini can label read/split/take/trim pipelines.
+   */
+  private AstStep rawForArrayDerivedSetter(
+      ClassOrInterfaceDeclaration classDecl,
+      ArrayAccessExpr access,
+      String targetPath,
+      Map<String, String> locals,
+      Map<String, String> varPaths,
+      Map<String, Expression> varInits,
+      String setterText) {
+    StringBuilder code = new StringBuilder();
+    if (access.getName().isNameExpr()) {
+      String arr = access.getName().asNameExpr().getNameAsString();
+      Expression init = varInits.get(arr);
+      if (init != null && init.isMethodCallExpr()) {
+        MethodCallExpr initCall = init.asMethodCallExpr();
+        if (!initCall.getArguments().isEmpty()) {
+          String hint =
+              resolveSourceFieldPath(initCall.getArgument(0), locals, varPaths);
+          if (hint != null) {
+            code.append("// sourceField: ").append(hint).append("\n");
+          }
+        }
+      }
+      if (init != null) {
+        code.append(arr).append(" = ").append(init).append(";\n");
+      }
+      code.append(setterText);
+      if (init != null && init.isMethodCallExpr()) {
+        MethodCallExpr initCall = init.asMethodCallExpr();
+        if (isSameClassHelperCall(classDecl, initCall)) {
+          MethodDeclaration helper =
+              classDecl.getMethodsByName(initCall.getNameAsString()).stream()
+                  .findFirst()
+                  .orElse(null);
+          if (helper != null) {
+            code.append("\n\n").append(helper);
+          }
+        }
+      }
+    } else {
+      code.append(setterText);
+    }
+    return AstStep.raw(code.toString(), targetPath);
   }
 
   /**
@@ -510,6 +587,7 @@ public class MapperIndexer {
       Set<String> visited,
       Map<String, String> parentLocals,
       Map<String, String> parentPaths,
+      Map<String, Expression> parentInits,
       String nestRoot,
       String sourceText) {
     if (!isSameClassHelperCall(classDecl, call)) {
@@ -524,11 +602,16 @@ public class MapperIndexer {
     if (helper == null || helper.getBody().isEmpty()) {
       return Optional.empty();
     }
+    // Only inline DTO builders — never String/String[]/scalar helpers (those stay RAW for AI)
+    if (!isInlinableReturnType(helper.getType().asString())) {
+      return Optional.empty();
+    }
     Set<String> nextVisited = new HashSet<>(visited);
     nextVisited.add(name);
 
     Map<String, String> helperLocals = new HashMap<>();
     Map<String, String> helperPaths = new HashMap<>();
+    Map<String, Expression> helperInits = new HashMap<>();
     List<Parameter> params = helper.getParameters();
     for (int i = 0; i < params.size(); i++) {
       Parameter param = params.get(i);
@@ -564,12 +647,69 @@ public class MapperIndexer {
             nextVisited,
             helperLocals,
             helperPaths,
+            helperInits,
             nestRoot,
             true);
     if (inlined.isEmpty()) {
       return Optional.of(List.of(AstStep.build(name, call.toString())));
     }
     return Optional.of(inlined);
+  }
+
+  /** True for custom DTO/object return types that should be inlined as nested mappings. */
+  private boolean isInlinableReturnType(String typeAsString) {
+    if (typeAsString == null || typeAsString.isBlank()) {
+      return false;
+    }
+    String t = typeAsString;
+    int generic = t.indexOf('<');
+    if (generic >= 0) {
+      t = t.substring(0, generic).trim();
+    }
+    if (t.endsWith("[]")) {
+      return false;
+    }
+    String simple = simpleName(resolveTypeFqcn(t));
+    if (simple == null || simple.isBlank()) {
+      return false;
+    }
+    return switch (simple) {
+      case "String",
+          "Integer",
+          "Long",
+          "Double",
+          "Float",
+          "Boolean",
+          "Byte",
+          "Short",
+          "Character",
+          "Object",
+          "void",
+          "int",
+          "long",
+          "double",
+          "float",
+          "boolean",
+          "byte",
+          "short",
+          "char" -> false;
+      default -> true;
+    };
+  }
+
+  private boolean isInlinableReturnType(
+      MethodCallExpr call, ClassOrInterfaceDeclaration classDecl) {
+    MethodDeclaration helper =
+        classDecl.getMethodsByName(call.getNameAsString()).stream().findFirst().orElse(null);
+    if (helper == null) {
+      return false;
+    }
+    return isInlinableReturnType(helper.getType().asString());
+  }
+
+  /** Locals that hold intermediate scalars/arrays — not BUILD targets. */
+  private boolean isIntermediateLocalType(String typeAsString) {
+    return !isInlinableReturnType(typeAsString);
   }
 
   /**

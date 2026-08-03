@@ -15,10 +15,10 @@ npm run build:indexer         # JavaParser shadow jar (needs JDK 21 — see note
 Two independent commands (do not need to run both):
 
 
-| Command         | Role                         | AI?                  |
-| --------------- | ---------------------------- | -------------------- |
-| `npm run ast`   | Deterministic AST index only | No                   |
-| `npm run label` | Index + Gemini labels        | Yes (RAW steps only) |
+| Command         | Role                                      | AI? |
+| --------------- | ----------------------------------------- | --- |
+| `npm run ast`   | Deterministic Java AST (Java DTO paths)   | No  |
+| `npm run label` | Index + Gemini → business/schema paths    | Yes (every field) |
 
 
 ```bash
@@ -44,9 +44,11 @@ npm run label -- --mapper lpa-request-mapper \
 --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
 ```
 
-Also accepts Java FQNs or bare leaf names (`MISMOReferenceModelIdentifier`). Prefer `MESSAGE.…` paths — they match the transform JSON.
+Prefer business `--fields` paths (`MESSAGE.…`). Leaf names and Java paths also match for filtering.
 
-Output uses `mapping`: one element per target field, each with a `pipeline` of ops (`READ`, `TRANSFORM`, `CONSTANT`, …). No `sourceText` / `children`.
+`npm run label` output is AI-owned business JSON: `mapperId` + `mapping` (schema paths like `MESSAGE.DEAL.PARTY.FirstName`, `applicant.displayName`) — no Java DTO envelope. `npm run ast` keeps Java paths for debugging.
+
+Each `mapping` entry has a `pipeline` of ops (`READ`, `TRANSFORM`, `CONSTANT`, …). No `sourceText` / `children`.
 
 After changing indexer Java, rebuild once: `npm run build:indexer`.
 

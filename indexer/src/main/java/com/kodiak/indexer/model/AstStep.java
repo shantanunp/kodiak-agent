@@ -32,6 +32,13 @@ public class AstStep {
     return step;
   }
 
+  /** RAW with a known target so Gemini can expand into a multi-op pipeline. */
+  public static AstStep raw(String code, String targetField) {
+    AstStep step = raw(code);
+    step.targetField = targetField;
+    return step;
+  }
+
   public static AstStep write(String targetField, String sourceField) {
     AstStep step = new AstStep();
     step.kind = Kind.WRITE;

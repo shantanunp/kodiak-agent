@@ -280,7 +280,17 @@ function convertStep(
             ? "Subtract"
             : opRaw === "divide"
               ? "Divide"
-              : opRaw;
+              : opRaw === "trim"
+                ? "Trim"
+                : opRaw === "split"
+                  ? "Split"
+                  : opRaw === "takefirst"
+                    ? "Take first"
+                    : opRaw === "takelast"
+                      ? "Take last"
+                      : opRaw === "takeindex"
+                        ? "Take index"
+                        : opRaw;
     const param = step.meta?.value;
     return [
       {
