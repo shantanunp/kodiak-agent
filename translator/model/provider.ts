@@ -70,7 +70,7 @@ The JavaParser indexer already extracted operations (hints only). You own the fi
 kinds, pipeline steps, and business/schema field paths.
 
 Allowed operation kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
-Transform "op" values: trim, split, takeFirst, takeLast, takeIndex, multiply, add, subtract, divide, uppercase, lowercase, join.
+Transform "op" values: trim, split, takeFirst, takeLast, takeIndex, multiply, add, subtract, divide, uppercase, lowercase, join, lettersOnly.
 
 CRITICAL — business paths only:
 - targetField and sourceField MUST come from the Known source/target fields in context (or a close leaf match).
@@ -89,6 +89,12 @@ Rules:
    {"kind":"transform","op":"trim"},
    {"kind":"transform","op":"split","value":" "},
    {"kind":"transform","op":"takeFirst"}]  // or takeLast for parts[1]
+- Letter sanitize / state-code normalize (trim + keep letters + uppercase, e.g. sanitizeAlpha / Character.isLetter loops):
+  [{"kind":"read","sourceField":"property.region"},
+   {"kind":"transform","op":"trim"},
+   {"kind":"transform","op":"lettersOnly"},
+   {"kind":"transform","op":"uppercase"}]
+  Do NOT drop lettersOnly when the code strips non-letters — it is a real transform, not implicit.
 - Drop meaningless null-guard filters.
 - If RAW meta.code is present, expand it into the correct pipeline.
 - If unsure, return recognized=false.
@@ -108,7 +114,7 @@ Return JSON only:
 Rules:
 - Prefer one entry per distinct target field. If the same field is set twice, include both snippets in codeSnippet or two entries with the same hint.
 - codeSnippet must be real code from the file (abbreviate long helpers with ... only in the middle).
-- When the setter argument is a same-class helper (or Optional/Stream chain) that trims, splits, filters, or otherwise transforms values, INLINE that helper method body (or the full chain) in codeSnippet — not only the setX(...) line. Short helpers for trim/split/take must be fully included.
+- When the setter argument is a same-class helper (or Optional/Stream chain) that trims, splits, filters, letter-sanitizes, uppercases, or otherwise transforms values, INLINE that helper method body (or the full chain) in codeSnippet — not only the setX(...) line. Short helpers for trim/split/take/sanitizeAlpha/toUpperCase must be fully included.
 - Do not invent mappings that are not in the source.
 - javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 

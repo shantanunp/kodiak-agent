@@ -271,26 +271,22 @@ function convertStep(
 
   if (kind === "transform") {
     const opRaw = typeof step.meta?.op === "string" ? step.meta.op : "transform";
-    const opLabel =
-      opRaw === "multiply"
-        ? "Multiply"
-        : opRaw === "add"
-          ? "Add"
-          : opRaw === "subtract"
-            ? "Subtract"
-            : opRaw === "divide"
-              ? "Divide"
-              : opRaw === "trim"
-                ? "Trim"
-                : opRaw === "split"
-                  ? "Split"
-                  : opRaw === "takefirst"
-                    ? "Take first"
-                    : opRaw === "takelast"
-                      ? "Take last"
-                      : opRaw === "takeindex"
-                        ? "Take index"
-                        : opRaw;
+    const opLabels: Record<string, string> = {
+      multiply: "Multiply",
+      add: "Add",
+      subtract: "Subtract",
+      divide: "Divide",
+      trim: "Trim",
+      split: "Split",
+      takefirst: "Take first",
+      takelast: "Take last",
+      takeindex: "Take index",
+      uppercase: "Uppercase",
+      lowercase: "Lowercase",
+      join: "Join",
+      lettersonly: "Letters only",
+    };
+    const opLabel = opLabels[opRaw.toLowerCase()] ?? opRaw;
     const param = step.meta?.value;
     return [
       {
