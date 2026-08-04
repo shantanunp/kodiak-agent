@@ -330,7 +330,7 @@ async function buildWithAi() {
     return;
   }
   if (!focusField) {
-    statusEl.textContent = 'No field in view. Run: npm run label -- --mapper … --fields MESSAGE.… first.';
+    statusEl.textContent = 'No field in view. Run: npm run label -- --mapper … --fields <schema.target.path> first.';
     statusEl.classList.add('error');
     return;
   }

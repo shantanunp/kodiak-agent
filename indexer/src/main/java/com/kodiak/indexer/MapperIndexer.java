@@ -363,7 +363,7 @@ public class MapperIndexer {
 
   /**
    * Bundle setter + scalar helper body so Gemini can label read/trim/filter pipelines.
-   * e.g. {@code setAddressLineText(mapAddressLineViaOptional(property))}
+   * e.g. {@code setStreetLine(mapStreetViaOptional(address))}
    */
   private AstStep rawForHelperDerivedSetter(
       ClassOrInterfaceDeclaration classDecl,
@@ -560,8 +560,7 @@ public class MapperIndexer {
   }
 
   /**
-   * Resolve {@code input.getRefNumber()} / chained getters to {@code
-   * LoanApplicationRequest.refNumber}.
+   * Resolve {@code input.getCustomerId()} / chained getters to {@code Customer.customerId}.
    */
   private String resolveSourceFieldPath(
       Expression expr, Map<String, String> locals, Map<String, String> varPaths) {

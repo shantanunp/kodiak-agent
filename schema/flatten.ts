@@ -32,7 +32,7 @@ function flattenRecursive(node: SchemaNode, prefix: string, fields: FlatField[])
   }
 }
 
-/** Flatten a schema tree to dotted paths, e.g. deal.loans[].loanIdentifier */
+/** Flatten a schema tree to dotted paths, e.g. customer.orders[].id */
 export function flattenSchema(root: SchemaNode, skipRoot = true): FlatField[] {
   const fields: FlatField[] = [];
   if (skipRoot) {

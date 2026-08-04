@@ -81,13 +81,13 @@ CRITICAL — business paths only:
 - NEVER emit Java class names, packages, or DTO type prefixes.
 - Forbidden substrings in field paths: "com.", "$", "dto.", and any Java package / FQCN prefix.
 - Good targets: Order.shipTo.postalCode, Customer.fullName, Invoice.lineItems[].amount
-- Good sources: customer.displayName, order.termYears, account.refNumber
+- Good sources: customer.displayName, order.quantity, account.refNumber
 
 Rules:
 - Indexer ops (READ/CONSTANT/TRANSFORM/RAW/…) are hints — correct them when wrong.
 - Literals/static finals → single constant step with "value"; never invent a read for constants.
 - Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads customer.displayName from the source."}]
-- Arithmetic (e.g. termYears * 12) → read + transform multiply with value "12"
+- Arithmetic (e.g. quantity * 12) → read + transform multiply with value "12"
 - Name-split (parts[0]/parts[1] from trim+split helper):
   [{"kind":"read","sourceField":"customer.displayName","summary":"…"},
    {"kind":"transform","op":"trim","summary":"…"},
@@ -119,7 +119,7 @@ Given the full Java source, list every place a target DTO field is set (setX(...
 Include writes inside helpers, Optional chains, ternaries, switch arms, and loops when they set a field.
 
 Return JSON only:
-{"mappings":[{"javaTargetHint":"Party.firstName or setFirstName","codeSnippet":"relevant lines including helper if needed","note":"optional"}]}
+{"mappings":[{"javaTargetHint":"Customer.firstName or setFirstName","codeSnippet":"relevant lines including helper if needed","note":"optional"}]}
 
 Rules:
 - Prefer one entry per distinct target field. If the same field is set twice, include both snippets in codeSnippet or two entries with the same hint.

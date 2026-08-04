@@ -6,12 +6,13 @@ Get labeling working on a Windows laptop in a few steps. Use **PowerShell**.
 
 ## You need
 
-| Tool | Version |
-|------|---------|
-| Node.js | 20+ |
-| JDK | 17+ (`JAVA_HOME` set) |
-| Gradle | 8.x on `PATH` |
-| Mapper repo checkout | e.g. `Kmismomapper` |
+| Tool                 | Version               |
+| -------------------- | --------------------- |
+| Node.js              | 20+                   |
+| JDK                  | 17+ (`JAVA_HOME` set) |
+| Gradle               | 8.x on `PATH`         |
+| Mapper repo checkout | your Java mapper repo |
+
 
 ```powershell
 node -v
@@ -20,7 +21,7 @@ gradle -v
 echo $env:JAVA_HOME
 ```
 
-Also clone the mapper repo (e.g. `Kmismomapper`) so you can use `--worktree` and skip GitHub for daily work.
+Also clone your mapper repo so you can use `--worktree` and skip GitHub for daily work.
 
 ---
 
@@ -69,126 +70,98 @@ npm run build:indexer
 
 Office Artifactory / npm mirrors should already be configured on your laptop (same as other projects). This repo has **no** `gradlew`.
 
+Edit `registry/mapping-registry.yaml` to point at your mapper repo and class files. Optionally add `registry/schemas/{mapperId}.schema.json`.
+
 ---
 
-## Daily commands
-
-Replace the worktree path with your mapper checkout.
-
-**Label one field** (AI discovery on; AST off by default):
+## Label a field (local worktree)
 
 ```powershell
-npm run label -- --mapper lpa-request-mapper `
-  --worktree C:\Users\<you>\Workspace\Kmismomapper `
-  --fields MESSAGE.DEAL.COLLATERAL.AddressLineText
+npm run label -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+  --fields Summary.displayName
 ```
 
-**Same, with AST confidence** (optional):
+Warm cache (same fingerprint):
 
 ```powershell
-npm run label -- --mapper lpa-request-mapper `
-  --worktree C:\Users\<you>\Workspace\Kmismomapper `
-  --fields MESSAGE.DEAL.COLLATERAL.AddressLineText `
-  --with-ast
+npm run label -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+  --fields Summary.displayName
 ```
 
-**Clear cache** (if results look stale):
+Clear caches:
 
 ```powershell
-npm run cache:clear -- --mapper lpa-request-mapper
+npm run cache:clear -- --mapper demo-ai-recognition-mapper
 ```
 
-**Inspect Java AST only** (no AI):
+AST only (no AI):
 
 ```powershell
-npm run ast -- --mapper lpa-request-mapper `
-  --worktree C:\Users\<you>\Workspace\Kmismomapper
+npm run ast -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo
 ```
 
-**Local UI** (optional):
+---
+
+## UI
 
 ```powershell
 npm run ui:serve
-# http://localhost:4173/pipeline-viewer/?mapper=lpa-request-mapper
+# http://localhost:4173/pipeline-viewer/?mapper=demo-ai-recognition-mapper
 ```
 
-**Build with AI** (POC pipeline viewer) — scoped to one labeled field:
+**Build with AI (POC):**
 
-1. Set `MAPPER_WORKTREE` + `MODEL_API_KEY` in `.env`.
-2. Label one field and open the viewer:
+1. Label one field first:
    ```powershell
-   npm run label -- --mapper lpa-request-mapper `
-     --worktree C:\Users\<you>\Workspace\Kmismomapper `
-     --fields MESSAGE.DEAL.COLLATERAL.PostalCode --no-cache
-   npm run ui:serve
-   # http://localhost:4173/pipeline-viewer/?mapper=lpa-request-mapper&fields=MESSAGE.DEAL.COLLATERAL.PostalCode
+   npm run label -- --mapper demo-ai-recognition-mapper `
+     --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+     --fields Summary.displayName --no-cache
    ```
-3. Click **Build with AI** with a change request — only helpers for that field are edited, then that field is re-labeled.
-
-Git commit / push / PR is later. Review diffs in the mapper repo yourself.
-
-Tips:
-
-- Prefer `--fields` so you don’t burn quota labeling everything.
-- Prefer `--worktree` over `--remote` (no GitHub needed).
-- Second label run should show `"cacheHit": true` unless you pass `--no-cache`.
+2. Open the viewer with that mapper/field.
+3. Set `MAPPER_WORKTREE` in `.env` to the same checkout.
+4. Describe a change and click **Build with AI**.
 
 ---
 
 ## Switch model provider
 
-| Env var | Meaning |
-|---------|---------|
-| `MODEL_API_KEY` | Required |
+| Variable | Values |
+| -------- | ------ |
 | `MODEL_API_STYLE` | `openai`, `claude`, or `copilot` |
 | `MODEL_BASE_URL` | API host (no trailing slash; copilot: `https://api.githubcopilot.com`) |
-| `MODEL_NAME` | Model id |
 
 `STYLE` must match the endpoint shape (don’t point `claude` style at an OpenAI URL).
 
 ---
 
-## Offline (no model API)
-
-When the office blocks model APIs:
+## Offline agent jobs (optional)
 
 ```powershell
-npm run label:export -- --mapper lpa-request-mapper `
-  --worktree C:\Users\<you>\Workspace\Kmismomapper `
-  --fields MESSAGE.DEAL.PARTY.LastName
+npm run label:export -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+  --fields Summary.displayName
 
-# Open .cache\agent-jobs\...\job.json in Cursor → write result.json
+# complete result.json via Cursor / offline agent, then:
 
-npm run label:import -- --mapper lpa-request-mapper `
-  --worktree C:\Users\<you>\Workspace\Kmismomapper `
-  --fields MESSAGE.DEAL.PARTY.LastName
+npm run label:import -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+  --fields Summary.displayName
 
-npm run label -- --mapper lpa-request-mapper `
-  --worktree C:\Users\<you>\Workspace\Kmismomapper `
-  --fields MESSAGE.DEAL.PARTY.LastName `
+npm run label -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+  --fields Summary.displayName `
   --from-cache-only
-```
-
----
-
-## Point at another mapper
-
-1. Edit `registry/mapping-registry.yaml` (`repo`, `scope`, `mappers` entry).
-2. Optional: add `registry/schemas/<mapper-id>.schema.json`.
-3. Run with `--worktree` to that repo root (folder that contains `src\main\java\...`).
-
-```powershell
-npm run label -- --mapper my-test-mapper `
-  --worktree C:\Users\<you>\Workspace\MyMapperRepo `
-  --fields <business.field.Path>
 ```
 
 ---
 
 ## Checklist
 
-- [ ] Node 20+, JDK 17+, Gradle on PATH  
-- [ ] `.env` has `MODEL_API_KEY`  
-- [ ] `npm install` && `npm run build:indexer`  
-- [ ] Mapper repo on disk  
-- [ ] `npm run label -- … --worktree … --fields …` returns a pipeline  
+- [ ] `npm install` && `npm run build:indexer`
+- [ ] Registry points at your mapper repo
+- [ ] `MODEL_API_KEY` (or style-specific key) in `.env`
+- [ ] `npm run label -- --mapper … --worktree … --fields …`
+- [ ] `npm run ui:serve` and open the pipeline viewer

@@ -20,7 +20,7 @@ describe("normalizeKeepDigitsOp", () => {
 describe("applyFieldMappingResponse", () => {
   it("keeps the model pipeline as-is (no lettersOnly repair)", () => {
     const entry: FieldMapping = {
-      targetField: "StateCode",
+      targetField: "regionCode",
       pipeline: [
         {
           kind: "RAW",
@@ -32,7 +32,7 @@ describe("applyFieldMappingResponse", () => {
     };
     const labeled = applyFieldMappingResponse(entry, {
       recognized: true,
-      targetField: "Order.shipTo.regionCode",
+      targetField: "DeliveryPayload.shipTo.regionCode",
       reason: "trim → keepDigits → uppercase; sanitizeAlpha wraps keepDigits",
       pipeline: [
         { kind: "read", sourceField: "address.region", summary: "Reads region." },
@@ -51,33 +51,33 @@ describe("applyFieldMappingResponse", () => {
 
   it("keeps per-step summary from the model response", () => {
     const entry: FieldMapping = {
-      targetField: "PostalCode",
-      pipeline: [{ kind: "RAW", meta: { code: "setPostalCode(trimPostal(p));" } }],
+      targetField: "postalCode",
+      pipeline: [{ kind: "RAW", meta: { code: "setPostalCode(trimValue(p));" } }],
     };
     const labeled = applyFieldMappingResponse(entry, {
       recognized: true,
-      targetField: "Order.shipTo.postalCode",
+      targetField: "DeliveryPayload.shipTo.postalCode",
       reason: "postal pipeline",
       pipeline: [
         {
           kind: "read",
           sourceField: "address.postalCode",
-          summary: "Reads property.postalCode from the source.",
+          summary: "Reads address.postalCode from the source.",
         },
         {
           kind: "transform",
           op: "trim",
-          summary: "trimPostal removes leading and trailing whitespace.",
+          summary: "trimValue removes leading and trailing whitespace.",
         },
       ],
     });
     assert.equal(
       labeled.pipeline[0]?.summary,
-      "Reads property.postalCode from the source.",
+      "Reads address.postalCode from the source.",
     );
     assert.equal(
       labeled.pipeline[1]?.summary,
-      "trimPostal removes leading and trailing whitespace.",
+      "trimValue removes leading and trailing whitespace.",
     );
   });
 });

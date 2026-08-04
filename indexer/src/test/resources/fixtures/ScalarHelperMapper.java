@@ -5,7 +5,7 @@ import java.util.Optional;
 /** Fixture: setter fed by a scalar String helper with Optional.trim. */
 public class ScalarHelperMapper {
 
-  public static class Property {
+  public static class Address {
     private String street;
 
     public String getStreet() {
@@ -13,41 +13,41 @@ public class ScalarHelperMapper {
     }
   }
 
-  public static class Collateral {
-    private String addressLineText;
+  public static class Destination {
+    private String streetLine;
 
-    public void setAddressLineText(String addressLineText) {
-      this.addressLineText = addressLineText;
+    public void setStreetLine(String streetLine) {
+      this.streetLine = streetLine;
     }
   }
 
   public static class Source {
-    private Property property;
+    private Address address;
 
-    public Property getProperty() {
-      return property;
+    public Address getAddress() {
+      return address;
     }
   }
 
   public static class Target {
-    private Collateral collateral;
+    private Destination destination;
 
-    public void setCollateral(Collateral collateral) {
-      this.collateral = collateral;
+    public void setDestination(Destination destination) {
+      this.destination = destination;
     }
   }
 
   public Target map(Source source) {
     Target target = new Target();
-    Collateral collateral = new Collateral();
-    collateral.setAddressLineText(mapAddressLineViaOptional(source.getProperty()));
-    target.setCollateral(collateral);
+    Destination destination = new Destination();
+    destination.setStreetLine(mapStreetViaOptional(source.getAddress()));
+    target.setDestination(destination);
     return target;
   }
 
-  private String mapAddressLineViaOptional(Property property) {
-    return Optional.ofNullable(property)
-        .map(Property::getStreet)
+  private String mapStreetViaOptional(Address address) {
+    return Optional.ofNullable(address)
+        .map(Address::getStreet)
         .map(String::trim)
         .filter(s -> !s.isEmpty())
         .orElse(null);

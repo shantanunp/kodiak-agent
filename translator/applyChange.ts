@@ -160,7 +160,7 @@ export async function applyChangeToMapper(options: ApplyChangeOptions): Promise<
     .filter(Boolean);
   if (focusFields.length === 0) {
     throw new Error(
-      "focusFields required. Run npm run label -- --fields <MESSAGE.…> first, then Build with AI on that field.",
+      "focusFields required. Run npm run label -- --fields <schema.target.path> first, then Build with AI on that field.",
     );
   }
 

@@ -173,7 +173,7 @@
 
   <div class="ai-bar">
     <span class="ai-bar-icon">&#10022;</span>
-    <input id="aiInput" type="text" placeholder="Describe the structure, e.g. a loan with borrowers (first name, last name, email) and a property address" />
+    <input id="aiInput" type="text" placeholder="Describe the structure, e.g. a customer with profile (first name, last name, email) and a shipping address" />
     <select id="aiTarget">
       <option value="source">Draft into: Source</option>
       <option value="target">Draft into: Target</option>
@@ -857,38 +857,38 @@ const MODE_LABEL = {
 };
 const SAMPLES = {
   'payload-json': JSON.stringify({
-    loanIdentifier:"LN-8842", loanType:"CONVENTIONAL", noteAmount:325000.5, closingDate:"2026-03-14",
-    borrowers:[{firstName:"Ada", lastName:"Lovelace", email:"ada@example.com", primary:true}],
-    property:{ addressLineText:"1 Analytical Way", cityName:"London", stateCode:"NA", postalCode:"00001" }
+    customerId:"C-8842", status:"active", amount:325.5, createdOn:"2026-03-14",
+    contacts:[{firstName:"Ada", lastName:"Lovelace", email:"ada@example.com", primary:true}],
+    address:{ line:"1 Analytical Way", city:"London", region:"NA", postalCode:"00001" }
   }, null, 2),
   'json-schema': JSON.stringify({
-    type:"object", description:"Loan delivery", required:["loanId"],
+    type:"object", description:"Delivery payload", required:["customerId"],
     properties:{
-      loanId:{type:"string", description:"Uppercased id"},
-      purpose:{type:"string"},
+      customerId:{type:"string", description:"Uppercased id"},
+      status:{type:"string"},
       amount:{type:"number"},
-      parties:{ type:"array", items:{ type:"object", properties:{ name:{type:"string"}, contact:{type:"string", format:"email"} } } }
+      contacts:{ type:"array", items:{ type:"object", properties:{ name:{type:"string"}, contact:{type:"string", format:"email"} } } }
     }
   }, null, 2),
-  'payload-xml': `<LOAN>
-  <loanIdentifier>LN-8842</loanIdentifier>
-  <loanType>FHA</loanType>
-  <borrowers>
-    <borrower><firstName>Ada</firstName><lastName>Lovelace</lastName></borrower>
-    <borrower><firstName>Alan</firstName><lastName>Turing</lastName></borrower>
-  </borrowers>
-  <property region="US"><city>London</city><postalCode>00001</postalCode></property>
-</LOAN>`,
+  'payload-xml': `<Customer>
+  <customerId>C-8842</customerId>
+  <status>active</status>
+  <contacts>
+    <contact><firstName>Ada</firstName><lastName>Lovelace</lastName></contact>
+    <contact><firstName>Alan</firstName><lastName>Turing</lastName></contact>
+  </contacts>
+  <address region="US"><city>London</city><postalCode>00001</postalCode></address>
+</Customer>`,
   'xsd': `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <xs:element name="LOAN">
+  <xs:element name="Customer">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="loanIdentifier" type="xs:string" minOccurs="1">
-          <xs:annotation><xs:documentation>Unique loan id</xs:documentation></xs:annotation>
+        <xs:element name="customerId" type="xs:string" minOccurs="1">
+          <xs:annotation><xs:documentation>Unique customer id</xs:documentation></xs:annotation>
         </xs:element>
-        <xs:element name="noteAmount" type="xs:decimal"/>
-        <xs:element name="closingDate" type="xs:date"/>
-        <xs:element name="borrowers" maxOccurs="unbounded">
+        <xs:element name="amount" type="xs:decimal"/>
+        <xs:element name="createdOn" type="xs:date"/>
+        <xs:element name="contacts" maxOccurs="unbounded">
           <xs:complexType>
             <xs:sequence>
               <xs:element name="firstName" type="xs:string"/>
@@ -960,13 +960,13 @@ function aiDraft(){
     const root = makeNode(schemas[key].root.name, 'object', {doc:'AI draft from: "'+intent+'"'});
     const lower = intent.toLowerCase();
     root.children.push(makeNode('id','string',{required:true}));
-    if(/borrower|part(y|ies)|customer|person/.test(lower)){
-      const arr = makeNode('borrowers','array',{doc:'People on the record'});
-      const item = makeNode('borrower','object');
+    if(/customer|person|contact|user/.test(lower)){
+      const arr = makeNode('contacts','array',{doc:'People on the record'});
+      const item = makeNode('contact','object');
       item.children = [makeNode('firstName','string',{required:true}), makeNode('lastName','string',{required:true}), makeNode('email','string')];
       arr.children=[item]; root.children.push(arr);
     }
-    if(/address|property|collateral/.test(lower)){
+    if(/address|shipping|location/.test(lower)){
       const addr = makeNode('address','object');
       addr.children=[makeNode('line','string'),makeNode('city','string'),makeNode('state','string'),makeNode('postalCode','string')];
       root.children.push(addr);

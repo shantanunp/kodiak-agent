@@ -55,17 +55,17 @@ class MapperIndexerTest {
     IndexResult result = new MapperIndexer().index(entry, worktree);
     AstStep address =
         result.getOperations().stream()
-            .filter(s -> s.getTargetField() != null && s.getTargetField().endsWith("addressLineText"))
+            .filter(s -> s.getTargetField() != null && s.getTargetField().endsWith("streetLine"))
             .findFirst()
             .orElse(null);
 
-    assertNotNull(address, "expected addressLineText step");
+    assertNotNull(address, "expected streetLine step");
     assertTrue(address.getKind() == AstStep.Kind.RAW, "scalar helper should be RAW, not bare WRITE");
     Object code = address.getMeta() != null ? address.getMeta().get("code") : null;
     assertNotNull(code);
     String codeText = code.toString();
-    assertTrue(codeText.contains("mapAddressLineViaOptional"), codeText);
+    assertTrue(codeText.contains("mapStreetViaOptional"), codeText);
     assertTrue(codeText.contains("String::trim"), codeText);
-    assertTrue(codeText.contains("Property::getStreet"), codeText);
+    assertTrue(codeText.contains("Address::getStreet"), codeText);
   }
 }

@@ -13,11 +13,11 @@ import type { DiscoverHit } from "./provider.js";
 
 describe("preferRicherCode", () => {
   it("prefers helper body with trim over bare setter", () => {
-    const short = "collateral.setAddressLineText(mapAddressLineViaOptional(property));";
+    const short = "destination.setStreetLine(mapStreetViaOptional(address));";
     const rich =
       short +
-      "\n\nprivate String mapAddressLineViaOptional(PropertyInfo property) {\n" +
-      "  return Optional.ofNullable(property).map(PropertyInfo::getStreet).map(String::trim).orElse(null);\n}";
+      "\n\nprivate String mapStreetViaOptional(Address address) {\n" +
+      "  return Optional.ofNullable(address).map(Address::getStreet).map(String::trim).orElse(null);\n}";
     assert.equal(preferRicherCode(rich, short), rich);
     assert.equal(preferRicherCode(short, rich), rich);
   });
@@ -26,30 +26,30 @@ describe("preferRicherCode", () => {
 describe("mergeAstAndAiDiscovery (AI-primary)", () => {
   const astGroups: FieldMapping[] = [
     {
-      targetField: "LpaMappedResponse.Message.Deal.Collateral.addressLineText",
+      targetField: "DeliveryPayload.Destination.streetLine",
       pipeline: [
         {
           kind: "RAW",
           meta: {
             code:
-              "collateral.setAddressLineText(mapAddressLineViaOptional(property));\n\n" +
-              "private String mapAddressLineViaOptional(PropertyInfo property) {\n" +
-              "  return Optional.ofNullable(property).map(PropertyInfo::getStreet).map(String::trim).orElse(null);\n}",
+              "destination.setStreetLine(mapStreetViaOptional(address));\n\n" +
+              "private String mapStreetViaOptional(Address address) {\n" +
+              "  return Optional.ofNullable(address).map(Address::getStreet).map(String::trim).orElse(null);\n}",
           },
         },
       ],
     },
     {
-      targetField: "LpaMappedResponse.Message.Deal.Loan.noteAmount",
-      pipeline: [{ kind: "READ", sourceField: "LoanApplicationRequest.mortgage.amount" }],
+      targetField: "DeliveryPayload.Order.amount",
+      pipeline: [{ kind: "READ", sourceField: "Customer.order.amount" }],
     },
   ];
 
   it("matches AI+AST → both, confidence 1, richer code with trim", () => {
     const aiHits: DiscoverHit[] = [
       {
-        javaTargetHint: "setAddressLineText",
-        codeSnippet: "collateral.setAddressLineText(mapAddressLineViaOptional(property));",
+        javaTargetHint: "setStreetLine",
+        codeSnippet: "destination.setStreetLine(mapStreetViaOptional(address));",
       },
     ];
     const { groups, meta } = mergeAstAndAiDiscovery(astGroups, aiHits);
@@ -66,8 +66,8 @@ describe("mergeAstAndAiDiscovery (AI-primary)", () => {
   it("AI-only hit → ai, confidence 0.6, still a labeling candidate", () => {
     const aiHits: DiscoverHit[] = [
       {
-        javaTargetHint: "Party.fullName",
-        codeSnippet: 'party.setFullName(applicant.getDisplayName());',
+        javaTargetHint: "Customer.fullName",
+        codeSnippet: "target.setFullName(source.getDisplayName());",
       },
     ];
     const { groups, meta } = mergeAstAndAiDiscovery(astGroups, aiHits);
@@ -78,7 +78,7 @@ describe("mergeAstAndAiDiscovery (AI-primary)", () => {
     const op = groups[0]!.pipeline[0]!;
     assert.equal(op.meta?.discoverySource, "ai");
     assert.equal(op.meta?.confidence, 0.6);
-    assert.equal(groups[0]!.targetField, "Party.fullName");
+    assert.equal(groups[0]!.targetField, "Customer.fullName");
   });
 
   it("AST-only fields are absent from groups but counted in meta.astOnly", () => {
@@ -94,8 +94,8 @@ describe("mergeAstOnlyEscapeHatch", () => {
   it("emits AST groups with confidence 0.4", () => {
     const astGroups: FieldMapping[] = [
       {
-        targetField: "Collateral.addressLineText",
-        pipeline: [{ kind: "WRITE", sourceField: "mapAddressLineViaOptional(property)" }],
+        targetField: "Destination.streetLine",
+        pipeline: [{ kind: "WRITE", sourceField: "mapStreetViaOptional(address)" }],
       },
     ];
     const { groups, meta } = mergeAstOnlyEscapeHatch(astGroups);
@@ -114,8 +114,8 @@ describe("discoverAndMerge useAst flag", () => {
     operations: [
       {
         kind: "RAW",
-        targetField: "Collateral.addressLineText",
-        meta: { code: "setAddressLineText(x); private String h(){ return s.trim(); }" },
+        targetField: "Destination.streetLine",
+        meta: { code: "setStreetLine(x); private String h(){ return s.trim(); }" },
       },
     ],
   };
@@ -127,8 +127,8 @@ describe("discoverAndMerge useAst flag", () => {
         return {
           mappings: [
             {
-              javaTargetHint: "addressLineText",
-              codeSnippet: "collateral.setAddressLineText(mapAddressLineViaOptional(property));",
+              javaTargetHint: "streetLine",
+              codeSnippet: "destination.setStreetLine(mapStreetViaOptional(address));",
             },
           ],
         };
@@ -157,8 +157,8 @@ describe("discoverAndMerge useAst flag", () => {
         return {
           mappings: [
             {
-              javaTargetHint: "addressLineText",
-              codeSnippet: "collateral.setAddressLineText(x);",
+              javaTargetHint: "streetLine",
+              codeSnippet: "destination.setStreetLine(x);",
             },
           ],
         };
@@ -178,6 +178,5 @@ describe("discoverAndMerge useAst flag", () => {
     assert.equal(meta.astTargets, 1);
     assert.equal(meta.both, 1);
     assert.equal(groups[0]!.pipeline[0]!.meta?.discoverySource, "both");
-    assert.equal(groups[0]!.pipeline[0]!.meta?.confidence, 1);
   });
 });

@@ -12,7 +12,7 @@ When the user asks you to complete an offline label job (or you have `.cache/age
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
 3. For **each** entry in `fields[]`, produce a `FieldMappingResponse`:
    - `recognized` (boolean)
-   - `targetField` (business path from schema, e.g. `MESSAGE.DEAL.PARTY.LastName`)
+   - `targetField` (business path from schema, e.g. `DeliveryPayload.shipTo.postalCode`)
    - `pipeline` (array of steps: read / transform / constant / …)
    - `reason` (short string)
 4. Write **only** `result.json` next to `job.json` with this shape:
@@ -27,8 +27,8 @@ When the user asks you to complete an offline label job (or you have `.cache/age
       "javaTargetField": "<from job.fields[i].javaTargetField>",
       "response": {
         "recognized": true,
-        "targetField": "MESSAGE.…",
-        "pipeline": [{ "kind": "read", "sourceField": "…" }],
+        "targetField": "DeliveryPayload.…",
+        "pipeline": [{ "kind": "read", "sourceField": "…", "summary": "…" }],
         "reason": "…"
       }
     }

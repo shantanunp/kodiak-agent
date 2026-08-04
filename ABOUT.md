@@ -2,7 +2,7 @@
 
 Orchestrator for viewing and proposing changes to prod Java mapping logic. Java classes in GitHub (or a local worktree) are the source of truth; this tool discovers, indexes, and labels them — without migrating logic to a new framework.
 
-It is **not** tied to a specific domain schema: any registered mapper + optional schema works. The sample registry uses a public demo mapper repo as one example.
+It is **not** tied to a specific domain schema: any registered mapper + optional schema works. Configure `registry/mapping-registry.yaml` for your Java mapper repo.
 
 ---
 
@@ -169,8 +169,8 @@ Business user views pipeline (read-only)
 
 | ID                           | Source file                                      |
 | ---------------------------- | ------------------------------------------------ |
-| `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` — small canary    |
-| `lpa-request-mapper`         | `LpaRequestMapper.java` — sample mapper in demo repo |
+| `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` — small canary |
+
 
 
 ---

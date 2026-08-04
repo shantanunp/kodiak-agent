@@ -227,7 +227,7 @@ createServer(async (req, res) => {
       if (!fieldsFilter) {
         sendJson(res, 400, {
           error:
-            "fields required. Run npm run label -- --fields MESSAGE.… first, then Build with AI on that field.",
+            "fields required. Run npm run label -- --fields <schema.target.path> first, then Build with AI on that field.",
         });
         return;
       }

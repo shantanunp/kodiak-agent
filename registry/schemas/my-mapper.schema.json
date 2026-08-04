@@ -1,53 +1,82 @@
 {
   "version": 1,
   "mapperId": "my-mapper",
-  "savedAt": "2026-07-31T06:22:15.790Z",
   "source": {
     "method": "manual",
     "root": {
-      "id": "n5",
-      "name": "LoanApplicationRequest",
+      "id": "src-root",
+      "name": "Customer",
       "type": "object",
       "required": false,
-      "description": "",
       "children": [
         {
-          "id": "n6",
-          "name": "refNumber",
+          "id": "src-id",
+          "name": "customerId",
           "type": "string",
-          "required": false,
-          "description": "",
+          "required": true,
           "children": []
         },
         {
-          "id": "n7",
-          "name": "applicant",
+          "id": "src-profile",
+          "name": "profile",
           "type": "object",
           "required": false,
-          "description": "",
           "children": [
             {
-              "id": "n9",
-              "name": "displayName",
+              "id": "src-first",
+              "name": "firstName",
               "type": "string",
-              "required": false,
-              "description": "",
+              "required": true,
               "children": []
             },
             {
-              "id": "n10",
-              "name": "dateOfBirth",
+              "id": "src-last",
+              "name": "lastName",
               "type": "string",
-              "required": false,
-              "description": "",
+              "required": true,
               "children": []
             },
             {
-              "id": "n11",
-              "name": "governmentId",
+              "id": "src-email",
+              "name": "email",
               "type": "string",
               "required": false,
-              "description": "",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "src-address",
+          "name": "address",
+          "type": "object",
+          "required": false,
+          "children": [
+            {
+              "id": "src-line",
+              "name": "line",
+              "type": "string",
+              "required": false,
+              "children": []
+            },
+            {
+              "id": "src-city",
+              "name": "city",
+              "type": "string",
+              "required": false,
+              "children": []
+            },
+            {
+              "id": "src-region",
+              "name": "region",
+              "type": "string",
+              "required": false,
+              "children": []
+            },
+            {
+              "id": "src-postal",
+              "name": "postalCode",
+              "type": "string",
+              "required": false,
               "children": []
             }
           ]
@@ -58,71 +87,58 @@
   "target": {
     "method": "manual",
     "root": {
-      "id": "n8",
-      "name": "LPALoanAssessmentServiceRequest",
+      "id": "tgt-root",
+      "name": "DeliveryPayload",
       "type": "object",
       "required": false,
-      "description": "",
       "children": [
         {
-          "id": "n12",
-          "name": "MESSAGE",
+          "id": "tgt-id",
+          "name": "customerId",
+          "type": "string",
+          "required": true,
+          "children": []
+        },
+        {
+          "id": "tgt-name",
+          "name": "fullName",
+          "type": "string",
+          "required": false,
+          "children": []
+        },
+        {
+          "id": "tgt-ship",
+          "name": "shipTo",
           "type": "object",
           "required": false,
-          "description": "",
           "children": [
             {
-              "id": "n13",
-              "name": "MISMOReferenceModelIdentifier",
+              "id": "tgt-line",
+              "name": "line",
               "type": "string",
               "required": false,
-              "description": "",
               "children": []
             },
             {
-              "id": "n14",
-              "name": "ABOUT_VERSIONS",
-              "type": "object",
+              "id": "tgt-city",
+              "name": "city",
+              "type": "string",
               "required": false,
-              "description": "",
-              "children": [
-                {
-                  "id": "n15",
-                  "name": "ABOUT_VERSION",
-                  "type": "array",
-                  "required": false,
-                  "description": "",
-                  "children": [
-                    {
-                      "id": "n17",
-                      "name": "item",
-                      "type": "object",
-                      "required": false,
-                      "description": "",
-                      "children": [
-                        {
-                          "id": "n18",
-                          "name": "DataVersionIdentifier",
-                          "type": "object",
-                          "required": false,
-                          "description": "",
-                          "children": [
-                            {
-                              "id": "n19",
-                              "name": "Value",
-                              "type": "string",
-                              "required": false,
-                              "description": "",
-                              "children": []
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ],
-                  "itemType": "object"
-                }
-              ]
+              "children": []
+            },
+            {
+              "id": "tgt-region",
+              "name": "regionCode",
+              "type": "string",
+              "required": false,
+              "children": []
+            },
+            {
+              "id": "tgt-postal",
+              "name": "postalCode",
+              "type": "string",
+              "required": false,
+              "children": []
             }
           ]
         }

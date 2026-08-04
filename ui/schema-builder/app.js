@@ -747,9 +747,9 @@ function aiDraft() {
     const root = makeNode(schemas[key].root.name, "object", { doc: 'AI draft from: "' + intent + '"' });
     const lower = intent.toLowerCase();
     root.children.push(makeNode("id", "string", { required: true }));
-    if (/borrower|part(y|ies)|customer|person/.test(lower)) {
-      const arr = makeNode("borrowers", "array", { doc: "People on the record" });
-      const item = makeNode("borrower", "object");
+    if (/customer|person|contact|user/.test(lower)) {
+      const arr = makeNode("contacts", "array", { doc: "People on the record" });
+      const item = makeNode("contact", "object");
       item.children = [
         makeNode("firstName", "string", { required: true }),
         makeNode("lastName", "string", { required: true }),
@@ -758,7 +758,7 @@ function aiDraft() {
       arr.children = [item];
       root.children.push(arr);
     }
-    if (/address|property|collateral/.test(lower)) {
+    if (/address|shipping|location/.test(lower)) {
       const addr = makeNode("address", "object");
       addr.children = [
         makeNode("line", "string"),

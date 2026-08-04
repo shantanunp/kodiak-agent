@@ -19,7 +19,7 @@ function leaf(path: string): string {
   return part.replace(/\[\]$/, "");
 }
 
-/** Strip JavaBean get/set/is so setAddressLineText matches AddressLineText. */
+/** Strip JavaBean get/set/is so setStreetLine matches streetLine. */
 function beanLeaf(path: string): string {
   return normalize(leaf(path)).replace(/^(set|get|is)/, "");
 }

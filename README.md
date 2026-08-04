@@ -2,14 +2,14 @@
 
 Orchestrator for Java mapping discovery, indexing, and pipeline visualization — generic for any source→target data transformation.
 
-Register your mapper in `registry/mapping-registry.yaml` and optionally add `registry/schemas/{mapperId}.schema.json`. The sample registry points at a public demo mapper repo; swap it for yours.
+Register your mapper in `registry/mapping-registry.yaml` and optionally add `registry/schemas/{mapperId}.schema.json`.
 
 ## Quick start
 
 ```bash
 cp .env.example .env          # MODEL_API_KEY required for label; GITHUB_TOKEN optional
 npm install
-npm run build:indexer         # JavaParser shadow jar (needs JDK 21 — see note below)
+npm run build:indexer         # JavaParser shadow jar (needs JDK — see note below)
 ```
 
 Two independent commands (do not need to run both):
@@ -23,23 +23,23 @@ Two independent commands (do not need to run both):
 
 ```bash
 # 1) AST only — local checkout, no AI
-npm run ast -- --mapper lpa-request-mapper \
-  --worktree /home/shantanu/Workspace/vscode/Kmismomapper
+npm run ast -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/your-mapper-repo
 
 # 2) AI label — remote GitHub, or local worktree for unpushed mapper changes
-npm run label -- --mapper lpa-request-mapper --remote
+npm run label -- --mapper demo-ai-recognition-mapper --remote
 
-npm run label -- --mapper lpa-request-mapper \
-  --worktree /home/shantanu/Workspace/vscode/Kmismomapper
+npm run label -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/your-mapper-repo
 
-npm run label -- --mapper lpa-request-mapper \
-  --worktree /home/shantanu/Workspace/vscode/Kmismomapper \
-  --fields MESSAGE.DEAL.PARTY.FirstName,MESSAGE.DEAL.PARTY.FullName
+npm run label -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/your-mapper-repo \
+  --fields Summary.displayName
 ```
 
-Prefer business `--fields` paths (`MESSAGE.…`). Leaf names and Java paths also match for filtering.
+Prefer business `--fields` paths from your schema. Leaf names and Java paths also match for filtering.
 
-`npm run label` output is AI-owned business JSON: `mapperId` + `mapping` (schema paths like `MESSAGE.DEAL.PARTY.FirstName`, `applicant.displayName`) — no Java DTO envelope. `npm run ast` keeps Java paths for debugging.
+`npm run label` output is AI-owned business JSON: `mapperId` + `mapping` (schema paths like `DeliveryPayload.fullName`, `Customer.profile.firstName`) — no Java DTO envelope. `npm run ast` keeps Java paths for debugging.
 
 Each `mapping` entry has a `pipeline` of ops (`READ`, `TRANSFORM`, `CONSTANT`, …). No `sourceText` / `children`.
 
@@ -48,10 +48,11 @@ After changing indexer Java, rebuild once: `npm run build:indexer`.
 Registered mappers (see `registry/mapping-registry.yaml`):
 
 
-| ID                           | File                           | Notes                                                      |
-| ---------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` | Small canary — best first check                            |
-| `lpa-request-mapper`         | `LpaRequestMapper.java`        | Sample full mapper in the demo repo (use `--fields` to filter) |
+| ID                           | File                           | Notes                           |
+| ---------------------------- | ------------------------------ | ------------------------------- |
+| `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` | Small canary — best first check |
+
+Add more mappers by editing the registry (and optional schema JSON).
 
 ## Label pipeline
 
@@ -103,17 +104,17 @@ Caches under `.cache/`:
 
 ```bash
 # Use cache (default)
-npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
+npm run label -- --mapper demo-ai-recognition-mapper --worktree /path/to/your-mapper-repo
 
 # Bypass cache for this run
-npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper --no-cache
+npm run label -- --mapper demo-ai-recognition-mapper --worktree /path/to/your-mapper-repo --no-cache
 
 # Clear then run
-npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper --clear-cache
+npm run label -- --mapper demo-ai-recognition-mapper --worktree /path/to/your-mapper-repo --clear-cache
 
 # Clear all translator caches (pipelines + discovery + per-field labels)
 npm run cache:clear
-npm run cache:clear -- --mapper lpa-request-mapper
+npm run cache:clear -- --mapper demo-ai-recognition-mapper
 ```
 
 Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs reuse field cache when the fingerprint matches (`"cacheHit": true`).
@@ -147,7 +148,7 @@ npm run build:indexer
 
 ## GitHub auth
 
-Repo is **public** — unauthenticated reads work (60 requests/hour). For automated polling, add a fine-grained PAT with **Contents: Read-only** on [Kmismomapper](https://github.com/shantanunp/Kmismomapper):
+Configure `repo` in `registry/mapping-registry.yaml` (or `GITHUB_OWNER` / `GITHUB_REPO` in `.env`). For private repos or higher rate limits, add a fine-grained PAT with **Contents: Read-only**:
 
 ```
 GITHUB_TOKEN=ghp_...
@@ -206,7 +207,7 @@ npm run view   # export demo mapper + serve
 # → http://localhost:4173/pipeline-viewer/?mapper=demo-ai-recognition-mapper
 ```
 
-Or: `npm run view:export -- --mapper lpa-request-mapper --label && npm run view:serve`
+Or: `npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve`
 
 ## Architecture
 
