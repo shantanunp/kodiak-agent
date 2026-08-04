@@ -138,7 +138,7 @@
 const OBJECT_FIELDS = {
   full_name: ['Customer.first_name','Customer.last_name','Customer.email','Customer.phone'],
   masked_account: ['Account.number','Account.holder_name','Account.opened_on'],
-  mismo_ref: []
+  schema_version: []
 };
 const LIST_FIELDS = { items: ['Customer.orders'], completed_order: ['Customer.orders'] };
 const ITEM_FIELDS = {
@@ -206,15 +206,15 @@ const examples = {
       { kind:'write', target:'target.completed_order' }
     ]
   },
-  mismo_ref: {
-    target:'MESSAGE.MISMOReferenceModelIdentifier', isList:false,
+  schema_version: {
+    target:'target.schema_version', isList:false,
     steps:[
-      { kind:'constant', target:'MESSAGE.MISMOReferenceModelIdentifier', value:'3.4[B324]' }
+      { kind:'constant', target:'target.schema_version', value:'1.0' }
     ]
   }
 };
 
-let current = 'mismo_ref';
+let current = 'schema_version';
 
 function itemPool(){ return ITEM_FIELDS[current] || []; }
 function objPool(){ return examples[current].isList ? itemPool() : (OBJECT_FIELDS[current] || []); }
@@ -241,7 +241,7 @@ function renderSchema(){
   const el = document.getElementById('schemaPanel');
   const ex = examples[current];
   let body = '';
-  if(current === 'mismo_ref'){
+  if(current === 'schema_version'){
     body = `<div class="schema-group">No source fields</div>
       <div class="schema-hint" style="margin-top:0">This target is a hard-coded constant — nothing is read from the source.</div>`;
     el.innerHTML = `<div class="schema-title">Source schema</div>${body}`;

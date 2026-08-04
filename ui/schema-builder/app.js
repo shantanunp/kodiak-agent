@@ -602,7 +602,7 @@ function renderSummary() {
       return r;
     })();
     document.getElementById("summary").innerHTML =
-      `<b>${schemas[side].label}</b> · <b>${n}</b> elements, <b>${req}</b> required. Large schemas (LPA / MISMO can carry 1000s of elements across files) are built the same way — import once, then refine.`;
+      `<b>${schemas[side].label}</b> · <b>${n}</b> elements, <b>${req}</b> required. Large schemas (thousands of elements across files) are built the same way — import once, then refine.`;
   }
 }
 

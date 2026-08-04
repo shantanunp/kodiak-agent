@@ -1,8 +1,8 @@
 # Kodiak Agent — About
 
-Orchestrator for viewing and proposing changes to prod Java mapping logic. Java classes in GitHub are the source of truth; this tool discovers, indexes, and labels them — without migrating logic to a new framework.
+Orchestrator for viewing and proposing changes to prod Java mapping logic. Java classes in GitHub (or a local worktree) are the source of truth; this tool discovers, indexes, and labels them — without migrating logic to a new framework.
 
-**Target repo:** [shantanunp/Kmismomapper](https://github.com/shantanunp/Kmismomapper) (public)
+It is **not** tied to a specific domain schema: any registered mapper + optional schema works. The sample registry uses a public demo mapper repo as one example.
 
 ---
 
@@ -101,7 +101,7 @@ flowchart TD
   end
 
   subgraph phase0 [Phase 0 — no AI]
-    GitHub["GitHub: shantanunp/Kmismomapper"]
+    GitHub["GitHub mapper repo"]
     Fetch["read-source / scan fetch"]
     Worktree[".cache/worktrees/commitSha/"]
   end
@@ -149,7 +149,7 @@ flowchart TD
 **Text summary:**
 
 ```
-GitHub (Kmismomapper)
+GitHub (mapper repo)
     ↓  npm run scan --remote
 Fetch to .cache/worktrees/{sha}/
     ↓  JavaParser jar
@@ -170,7 +170,7 @@ Business user views pipeline (read-only)
 | ID                           | Source file                                      |
 | ---------------------------- | ------------------------------------------------ |
 | `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` — small canary    |
-| `lpa-request-mapper`         | `LpaRequestMapper.java` — full LPA/MISMO mapping |
+| `lpa-request-mapper`         | `LpaRequestMapper.java` — sample mapper in demo repo |
 
 
 ---

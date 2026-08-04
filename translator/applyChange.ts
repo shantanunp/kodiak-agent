@@ -14,7 +14,7 @@ const APPLY_CHANGE_PROMPT = `You edit Java mapper source for ONE target field on
 
 You receive:
 - intent: what to change
-- focusFields: business target field path(s) in scope (e.g. MESSAGE.DEAL.COLLATERAL.PostalCode)
+- focusFields: business target field path(s) in scope (schema paths for the field shown in the UI)
 - pipelineHint: labeled pipeline / reason for that field (helpers mentioned there are the edit scope)
 - allowedPaths: repo-relative paths you may modify
 - files: current contents of those paths
@@ -26,8 +26,8 @@ Return JSON only (no markdown fences):
 }
 
 CRITICAL scope rules:
-- Change ONLY the private helpers / methods used by focusFields (from pipelineHint: e.g. mapPostalCodeViaFunctions, trimPostal, keepDigits, guardPostalLength).
-- Do NOT modify unrelated mappings (StateCode, Party, Loan, constants, etc.).
+- Change ONLY the private helpers / methods used by focusFields (from pipelineHint).
+- Do NOT modify unrelated field mappings or shared helpers used by other fields.
 - Do NOT change shared helpers that other fields use unless the intent explicitly requires it AND the helper is only for focusFields.
 - Return the FULL file content for each changed file (not a diff).
 - Paths MUST be exact members of allowedPaths.

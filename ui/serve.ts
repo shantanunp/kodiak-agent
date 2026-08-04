@@ -94,7 +94,7 @@ async function labelAndWriteView(options: {
 
   if (!pipeline.mapping?.length) {
     throw new Error(
-      "No labeled fields matched. Pass schema paths like MESSAGE.DEAL.COLLATERAL.PostalCode, or omit fields to label all.",
+      "No labeled fields matched. Pass schema target paths (from your mapper schema), or omit fields to label all.",
     );
   }
 

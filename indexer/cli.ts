@@ -3,8 +3,8 @@
  * ast / index-mappings — deterministic JavaParser AST (no AI).
  * Emits grouped `mapping` (one entry per target field).
  *
- *   npm run ast -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
- *   --fields MESSAGE.MISMOReferenceModelIdentifier,MESSAGE.DataVersionIdentifier
+ *   npm run ast -- --mapper my-mapper --worktree /path/to/mapper-repo
+ *   --fields Order.customerId,Order.shipTo.postalCode
  */
 
 import { parseArgs } from "node:util";

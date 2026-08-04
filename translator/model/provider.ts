@@ -74,40 +74,40 @@ kinds, pipeline steps, and business/schema field paths.
 Allowed operation kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
 Transform "op" values: trim, split, takeFirst, takeLast, takeIndex, multiply, add, subtract, divide, uppercase, lowercase, join, lettersOnly, keepDigits.
 
-keepDigits = keep digit characters (and optional hyphens for postal codes). Prefer "keepDigits" — never invent names like keepDigitsAndHyphen.
+keepDigits = keep digit characters (and optional hyphens). Prefer "keepDigits" — never invent names like keepDigitsAndHyphen.
 
 CRITICAL — business paths only:
 - targetField and sourceField MUST come from the Known source/target fields in context (or a close leaf match).
 - NEVER emit Java class names, packages, or DTO type prefixes.
-- Forbidden substrings in field paths: "com.", "LpaMappedResponse", "LoanApplicationRequest", "$", "dto.".
-- Good targets: MESSAGE.DEAL.PARTY.FirstName, MESSAGE.MISMOReferenceModelIdentifier
-- Good sources: applicant.displayName, mortgage.termYears, refNumber
+- Forbidden substrings in field paths: "com.", "$", "dto.", and any Java package / FQCN prefix.
+- Good targets: Order.shipTo.postalCode, Customer.fullName, Invoice.lineItems[].amount
+- Good sources: customer.displayName, order.termYears, account.refNumber
 
 Rules:
 - Indexer ops (READ/CONSTANT/TRANSFORM/RAW/…) are hints — correct them when wrong.
 - Literals/static finals → single constant step with "value"; never invent a read for constants.
-- Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads applicant.displayName from the source."}]
+- Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads customer.displayName from the source."}]
 - Arithmetic (e.g. termYears * 12) → read + transform multiply with value "12"
 - Name-split (parts[0]/parts[1] from trim+split helper):
-  [{"kind":"read","sourceField":"applicant.displayName","summary":"…"},
+  [{"kind":"read","sourceField":"customer.displayName","summary":"…"},
    {"kind":"transform","op":"trim","summary":"…"},
    {"kind":"transform","op":"split","value":" ","summary":"…"},
    {"kind":"transform","op":"takeFirst","summary":"…"}]  // or takeLast for parts[1]
-- Letter sanitize / state-code normalize (trim + keep letters + uppercase, e.g. sanitizeAlpha / Character.isLetter loops):
-  [{"kind":"read","sourceField":"property.region","summary":"…"},
+- Letter sanitize / alpha-only normalize (trim + keep letters + uppercase, e.g. Character.isLetter loops or letter-filter helpers):
+  [{"kind":"read","sourceField":"address.region","summary":"…"},
    {"kind":"transform","op":"trim","summary":"…"},
    {"kind":"transform","op":"lettersOnly","summary":"…"},
    {"kind":"transform","op":"uppercase","summary":"…"}]
-  MUST emit lettersOnly whenever the code strips non-letters (sanitizeAlpha, Character.isLetter, letter-filter loops).
-  Never omit it as "implicit" or "typical for state codes" — if the code filters letters, the pipeline must include lettersOnly.
+  MUST emit lettersOnly whenever the code strips non-letters (Character.isLetter, letter-filter loops, alpha-only helpers).
+  Never omit it as "implicit" — if the code filters letters, the pipeline must include lettersOnly.
 - Drop meaningless null-guard filters.
 - If RAW meta.code is present, expand it into the correct pipeline.
-- EVERY pipeline step MUST include "summary": one short plain-English sentence describing what THAT step does (mention the real helper/method when known, e.g. "trimPostal trims leading/trailing whitespace.").
+- EVERY pipeline step MUST include "summary": one short plain-English sentence describing what THAT step does (mention the real helper/method when known, e.g. "trimValue trims leading/trailing whitespace.").
 - "reason" is a brief overall field explanation (helpers chain + source→target). Do not put per-step detail only in reason — put it in each step's summary.
 - If unsure, return recognized=false.
 
 Respond with JSON only:
-{"recognized":true,"targetField":"MESSAGE.…","pipeline":[{"kind":"read","sourceField":"…","summary":"…"},{"kind":"transform","op":"trim","summary":"…"},…],"reason":"…"}
+{"recognized":true,"targetField":"Order.…","pipeline":[{"kind":"read","sourceField":"…","summary":"…"},{"kind":"transform","op":"trim","summary":"…"},…],"reason":"…"}
 or {"recognized":false,"reason":"…"}`;
 
 const DISCOVER_PROMPT = `You discover field writes in a Java mapper class. You do NOT label business paths.
@@ -121,7 +121,7 @@ Return JSON only:
 Rules:
 - Prefer one entry per distinct target field. If the same field is set twice, include both snippets in codeSnippet or two entries with the same hint.
 - codeSnippet must be real code from the file (abbreviate long helpers with ... only in the middle).
-- When the setter argument is a same-class helper (or Optional/Stream chain) that trims, splits, filters, letter-sanitizes, uppercases, or otherwise transforms values, INLINE that helper method body (or the full chain) in codeSnippet — not only the setX(...) line. Short helpers for trim/split/take/sanitizeAlpha/toUpperCase must be fully included.
+- When the setter argument is a same-class helper (or Optional/Stream chain) that trims, splits, filters, letter-sanitizes, uppercases, or otherwise transforms values, INLINE that helper method body (or the full chain) in codeSnippet — not only the setX(...) line. Short helpers for trim/split/take/letter-filter/toUpperCase must be fully included.
 - Do not invent mappings that are not in the source.
 - javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 

@@ -10,7 +10,9 @@ function stripCodeMeta(meta?: Record<string, unknown>): Record<string, unknown> 
 
 /** Java evidence that non-letter characters are stripped. */
 export function hasLettersOnlyEvidence(code: string): boolean {
-  return /sanitizeAlpha|Character\.isLetter|\.isLetter\s*\(/.test(code);
+  return /Character\.isLetter|\.isLetter\s*\(|lettersOnly|keepLetters|alphaOnly|sanitizeAlpha/.test(
+    code,
+  );
 }
 
 function codeFromIndexerOps(ops: PipelineOp[] | undefined): string {

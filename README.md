@@ -1,8 +1,8 @@
 # Kodiak Agent
 
-Orchestrator for Java mapping discovery, indexing, and pipeline visualization.
+Orchestrator for Java mapping discovery, indexing, and pipeline visualization — generic for any source→target data transformation.
 
-**Target mapping repo:** [shantanunp/Kmismomapper](https://github.com/shantanunp/Kmismomapper) (public)
+Register your mapper in `registry/mapping-registry.yaml` and optionally add `registry/schemas/{mapperId}.schema.json`. The sample registry points at a public demo mapper repo; swap it for yours.
 
 ## Quick start
 
@@ -51,7 +51,7 @@ Registered mappers (see `registry/mapping-registry.yaml`):
 | ID                           | File                           | Notes                                                      |
 | ---------------------------- | ------------------------------ | ---------------------------------------------------------- |
 | `demo-ai-recognition-mapper` | `DemoAiRecognitionMapper.java` | Small canary — best first check                            |
-| `lpa-request-mapper`         | `LpaRequestMapper.java`        | LPA DTO mapper (helpers inlined; use `--fields` to filter) |
+| `lpa-request-mapper`         | `LpaRequestMapper.java`        | Sample full mapper in the demo repo (use `--fields` to filter) |
 
 ## Label pipeline
 
@@ -78,7 +78,7 @@ flowchart TD
 1. **AI discovery** — primary (default): finds target fields + code snippets (helpers inlined when they trim/split/etc.)  
 2. **AST** — **off by default**; pass `--with-ast` to corroborate matches, raise `confidence` (`both` = 1, `ai` = 0.6), and enrich `meta.code`  
 3. **Merge** — AI hits drive the labeling set; with `--with-ast`, AST-only targets are still not labeled (counted in `discoveryMeta.astOnly`)  
-4. **Business label** — model rewrites to schema paths (`MESSAGE.*`)  
+4. **Business label** — model rewrites to schema paths from your mapper schema  
 5. **Pipeline cache** — reuse until inputs change  
 
 Escape hatch: `--with-ast --no-discover-ai` labels from AST only (`confidence` 0.4).

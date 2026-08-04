@@ -127,51 +127,6 @@ export interface PipelineViewModel {
   targetSchema?: SchemaNode;
 }
 
-/** Known field hints when registry does not list them explicitly. */
-const MAPPER_SCHEMA_HINTS: Record<
-  string,
-  { sourceFields: string[]; targetFields: string[]; isList?: boolean }
-> = {
-  "demo-ai-recognition-mapper": {
-    sourceFields: ["Person.firstName", "Person.lastName"],
-    targetFields: ["Summary.displayName"],
-    isList: false,
-  },
-  "lpa-request-mapper": {
-    sourceFields: [
-      "LoanApplicationRequest.refNumber",
-      "LoanApplicationRequest.applicant.displayName",
-      "LoanApplicationRequest.applicant.dateOfBirth",
-      "LoanApplicationRequest.mortgage.amount",
-      "LoanApplicationRequest.mortgage.ratePercent",
-      "LoanApplicationRequest.mortgage.purpose",
-      "LoanApplicationRequest.mortgage.termYears",
-      "LoanApplicationRequest.property.street",
-      "LoanApplicationRequest.property.city",
-      "LoanApplicationRequest.property.state",
-      "LoanApplicationRequest.property.postalCode",
-    ],
-    targetFields: [
-      "MESSAGE.MISMOReferenceModelIdentifier",
-      "MESSAGE.DataVersionIdentifier",
-      "MESSAGE.DEAL.LOAN.LoanIdentifier",
-      "MESSAGE.DEAL.LOAN.NoteAmount",
-      "MESSAGE.DEAL.LOAN.LoanPurposeType",
-      "MESSAGE.DEAL.LOAN.LoanMaturityPeriodCount",
-      "MESSAGE.DEAL.PARTY.FirstName",
-      "MESSAGE.DEAL.PARTY.LastName",
-      "MESSAGE.DEAL.PARTY.FullName",
-      "MESSAGE.DEAL.PARTY.PartyRoleType",
-      "MESSAGE.DEAL.PARTY.BorrowerBirthDate",
-      "MESSAGE.DEAL.COLLATERAL.AddressLineText",
-      "MESSAGE.DEAL.COLLATERAL.CityName",
-      "MESSAGE.DEAL.COLLATERAL.StateCode",
-      "MESSAGE.DEAL.COLLATERAL.PostalCode",
-    ],
-    isList: false,
-  },
-};
-
 export function simpleTypeName(fqcn: string): string {
   const idx = Math.max(fqcn.lastIndexOf("$"), fqcn.lastIndexOf("."));
   return idx >= 0 ? fqcn.slice(idx + 1) : fqcn;
@@ -490,13 +445,12 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const sourceSimple = simpleTypeName(sourceType);
   const targetSimple = simpleTypeName(targetType);
 
-  const hints = MAPPER_SCHEMA_HINTS[mapperId];
   const savedSchema = loadSchema(mapperId);
 
   const schemaSourceFields = savedSchema ? flattenPaths(savedSchema.source.root) : [];
   const schemaTargetFields = savedSchema ? flattenPaths(savedSchema.target.root) : [];
-  const targetPathHints =
-    schemaTargetFields.length > 0 ? schemaTargetFields : hints?.targetFields ?? [];
+  // Prefer saved schema paths; otherwise use fields discovered from the pipeline.
+  const targetPathHints = schemaTargetFields;
 
   const fields: FieldPipelineView[] = (pipeline.mapping ?? []).map((m) => {
     const fieldSteps = flattenFieldPipeline(m.targetField, m.pipeline).flatMap((s) =>
@@ -519,10 +473,10 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
 
   const sourceFields = schemaSourceFields.length
     ? schemaSourceFields
-    : hints?.sourceFields ?? [...collected.source].sort();
+    : [...collected.source].sort();
   const targetFields = schemaTargetFields.length
     ? schemaTargetFields
-    : hints?.targetFields ?? [...collected.target].sort();
+    : [...collected.target].sort();
 
   const primaryTarget =
     fields.length === 1 ? fields[0]!.targetField : targetSimple;
@@ -536,7 +490,7 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
     sourceSimple,
     targetSimple,
     target: primaryTarget,
-    isList: hints?.isList ?? false,
+    isList: false,
     sourceFields,
     targetFields,
     steps,

@@ -2,9 +2,9 @@
 /**
  * Import VS Code agent result.json into field cache (no model API).
  *
- *   npm run label:import -- --mapper lpa-request-mapper \
- *     --worktree /path/to/Kmismomapper \
- *     --fields MESSAGE.DEAL.PARTY.LastName
+ *   npm run label:import -- --mapper my-mapper \
+ *     --worktree /path/to/mapper-repo \
+ *     --fields Order.shipTo.postalCode
  *
  *   npm run label:import -- --result .cache/agent-jobs/.../result.json
  */

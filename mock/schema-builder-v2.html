@@ -286,50 +286,43 @@ function makeNode(name, type, extra={}){
 }
 
 /* ─────────────────────────────────────────────────────────
-   Seed schemas (MISMO / LPA flavored)
+   Seed schemas (generic order / customer example)
    ───────────────────────────────────────────────────────── */
 function seedSource(){
-  const root = makeNode('LOAN','object',{doc:'Root loan document (MISMO-style extract)'});
-  const deal = makeNode('deal','object',{doc:'Deal container'});
-  const loans = makeNode('loans','array',{doc:'One or more loans on the deal'});
-  const loan = makeNode('loan','object');
-  loan.children = [
-    makeNode('loanIdentifier','string',{required:true,doc:'Unique loan id (LPA key)'}),
-    makeNode('loanType','string',{doc:'CONVENTIONAL, FHA, VA, USDA'}),
-    makeNode('noteAmount','number',{doc:'Original note amount'}),
-    makeNode('closingDate','date'),
-  ];
-  loans.children = [loan];
-  const parties = makeNode('parties','array',{doc:'Borrowers, sellers, agents'});
-  const party = makeNode('party','object');
-  party.children = [
-    makeNode('roleType','string',{doc:'Borrower / Seller / Agent'}),
+  const root = makeNode('Customer','object',{doc:'Source customer record'});
+  const profile = makeNode('profile','object',{doc:'Identity and contact'});
+  profile.children = [
+    makeNode('customerId','string',{required:true,doc:'Stable customer id'}),
     makeNode('firstName','string',{required:true}),
     makeNode('lastName','string',{required:true}),
     makeNode('emailAddress','string'),
-    makeNode('taxIdentifier','string',{doc:'SSN / EIN, masked downstream'}),
   ];
-  parties.children = [party];
-  const collateral = makeNode('collateral','object',{doc:'Subject property'});
-  const address = makeNode('address','object');
+  const orders = makeNode('orders','array',{doc:'Purchase history'});
+  const order = makeNode('order','object');
+  order.children = [
+    makeNode('id','string',{required:true}),
+    makeNode('status','string',{doc:'open / complete / cancelled'}),
+    makeNode('amount','number'),
+    makeNode('date','date'),
+  ];
+  orders.children = [order];
+  const address = makeNode('address','object',{doc:'Shipping address'});
   address.children = [
-    makeNode('addressLineText','string'),
-    makeNode('cityName','string'),
-    makeNode('stateCode','string'),
+    makeNode('line','string'),
+    makeNode('city','string'),
+    makeNode('region','string'),
     makeNode('postalCode','string'),
   ];
-  collateral.children = [ makeNode('propertyType','string'), address ];
-  deal.children = [loans, parties, collateral];
-  root.children = [deal];
+  root.children = [profile, orders, address];
   return root;
 }
 
 function seedTarget(){
-  const root = makeNode('LoanDelivery','object',{doc:'Delivery payload to downstream system'});
+  const root = makeNode('DeliveryPayload','object',{doc:'Downstream delivery payload'});
   root.children = [
-    makeNode('loanId','string',{required:true,doc:'Uppercased loan identifier'}),
-    makeNode('purpose','string',{doc:'Purchase / Refinance / Other'}),
-    (()=>{ const p = makeNode('parties','array',{doc:'Flattened party list'}); const item = makeNode('party','object'); item.children=[makeNode('name','string'),makeNode('contact','string')]; p.children=[item]; return p; })(),
+    makeNode('customerId','string',{required:true,doc:'Uppercased customer id'}),
+    makeNode('fullName','string',{doc:'Joined display name'}),
+    (()=>{ const p = makeNode('lineItems','array',{doc:'Flattened order lines'}); const item = makeNode('item','object'); item.children=[makeNode('name','string'),makeNode('total','number')]; p.children=[item]; return p; })(),
   ];
   return root;
 }
@@ -685,7 +678,7 @@ function renderSummary(){
     const n = countElements(side);
     const req = (()=>{ let r=0; walk(schemas[side].root, nd=>{ if(nd.required) r++; }); return r; })();
     document.getElementById('summary').innerHTML =
-      `<b>${schemas[side].label}</b> · <b>${n}</b> elements, <b>${req}</b> required. Large schemas (LPA / MISMO can carry 1000s of elements across files) are built the same way — import once, then refine.`;
+      `<b>${schemas[side].label}</b> · <b>${n}</b> elements, <b>${req}</b> required. Large schemas (thousands of elements across files) are built the same way — import once, then refine.`;
   }
 }
 

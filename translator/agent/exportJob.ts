@@ -2,9 +2,9 @@
 /**
  * Export an offline labeling job for a VS Code custom agent (no model API).
  *
- *   npm run label:export -- --mapper lpa-request-mapper \
- *     --worktree /path/to/Kmismomapper \
- *     --fields MESSAGE.DEAL.PARTY.LastName
+ *   npm run label:export -- --mapper my-mapper \
+ *     --worktree /path/to/mapper-repo \
+ *     --fields Order.shipTo.postalCode
  */
 
 import { parseArgs } from "node:util";
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
       "Do not call external model APIs. Output JSON only in result.json.",
       "result.json shape:",
       '{ "mapperId", "fingerprint", "labelModel": "agent:offline", "fields": [',
-      '  { "javaTargetField": "...", "response": { "recognized": true, "targetField": "MESSAGE.…", "pipeline": [{"kind":"read","sourceField":"…","summary":"…"},…], "reason": "…" } }',
+      '  { "javaTargetField": "...", "response": { "recognized": true, "targetField": "Order.…", "pipeline": [{"kind":"read","sourceField":"…","summary":"…"},…], "reason": "…" } }',
       "] }",
       "Keep mapperId and fingerprint exactly as in this job.",
     ].join("\n"),

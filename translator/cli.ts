@@ -2,8 +2,8 @@
 /**
  * AI-label mapper fields via model provider → business/schema paths (no Java DTO paths).
  *
- *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
- *   --fields MESSAGE.DEAL.PARTY.FirstName
+ *   npm run label -- --mapper my-mapper --worktree /path/to/mapper-repo
+ *   --fields Order.shipTo.postalCode
  *   --no-cache | --clear-cache
  *   --with-ast          # opt-in JavaParser corroboration (off by default)
  *   --no-discover-ai    # AST-only escape hatch (requires --with-ast)
