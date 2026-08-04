@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Field Mapper — builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EEF1EC; --panel:#FFFFFF; --ink:#17201C; --ink-soft:#5C665F; --ink-faint:#8B948D; --line:#DADFD9;
+    --source:#0F6E56; --source-bg:#E1F3EC;
+    --target:#9A5B0A; --target-bg:#FBEFDC;
+    --op:#4A3F8C; --op-bg:#ECE9F8;
+    --cond:#A32B4B; --cond-bg:#FBE7ED;
+    --font-display:'Space Grotesk', sans-serif; --font-body:'Inter', sans-serif; --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);}
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 60px;}
+  header{margin-bottom:18px;}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:4px;}
+  .brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink);display:flex;align-items:center;justify-content:center;}
+  .brand-mark span{width:10px;height:10px;border-radius:2px;background:var(--bg);}
+  h1{font-family:var(--font-display);font-weight:600;font-size:20px;margin:0;letter-spacing:-0.01em;}
+  .tagline{color:var(--ink-soft);font-size:13.5px;margin:0 0 4px 36px;}
+
+  .tabs{display:flex;gap:6px;margin:18px 0 0;flex-wrap:wrap;}
+  .tab{font-family:var(--font-mono);font-size:12.5px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer;color:var(--ink-soft);}
+  .tab.active{background:var(--target-bg);border-color:var(--target);color:var(--target);font-weight:600;}
+
+  .ai-bar{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 14px;margin-top:14px;}
+  .ai-bar-icon{color:var(--op);font-size:14px;flex-shrink:0;}
+  .ai-bar input{flex:1;border:none;outline:none;font-family:var(--font-body);font-size:14px;background:transparent;color:var(--ink);padding:6px 0;}
+  .ai-bar input::placeholder{color:var(--ink-faint);}
+  .ai-bar button{border:none;background:var(--ink);color:var(--bg);font-family:var(--font-body);font-weight:600;font-size:13px;padding:8px 16px;border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .ai-bar button:hover{opacity:.88;}
+  .ai-bar button:disabled{opacity:.5;cursor:default;}
+  .ai-status{font-size:12.5px;color:var(--ink-faint);margin:8px 2px 0;min-height:16px;}
+  .ai-status.error{color:var(--cond);}
+  .ai-banner{display:flex;align-items:center;gap:8px;background:var(--op-bg);color:var(--op);border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:12.5px;}
+  .ai-banner b{font-weight:600;}
+
+  .legend{display:flex;gap:18px;margin:14px 2px 4px;flex-wrap:wrap;}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+
+  .layout{display:grid;grid-template-columns:230px 1fr;gap:20px;margin-top:16px;align-items:start;}
+
+  .schema-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;position:sticky;top:20px;}
+  .schema-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin-bottom:8px;}
+  .schema-group{font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);margin:10px 0 3px;}
+  .schema-field{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 6px;border-radius:6px;font-family:var(--font-mono);font-size:12px;color:var(--ink);}
+  .schema-field:hover{background:var(--bg);}
+  .schema-add{border:1px solid var(--line);background:var(--panel);color:var(--source);width:18px;height:18px;border-radius:5px;font-size:12px;line-height:1;cursor:pointer;flex-shrink:0;}
+  .schema-add:hover{background:var(--source-bg);border-color:var(--source);}
+  .schema-hint{font-size:11.5px;color:var(--ink-faint);margin-top:10px;line-height:1.5;}
+
+  .canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 26px 26px;min-height:420px;}
+  .target-name{font-family:var(--font-mono);font-size:15px;font-weight:500;color:var(--target);background:var(--target-bg);padding:3px 9px;border-radius:6px;}
+
+  .pipeline{margin-top:18px;padding-left:6px;}
+  .step{display:flex;gap:14px;position:relative;padding-bottom:20px;}
+  .step-rail{position:relative;display:flex;flex-direction:column;align-items:center;width:30px;flex-shrink:0;}
+  .step-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;z-index:1;border:2px solid var(--panel);}
+  .step-line{position:absolute;top:28px;bottom:-20px;width:2px;background:repeating-linear-gradient(var(--line),var(--line) 4px,transparent 4px,transparent 8px);}
+  .step:last-child .step-line{display:none;}
+
+  .step-card{flex:1;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px 12px;}
+  .step-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .step-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;}
+  .remove-step{border:none;background:transparent;color:var(--ink-faint);font-size:15px;cursor:pointer;line-height:1;padding:2px 4px;}
+  .remove-step:hover{color:var(--cond);}
+
+  .form-line{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:6px;font-size:13px;}
+  .form-line:first-of-type{margin-top:0;}
+  .form-line label{color:var(--ink-soft);font-size:12.5px;}
+  select, input[type="text"], input[type="number"]{
+    font-family:var(--font-mono);font-size:12.5px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);
+    background:var(--panel);color:var(--ink);
+  }
+  select:focus, input:focus{outline:2px solid var(--op);outline-offset:1px;}
+  input[type="text"]{font-family:var(--font-mono);}
+  input[type="number"]{width:60px;}
+
+  .rows{margin-top:6px;border-top:1px dashed var(--line);padding-top:8px;}
+  .row-line{display:flex;align-items:center;gap:7px;margin-bottom:6px;}
+  .row-arrow{color:var(--ink-faint);font-size:13px;}
+  .add-row-btn{border:1px dashed var(--line);background:transparent;color:var(--ink-soft);font-size:12px;padding:5px 9px;border-radius:6px;cursor:pointer;}
+  .add-row-btn:hover{border-color:var(--ink-faint);color:var(--ink);}
+  .remove-row{border:none;background:transparent;color:var(--ink-faint);font-size:14px;cursor:pointer;}
+  .remove-row:hover{color:var(--cond);}
+  .repeat-line{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;color:var(--ink-soft);}
+
+  .add-step-row{margin-top:2px;padding-left:36px;position:relative;}
+  .add-step-btn{border:1px dashed var(--line);background:transparent;color:var(--ink-soft);font-size:12.5px;padding:7px 12px;border-radius:7px;cursor:pointer;font-family:var(--font-body);}
+  .add-step-btn:hover{border-color:var(--ink-faint);color:var(--ink);}
+  .add-menu{position:absolute;top:36px;left:36px;z-index:20;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(20,30,24,0.12);min-width:200px;padding:5px;}
+  .add-menu-opt{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:6px;font-size:13px;cursor:pointer;}
+  .add-menu-opt:hover{background:var(--bg);}
+  .add-menu-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+
+  .summary{margin-top:22px;border-top:1px solid var(--line);padding-top:16px;}
+  .summary-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin-bottom:8px;}
+  .summary-text{font-size:13.5px;line-height:1.7;color:var(--ink-soft);}
+  .summary-text b{color:var(--ink);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="brand-mark"><span></span></div><h1>Field Mapper — build a mapping</h1></div>
+    <p class="tagline">Every step is a form: pick a field from a menu, pick an action, fill a value. Nothing is typed as code.</p>
+  </header>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="ai-bar">
+    <span class="ai-bar-icon">&#10022;</span>
+    <input id="aiInput" type="text" placeholder="Describe what you want, e.g. find the most recent completed order and pull its id, date and amount" />
+    <button id="aiBtn">Build with AI</button>
+  </div>
+  <div class="ai-status" id="aiStatus"></div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="dot" style="background:var(--source)"></span>Read (from source)</div>
+    <div class="legend-item"><span class="dot" style="background:var(--op)"></span>Transform / select / build</div>
+    <div class="legend-item"><span class="dot" style="background:var(--cond)"></span>Filter</div>
+    <div class="legend-item"><span class="dot" style="background:var(--target)"></span>Write (to target)</div>
+  </div>
+
+  <div class="layout">
+    <div class="schema-panel" id="schemaPanel"></div>
+    <div class="canvas" id="canvas"></div>
+  </div>
+</div>
+
+<script>
+const OBJECT_FIELDS = {
+  full_name: ['Customer.first_name','Customer.last_name','Customer.email','Customer.phone'],
+  masked_account: ['Account.number','Account.holder_name','Account.opened_on']
+};
+const LIST_FIELDS = { items: ['Customer.orders'], completed_order: ['Customer.orders'] };
+const ITEM_FIELDS = {
+  items: ['product_name','qty','price','sku'],
+  completed_order: ['id','status','date','amount']
+};
+const TRANSFORM_OPS = ['Join text','Mask characters','Uppercase','Lowercase','Trim spaces','Round number'];
+const OP_META = {
+  'Join text': { fields:2, paramLabel:'Separator', paramType:'text', paramDefault:' ' },
+  'Mask characters': { fields:1, paramLabel:'Characters to mask', paramType:'number', paramDefault:4 },
+  'Uppercase': { fields:1, paramLabel:null },
+  'Lowercase': { fields:1, paramLabel:null },
+  'Trim spaces': { fields:1, paramLabel:null },
+  'Round number': { fields:1, paramLabel:'Decimal places', paramType:'number', paramDefault:2 }
+};
+const CONDITION_OPS = ['equals','not equals','contains','greater than','less than'];
+const SELECT_MODES = ['First match','Last match','All matches'];
+
+const STEP_TYPES = [
+  { kind:'read', label:'Read', dotVar:'--source' },
+  { kind:'filter', label:'Filter', dotVar:'--cond' },
+  { kind:'select', label:'Select match', dotVar:'--op' },
+  { kind:'transform', label:'Transform', dotVar:'--op' },
+  { kind:'build', label:'Build object', dotVar:'--op' },
+  { kind:'write', label:'Write to target', dotVar:'--target' }
+];
+const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W' };
+const COLOR_VAR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', write:'--target' };
+const BG_VAR = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg' };
+
+const examples = {
+  full_name: {
+    target:'target.full_name', isList:false,
+    steps:[
+      { kind:'read', field:'Customer.first_name' },
+      { kind:'read', field:'Customer.last_name' },
+      { kind:'transform', op:'Join text', field:'Customer.first_name', field2:'Customer.last_name', param:' ' },
+      { kind:'write', target:'target.full_name' }
+    ]
+  },
+  masked_account: {
+    target:'target.masked_account', isList:false,
+    steps:[
+      { kind:'read', field:'Account.number' },
+      { kind:'transform', op:'Mask characters', field:'Account.number', param:4 },
+      { kind:'write', target:'target.masked_account' }
+    ]
+  },
+  items: {
+    target:'target.items', isList:true,
+    steps:[
+      { kind:'read', field:'Customer.orders' },
+      { kind:'build', repeat:true, rows:[{source:'product_name',target:'name'},{source:'qty',target:'quantity'},{source:'price',target:'unit_price'}] },
+      { kind:'write', target:'target.items' }
+    ]
+  },
+  completed_order: {
+    target:'target.completed_order', isList:true,
+    steps:[
+      { kind:'read', field:'Customer.orders' },
+      { kind:'filter', field:'status', op:'equals', value:'complete' },
+      { kind:'select', mode:'First match' },
+      { kind:'build', repeat:false, rows:[{source:'id',target:'order_id'},{source:'date',target:'completed_on'},{source:'amount',target:'total'}] },
+      { kind:'write', target:'target.completed_order' }
+    ]
+  }
+};
+
+let current = 'completed_order';
+
+function itemPool(){ return ITEM_FIELDS[current] || []; }
+function objPool(){ return examples[current].isList ? itemPool() : (OBJECT_FIELDS[current] || []); }
+function listPool(){ return LIST_FIELDS[current] || []; }
+
+function opts(list, selected){
+  return list.map(v=>`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
+}
+
+function closeMenu(){ document.querySelectorAll('.add-menu').forEach(n=>n.remove()); }
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.add-step-btn') && !e.target.closest('.add-menu')) closeMenu();
+});
+
+function renderTabs(){
+  const el = document.getElementById('tabs');
+  el.innerHTML = Object.keys(examples).map(id=>`
+    <div class="tab ${id===current?'active':''}" data-id="${id}">${examples[id].target}</div>
+  `).join('');
+  el.querySelectorAll('.tab').forEach(t=>t.addEventListener('click', ()=>{ current = t.dataset.id; renderAll(); }));
+}
+
+function renderSchema(){
+  const el = document.getElementById('schemaPanel');
+  const ex = examples[current];
+  let body = '';
+  if(ex.isList){
+    body += `<div class="schema-group">Customer.orders[]</div>` + itemPool().map(f=>`
+      <div class="schema-field"><span>${f}</span><button class="schema-add" data-field="${f}" data-pool="item" title="Insert as a Read step">+</button></div>
+    `).join('');
+  } else {
+    const group = current === 'full_name' ? 'Customer' : 'Account';
+    body += `<div class="schema-group">${group}</div>` + objPool().map(f=>`
+      <div class="schema-field"><span>${f.split('.')[1]}</span><button class="schema-add" data-field="${f}" data-pool="obj" title="Insert as a Read step">+</button></div>
+    `).join('');
+  }
+  el.innerHTML = `<div class="schema-title">Source schema</div>${body}
+    <div class="schema-hint">Click + to add a Read step for that field. Every other step is built the same way — pick from a menu below.</div>`;
+  el.querySelectorAll('.schema-add').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const ex = examples[current];
+      ex.aiGenerated = false;
+      const field = ex.isList ? (listPool()[0] || btn.dataset.field) : btn.dataset.field;
+      ex.steps.splice(ex.steps.length-1, 0, { kind:'read', field });
+      renderCanvas();
+    });
+  });
+}
+
+function stepCard(step, i){
+  const color = COLOR_VAR[step.kind];
+  let body = '';
+
+  if(step.kind === 'read'){
+    const pool = examples[current].isList ? listPool() : objPool();
+    body = `<div class="form-line"><label>Field</label>
+      <select data-i="${i}" data-role="field">${opts(pool, step.field)}</select>
+    </div>`;
+  }
+
+  else if(step.kind === 'filter'){
+    body = `<div class="form-line">
+      <label>Where</label><select data-i="${i}" data-role="field">${opts(itemPool(), step.field)}</select>
+      <select data-i="${i}" data-role="op">${opts(CONDITION_OPS, step.op)}</select>
+      <input type="text" data-i="${i}" data-role="value" value="${step.value||''}" style="width:110px" />
+    </div>`;
+  }
+
+  else if(step.kind === 'select'){
+    body = `<div class="form-line"><label>From the matches, take</label>
+      <select data-i="${i}" data-role="mode">${opts(SELECT_MODES, step.mode)}</select>
+    </div>`;
+  }
+
+  else if(step.kind === 'transform'){
+    const meta = OP_META[step.op] || OP_META['Uppercase'];
+    body = `<div class="form-line">
+      <label>Apply</label><select data-i="${i}" data-role="op">${opts(TRANSFORM_OPS, step.op)}</select>
+      <label>to</label><select data-i="${i}" data-role="field">${opts(objPool(), step.field)}</select>
+      ${meta.fields===2 ? `<label>and</label><select data-i="${i}" data-role="field2">${opts(objPool(), step.field2)}</select>` : ''}
+    </div>`;
+    if(meta.paramLabel){
+      body += `<div class="form-line"><label>${meta.paramLabel}</label>
+        <input type="${meta.paramType}" data-i="${i}" data-role="param" value="${step.param!==undefined?step.param:meta.paramDefault}" ${meta.paramType==='text'?'style="width:60px"':''} /></div>`;
+    }
+  }
+
+  else if(step.kind === 'build'){
+    const rows = step.rows || [];
+    body = `<div class="rows">
+      ${rows.map((r,ri)=>`
+        <div class="row-line">
+          <select data-i="${i}" data-ri="${ri}" data-role="row-source">${opts(itemPool(), r.source)}</select>
+          <span class="row-arrow">&rarr;</span>
+          <input type="text" data-i="${i}" data-ri="${ri}" data-role="row-target" value="${r.target}" placeholder="target field name" style="width:130px" />
+          <button class="remove-row" data-i="${i}" data-ri="${ri}">&times;</button>
+        </div>
+      `).join('')}
+      <button class="add-row-btn" data-i="${i}">+ Add field</button>
+    </div>
+    ${examples[current].isList ? `<label class="repeat-line"><input type="checkbox" data-i="${i}" data-role="repeat" ${step.repeat?'checked':''}/> Repeat for every item in the list</label>` : ''}`;
+  }
+
+  else if(step.kind === 'write'){
+    body = `<div class="form-line"><label>Save result as</label>
+      <input type="text" data-i="${i}" data-role="target" value="${step.target||''}" style="width:190px" />
+    </div>`;
+  }
+
+  return `
+    <div class="step">
+      <div class="step-rail"><div class="step-icon" style="background:var(${BG_VAR[step.kind]});color:var(${color})">${ICONS[step.kind]}</div><div class="step-line"></div></div>
+      <div class="step-card">
+        <div class="step-card-head">
+          <span class="step-kicker" style="color:var(${color})">${STEP_TYPES.find(t=>t.kind===step.kind).label}</span>
+          <button class="remove-step" data-i="${i}" title="Remove step">&times;</button>
+        </div>
+        ${body}
+      </div>
+    </div>`;
+}
+
+function summarize(){
+  const ex = examples[current];
+  const parts = ex.steps.map(s=>{
+    if(s.kind==='read') return `read <b>${s.field}</b>`;
+    if(s.kind==='filter') return `keep only where <b>${s.field} ${s.op} ${s.value||'...'}</b>`;
+    if(s.kind==='select') return `take the <b>${(s.mode||'first match').toLowerCase()}</b>`;
+    if(s.kind==='transform'){
+      const meta = OP_META[s.op]||{};
+      return `apply <b>${s.op}</b> to <b>${s.field}${meta.fields===2?' and '+s.field2:''}</b>`;
+    }
+    if(s.kind==='build') return `build an object (<b>${(s.rows||[]).map(r=>r.source+' &rarr; '+r.target).join(', ')}</b>)${s.repeat?' for every item':''}`;
+    if(s.kind==='write') return `save it as <b>${s.target}</b>`;
+    return '';
+  });
+  return parts.join(', then ') + '.';
+}
+
+function renderCanvas(){
+  const ex = examples[current];
+  const el = document.getElementById('canvas');
+  el.innerHTML = `
+    <span class="target-name">${ex.target}</span>
+    <div class="pipeline">
+      ${ex.aiGenerated ? `<div class="ai-banner"><span>&#10022;</span><span><b>AI-built from your description.</b> Review each field below, then edit anything that's not quite right.</span></div>` : ''}
+      ${ex.steps.map((s,i)=>stepCard(s,i)).join('')}
+      <div class="add-step-row"><button class="add-step-btn" id="addStepBtn">+ Add step</button></div>
+    </div>
+    <div class="summary">
+      <div class="summary-label">Reads as</div>
+      <div class="summary-text">${summarize()}</div>
+    </div>
+  `;
+
+  el.querySelectorAll('select[data-role], input[data-role]').forEach(ctrl=>{
+    ctrl.addEventListener('change', onFieldChange);
+  });
+  el.querySelectorAll('.remove-step').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ examples[current].aiGenerated=false; examples[current].steps.splice(parseInt(btn.dataset.i),1); renderCanvas(); });
+  });
+  el.querySelectorAll('.remove-row').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      examples[current].aiGenerated=false;
+      const step = examples[current].steps[parseInt(btn.dataset.i)];
+      step.rows.splice(parseInt(btn.dataset.ri),1); renderCanvas();
+    });
+  });
+  el.querySelectorAll('.add-row-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      examples[current].aiGenerated=false;
+      const step = examples[current].steps[parseInt(btn.dataset.i)];
+      step.rows.push({ source:itemPool()[0], target:'' }); renderCanvas();
+    });
+  });
+  document.getElementById('addStepBtn').addEventListener('click', (e)=>{
+    e.stopPropagation(); closeMenu();
+    const menu = document.createElement('div');
+    menu.className = 'add-menu';
+    menu.innerHTML = STEP_TYPES.map(t=>`<div class="add-menu-opt" data-kind="${t.kind}"><span class="add-menu-dot" style="background:var(${t.dotVar})"></span>${t.label}</div>`).join('');
+    e.target.parentElement.appendChild(menu);
+    menu.querySelectorAll('.add-menu-opt').forEach(opt=>{
+      opt.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        appendStep(opt.dataset.kind);
+        closeMenu();
+      });
+    });
+  });
+}
+
+function appendStep(kind){
+  const ex = examples[current];
+  ex.aiGenerated = false;
+  let step = { kind };
+  if(kind==='read') step.field = ex.isList ? listPool()[0] : objPool()[0];
+  if(kind==='filter') { step.field = itemPool()[0]; step.op = CONDITION_OPS[0]; step.value=''; }
+  if(kind==='select') step.mode = SELECT_MODES[0];
+  if(kind==='transform') { step.op = TRANSFORM_OPS[0]; step.field = objPool()[0]; step.param = OP_META[TRANSFORM_OPS[0]].paramDefault; }
+  if(kind==='build') { step.rows = [{ source:itemPool()[0], target:'' }]; step.repeat = ex.isList; }
+  if(kind==='write') step.target = ex.target;
+  ex.steps.push(step);
+  renderCanvas();
+}
+
+function onFieldChange(e){
+  examples[current].aiGenerated = false;
+  const i = parseInt(e.target.dataset.i);
+  const role = e.target.dataset.role;
+  const step = examples[current].steps[i];
+  if(role==='row-source' || role==='row-target'){
+    const ri = parseInt(e.target.dataset.ri);
+    step.rows[ri][role==='row-source'?'source':'target'] = e.target.value;
+  } else if(role==='repeat'){
+    step.repeat = e.target.checked;
+  } else if(role==='op' && step.kind==='transform'){
+    step.op = e.target.value;
+    step.param = OP_META[step.op].paramDefault;
+  } else {
+    step[role] = e.target.value;
+  }
+  renderCanvas();
+}
+
+function renderAll(){ renderTabs(); renderSchema(); renderCanvas(); }
+
+function schemaDescription(){
+  const ex = examples[current];
+  if(ex.isList){
+    return `This target field is a list-based mapping.
+- The source list field is: ${listPool().join(', ')}
+- Each item in that list has these fields available for "filter", "transform" and "build" steps: ${itemPool().join(', ')}`;
+  }
+  return `This target field is a single-value mapping.
+- Available source fields: ${objPool().join(', ')}`;
+}
+
+async function generateFromIntent(){
+  const intent = document.getElementById('aiInput').value.trim();
+  const statusEl = document.getElementById('aiStatus');
+  const btn = document.getElementById('aiBtn');
+  if(!intent){ statusEl.textContent = 'Describe what you want first.'; statusEl.classList.add('error'); return; }
+  statusEl.classList.remove('error');
+  statusEl.textContent = 'AI is building the pipeline...';
+  btn.disabled = true;
+
+  const system = `You convert a plain-English data mapping request into a JSON array of pipeline steps for a no-code field mapping tool.
+
+Allowed step shapes, in this exact JSON form (kind is always one of: read, filter, select, transform, build, write):
+{"kind":"read","field":"<field from the allowed list>"}
+{"kind":"filter","field":"<item field>","op":"equals|not equals|contains|greater than|less than","value":"<string>"}
+{"kind":"select","mode":"First match|Last match|All matches"}
+{"kind":"transform","op":"Join text|Mask characters|Uppercase|Lowercase|Trim spaces|Round number","field":"<field>","field2":"<field, only include for Join text>","param":<separator string for Join text, number of characters for Mask characters, decimal places for Round number, omit otherwise>}
+{"kind":"build","rows":[{"source":"<item field>","target":"<short target field name>"}],"repeat":true|false}
+{"kind":"write","target":"<target field path>"}
+
+Rules:
+- Only use field names from the allowed list given to you. Never invent a field.
+- Steps must start with "read" and end with "write".
+- Use "filter"/"select" only if the request implies narrowing down a list to specific item(s).
+- Use "build" only for list-based targets (it maps item fields into a new shape).
+- Use "transform" for text/number operations like combining, masking, casing, rounding.
+- Output ONLY the raw JSON array. No markdown fences, no prose, no explanation.
+
+${schemaDescription()}
+The target field path to write to is: ${examples[current].target}`;
+
+  try{
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        system: system,
+        messages: [{ role: "user", content: intent }]
+      })
+    });
+    const data = await response.json();
+    const text = (data.content || []).map(b=>b.text||'').join('');
+    const clean = text.replace(/```json|```/g,'').trim();
+    const steps = JSON.parse(clean);
+    if(!Array.isArray(steps) || steps.length === 0) throw new Error('empty');
+
+    examples[current].steps = steps;
+    examples[current].aiGenerated = true;
+    statusEl.textContent = '';
+    renderCanvas();
+  } catch(err){
+    statusEl.textContent = "Couldn't build a pipeline from that description. Try rephrasing, or build it manually below.";
+    statusEl.classList.add('error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('aiBtn').addEventListener('click', generateFromIntent);
+document.getElementById('aiInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') generateFromIntent(); });
+
+renderAll();
+</script>
+</body>
+</html>

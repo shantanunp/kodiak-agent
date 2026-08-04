@@ -29,17 +29,7 @@
   .pill{font-family:var(--font-mono);background:var(--panel);border:1px solid var(--line);padding:4px 10px;border-radius:6px;}
   .legend{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;font-size:12.5px;color:var(--ink-soft);}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
-  .layout{display:grid;grid-template-columns:230px 1fr;gap:20px;align-items:start;}
-  .schema-panel,.canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;}
-  .schema-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin-bottom:8px;}
-  .schema-group{font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);margin:10px 0 4px;}
-  .schema-field{font-family:var(--font-mono);font-size:12px;padding:4px 6px;border-radius:6px;}
-  .schema-field:hover{background:var(--bg);}
-  .schema-tree{margin-left:0;padding-left:0;list-style:none;}
-  .schema-tree li{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--ink-soft);}
-  .schema-tree .node-name{color:var(--ink);}
-  .schema-tree ul{margin:2px 0 4px 14px;padding:0;list-style:none;border-left:1px dashed var(--line);}
-  .schema-ref{font-size:11px;color:var(--ink-faint);margin-top:10px;}
+  .canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;}
   .tabs{display:flex;gap:6px;margin:0 0 14px;flex-wrap:wrap;}
   .tab{font-family:var(--font-mono);font-size:12px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);cursor:pointer;color:var(--ink-soft);}
   .tab.active{background:var(--target-bg);border-color:var(--target);color:var(--target);font-weight:600;}
@@ -78,10 +68,7 @@
     <span><span class="dot" style="background:var(--target)"></span>Write / Constant</span>
     <span><span class="dot" style="background:var(--raw)"></span>Raw / unclassified</span>
   </div>
-  <div class="layout">
-    <div class="schema-panel" id="schemaPanel"></div>
-    <div class="canvas" id="canvas"><p class="error">Loading…</p></div>
-  </div>
+  <div class="canvas" id="canvas"><p class="error">Loading…</p></div>
 </div>
 <script>
 const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W', constant:'C', raw:'?' };
@@ -154,56 +141,13 @@ function summarize(steps) {
   }).join(', then ') + '.';
 }
 
-function renderSchemaTree(node, depth = 0) {
-  if (!node) return '';
-  const kids = node.children || [];
-  const req = node.required ? ' <span style="color:var(--cond)">*</span>' : '';
-  const type = node.type === 'array' ? `array[${node.itemType || ''}]` : node.type;
-  let html = `<li><span class="node-name">${esc(node.name)}</span>${req} <span style="opacity:.65">${esc(type)}</span>`;
-  if (kids.length) {
-    html += `<ul>${kids.map(c => renderSchemaTree(c, depth + 1)).join('')}</ul>`;
-  }
-  html += '</li>';
-  return html;
-}
-
-function renderSchemaPanel(data, schemaDoc) {
-  const el = document.getElementById('schemaPanel');
-  const sourceRoot = data.sourceSchema || schemaDoc?.source?.root;
-  const targetRoot = data.targetSchema || schemaDoc?.target?.root;
-
-  let srcHtml;
-  let tgtHtml;
-
-  if (sourceRoot?.children?.length) {
-    srcHtml = `<ul class="schema-tree">${sourceRoot.children.map(c => renderSchemaTree(c)).join('')}</ul>`;
-  } else {
-    srcHtml = (data.sourceFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
-  }
-
-  if (targetRoot?.children?.length) {
-    tgtHtml = `<ul class="schema-tree">${targetRoot.children.map(c => renderSchemaTree(c)).join('')}</ul>`;
-  } else {
-    tgtHtml = (data.targetFields||[]).map(f => `<div class="schema-field">${esc(f)}</div>`).join('') || '<div class="schema-field">—</div>';
-  }
-
-  const schemaNote = data.schemaRef || schemaDoc
-    ? `<div class="schema-ref">Schema: ${esc(data.schemaRef || schemaDoc.mapperId + '.schema.json')}</div>`
-    : `<div class="schema-ref">Fields from pipeline steps (no saved schema)</div>`;
-
-  el.innerHTML = `
-    <div class="schema-title">Source · ${esc(data.sourceSimple)}</div>${srcHtml}
-    <div class="schema-group">Target · ${esc(data.targetSimple)}</div>${tgtHtml}
-    ${schemaNote}`;
-}
-
 function fieldLeaf(path) {
   if (!path) return '';
   const parts = String(path).split('.');
   return parts[parts.length - 1] || path;
 }
 
-function render(data, schemaDoc, activeFieldIndex) {
+function render(data, activeFieldIndex) {
   document.getElementById('metaBar').innerHTML = [
     `<span class="pill">${esc(data.mapperId)}</span>`,
     data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
@@ -211,7 +155,6 @@ function render(data, schemaDoc, activeFieldIndex) {
     data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
     `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(data.mapperId)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
   ].join('');
-  renderSchemaPanel(data, schemaDoc);
 
   const fields = Array.isArray(data.fields) ? data.fields : null;
   let steps = data.steps || [];
@@ -239,7 +182,7 @@ function render(data, schemaDoc, activeFieldIndex) {
 
   document.querySelectorAll('.tab[data-field-idx]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      render(data, schemaDoc, Number(btn.getAttribute('data-field-idx')));
+      render(data, Number(btn.getAttribute('data-field-idx')));
     });
   });
 }
@@ -248,46 +191,11 @@ async function load() {
   const params = new URLSearchParams(location.search);
   const mapper = params.get('mapper') || 'demo-ai-recognition-mapper';
   try {
-    const bust = `?t=${Date.now()}`;
-    const [viewRes, schemaRes] = await Promise.all([
-      fetch(`/data/${mapper}.view.json${bust}`),
-      fetch(`/api/schemas/${encodeURIComponent(mapper)}${bust}`),
-    ]);
-
-    let viewData = null;
-    if (viewRes.ok) {
-      viewData = await viewRes.json();
+    const viewRes = await fetch(`/data/${mapper}.view.json?t=${Date.now()}`);
+    if (!viewRes.ok) {
+      throw new Error(`No pipeline view for ${mapper}. Run: npm run label -- --mapper ${mapper}`);
     }
-
-    let schemaDoc = null;
-    if (schemaRes.ok) {
-      schemaDoc = await schemaRes.json();
-    }
-
-    if (!viewData && !schemaDoc) {
-      throw new Error(`No view data or schema for ${mapper}. Run: npm run label -- --mapper ${mapper}`);
-    }
-
-    if (!viewData) {
-      viewData = {
-        mapperId: mapper,
-        sourceSimple: schemaDoc.source?.root?.name || 'Source',
-        targetSimple: schemaDoc.target?.root?.name || 'Target',
-        target: schemaDoc.target?.root?.name || 'Target',
-        sourceFields: [],
-        targetFields: [],
-        steps: [],
-        sourceSchema: schemaDoc.source?.root,
-        targetSchema: schemaDoc.target?.root,
-        schemaRef: `${mapper}.schema.json`,
-      };
-      document.getElementById('canvas').innerHTML = `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Schema saved for <strong>${esc(mapper)}</strong>. No pipeline view yet — run <span class="mono">npm run label -- --mapper ${esc(mapper)}</span> (writes <span class="mono">ui/pipeline-viewer/data/${esc(mapper)}.view.json</span>).</p>`;
-      renderSchemaPanel(viewData, schemaDoc);
-      document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(mapper)}</span><span class="pill">schema only</span>`;
-      return;
-    }
-
-    render(viewData, schemaDoc, 0);
+    render(await viewRes.json(), 0);
   } catch (e) {
     document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }
