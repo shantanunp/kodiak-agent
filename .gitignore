@@ -16,7 +16,7 @@ indexer/.gradle/
 
 # Runtime cache (GitHub worktrees, index, labels)
 .cache/
-translator/cache/
+translator/cache/cache/
 ui/pipeline-viewer/data/*.view.json
 
 # Portable JDK downloaded for Gradle
