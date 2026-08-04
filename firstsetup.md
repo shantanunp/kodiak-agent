@@ -109,7 +109,8 @@ npm run ast -- --mapper demo-ai-recognition-mapper `
 
 ```powershell
 npm run ui:serve
-# http://localhost:4173/pipeline-viewer/?mapper=demo-ai-recognition-mapper
+# http://localhost:4173/pipeline-viewer/          # opens the most recently labeled mapper
+# http://localhost:4173/pipeline-viewer/?mapper=<mapper-id>   # or pick one explicitly
 ```
 
 **Build with AI (POC):**
@@ -137,14 +138,44 @@ npm run ui:serve
 
 ---
 
-## Offline agent jobs (optional)
+## Offline agent jobs (no model API / blocked office network)
+
+`npm run label` now auto-detects when it can't reach the model API — no key set, **or**
+the live call fails (blocked network/proxy) — and exports an offline job instead of just
+erroring. It prints the job path and exact next steps, so you can usually just run your
+normal `label` command and follow the printed instructions:
+
+```powershell
+npm run label -- --mapper demo-ai-recognition-mapper `
+  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+  --fields Summary.displayName --no-cache
+```
+
+That prints something like:
+
+```
+Run this agent with this input:
+  Job file: .cache\agent-jobs\demo-ai-recognition-mapper\<fingerprint>\job.json
+
+1. Open that job.json in VS Code.
+2. Ask Copilot Chat (agent mode): "Complete the offline label job in <jobFile>"
+3. The agent writes <resultFile>
+4. Then run label:import, then label --from-cache-only
+```
+
+Opening `job.json` (under `.cache/agent-jobs/**`) auto-attaches
+`.github/instructions/kodiak-agent-label.instructions.md`, which tells Copilot Chat's agent
+mode exactly how to fill in `result.json` — no external model API calls, no invented schema
+paths. In Cursor, the equivalent rule lives at `.cursor/rules/kodiak-agent-label.mdc`.
+
+You can also run each stage manually instead of relying on auto-fallback:
 
 ```powershell
 npm run label:export -- --mapper demo-ai-recognition-mapper `
   --worktree C:\Users\<you>\Workspace\your-mapper-repo `
   --fields Summary.displayName
 
-# complete result.json via Cursor / offline agent, then:
+# complete result.json via Copilot Chat (agent mode) / Cursor, then:
 
 npm run label:import -- --mapper demo-ai-recognition-mapper `
   --worktree C:\Users\<you>\Workspace\your-mapper-repo `

@@ -178,6 +178,59 @@ npm run label -- --mapper demo-ai-recognition-mapper --remote
 
 
 
+## Offline mode (no model API access)
+
+For offices that block outbound calls to the model API: `npm run label` auto-detects this —
+when `MODEL_API_KEY` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`) isn't set, **or** the live
+model call fails (blocked network/proxy) — and falls back to an offline agent job instead
+of erroring out. It writes `.cache/agent-jobs/{mapperId}/{fingerprint}/job.json` and prints
+exactly what to do next:
+
+```bash
+npm run label -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/mapper-repo --fields Summary.displayName --no-cache
+```
+
+```
+No model API configured (...).
+Exported an offline agent job instead (1 field(s), no HTTP calls needed).
+
+Run this agent with this input:
+  Job file: .cache/agent-jobs/demo-ai-recognition-mapper/<fingerprint>/job.json
+
+1. Open that job.json in VS Code.
+2. Ask Copilot Chat (agent mode): "Complete the offline label job in <jobFile>"
+   (.github/instructions/kodiak-agent-label.instructions.md auto-attaches and tells the agent exactly what to write).
+3. The agent writes <resultFile>
+4. Then run:
+   npm run label:import -- --mapper demo-ai-recognition-mapper --fields Summary.displayName
+   npm run label -- --mapper demo-ai-recognition-mapper --from-cache-only --fields Summary.displayName
+```
+
+Follow those 4 steps — no HTTP calls to the model API are made anywhere in this flow.
+You can also run each stage manually:
+
+```bash
+# 1. Export a job (same thing the auto-fallback does)
+npm run label:export -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/mapper-repo --fields Summary.displayName
+
+# 2. Open job.json in VS Code, ask Copilot Chat (agent mode) to complete it —
+#    .github/instructions/kodiak-agent-label.instructions.md auto-attaches for
+#    any file under .cache/agent-jobs/**, so the agent knows the exact
+#    result.json shape (recognized/targetField/pipeline/reason per field).
+
+# 3. Import the agent's result.json into the field cache
+npm run label:import -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/mapper-repo --fields Summary.displayName
+
+# 4. Read the labeled pipeline from cache (no model API needed)
+npm run label -- --mapper demo-ai-recognition-mapper \
+  --worktree /path/to/mapper-repo --fields Summary.displayName --from-cache-only
+```
+
+
+
 ## Schema builder
 
 Define source/target structures before mapping. Saved to `registry/schemas/{mapperId}.schema.json`.

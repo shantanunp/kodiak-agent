@@ -207,11 +207,20 @@ npm run golden:capture
 | Variable                | Purpose                                                         |
 | ----------------------- | --------------------------------------------------------------- |
 | `GITHUB_TOKEN`          | Optional for public repo; recommended for polling (5000 req/hr); also used by `copilot` style |
-| `MODEL_API_KEY`         | Required for `npm run label` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`) |
+| `MODEL_API_KEY`         | Used by `npm run label` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`). Not required — if missing, or if the API call fails (e.g. blocked office network), `label` auto-falls-back to an offline agent job (see below) |
 | `MODEL_API_STYLE`       | `openai` \| `claude` \| `copilot`                               |
 | `MODEL_NAME`            | Model id (e.g. `gpt-4o`, `claude-sonnet-4-5`)                   |
 | `POLL_INTERVAL_MINUTES` | Default `15`                                                    |
 
+### No model API access? (offline agent jobs)
+
+`npm run label` detects when it can't reach the model API and instead exports an offline
+job (`.cache/agent-jobs/{mapperId}/{fingerprint}/job.json`) with clear next steps printed
+to the console — open `job.json` in VS Code, ask Copilot Chat (agent mode) to complete it
+(`.github/instructions/kodiak-agent-label.instructions.md` auto-attaches for that path and
+tells the agent exactly how to write `result.json`), then run `npm run label:import` and
+`npm run label -- --from-cache-only`. See `translator/agent/exportJob.ts` /
+`translator/agent/importJob.ts` and the "Offline mode" section in `README.md`.
 
 ---
 

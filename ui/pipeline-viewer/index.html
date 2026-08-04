@@ -100,7 +100,7 @@ const COLOR = { read:'--source', filter:'--cond', select:'--op', transform:'--op
 const BG = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg', constant:'--target-bg', raw:'--raw-bg' };
 const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Transform', build:'Build object', write:'Write to target', constant:'Constant', raw:'Unclassified (raw)' };
 
-let currentMapper = 'demo-ai-recognition-mapper';
+let currentMapper = '';
 let viewData = null;
 let activeFieldIndex = 0;
 let aiGenerated = false;
@@ -281,9 +281,29 @@ function indexForFieldsParam(data, fieldsParam) {
   return byLeaf >= 0 ? byLeaf : 0;
 }
 
+async function latestMapper(params) {
+  try {
+    const res = await fetch(`/api/views/latest?t=${Date.now()}`);
+    if (!res.ok) return '';
+    const { mapperId } = await res.json();
+    if (!mapperId) return '';
+    // Pin it to the URL so reload and Build with AI stay on the same mapper
+    params.set('mapper', mapperId);
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+    return mapperId;
+  } catch {
+    return '';
+  }
+}
+
+function hint(html) {
+  document.getElementById('canvas').innerHTML =
+    `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">${html}</p>`;
+}
+
 async function load() {
   const params = new URLSearchParams(location.search);
-  currentMapper = params.get('mapper') || 'demo-ai-recognition-mapper';
+  currentMapper = params.get('mapper') || await latestMapper(params);
   const fieldsParam = params.get('fields');
   // Pre-fill optional re-label filter for Build with AI (after "| fields: …")
   if (fieldsParam && !document.getElementById('aiInput').value.trim()) {
@@ -291,12 +311,17 @@ async function load() {
       `e.g. rename helper | fields: ${fieldsParam}`;
   }
 
+  if (!currentMapper) {
+    document.getElementById('metaBar').innerHTML = '';
+    hint(`No pipeline view yet. Run <span class="mono">npm run label -- --mapper &lt;mapper-id&gt; --fields …</span> first.`);
+    return;
+  }
+
   try {
     const viewRes = await fetch(`/data/${currentMapper}.view.json?t=${Date.now()}`);
     if (!viewRes.ok) {
       document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(currentMapper)}</span>`;
-      document.getElementById('canvas').innerHTML =
-        `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">No pipeline view yet for <strong>${esc(currentMapper)}</strong>. Run <span class="mono">npm run label -- --mapper ${esc(currentMapper)} --fields …</span> first.</p>`;
+      hint(`No pipeline view yet for <strong>${esc(currentMapper)}</strong>. Run <span class="mono">npm run label -- --mapper ${esc(currentMapper)} --fields …</span> first.`);
       return;
     }
     const data = await viewRes.json();

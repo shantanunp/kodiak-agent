@@ -5,11 +5,11 @@
  *   npm run ui:serve
  *   http://localhost:4173/structure-setup/?mapper=my-mapper
  *   http://localhost:4173/schema-builder/?mapper=my-mapper
- *   http://localhost:4173/pipeline-viewer/?mapper=demo-ai-recognition-mapper
+ *   http://localhost:4173/pipeline-viewer/
  */
 
 import { createServer, type IncomingMessage } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import { getEnvOptional, paths } from "../src/config/env.js";
 import { loadSchema, saveSchema, SCHEMAS_DIR } from "../schema/io.js";
@@ -32,6 +32,8 @@ import type { PipelineViewModel } from "../translator/toPipelineView.js";
 
 const PORT = Number(process.env.VIEW_PORT ?? 4173);
 const UI_ROOT = join(paths.root, "ui");
+const VIEW_DATA_DIR = join(UI_ROOT, "pipeline-viewer/data");
+const VIEW_SUFFIX = ".view.json";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -343,10 +345,30 @@ createServer(async (req, res) => {
     }
   }
 
+  // Mapper of the most recently written view, so the viewer can open it by default
+  if (pathname === "/api/views/latest" && req.method === "GET") {
+    const latest = existsSync(VIEW_DATA_DIR)
+      ? readdirSync(VIEW_DATA_DIR)
+          .filter((name) => name.endsWith(VIEW_SUFFIX))
+          .map((name) => ({
+            mapperId: name.slice(0, -VIEW_SUFFIX.length),
+            mtimeMs: statSync(join(VIEW_DATA_DIR, name)).mtimeMs,
+          }))
+          .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
+      : undefined;
+
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    });
+    res.end(JSON.stringify({ mapperId: latest?.mapperId ?? null }));
+    return;
+  }
+
   // Pipeline viewer data
   if (pathname.startsWith("/data/")) {
-    const file = join(UI_ROOT, "pipeline-viewer/data", pathname.slice("/data/".length));
-    if (file.startsWith(join(UI_ROOT, "pipeline-viewer/data")) && existsSync(file)) {
+    const file = join(VIEW_DATA_DIR, pathname.slice("/data/".length));
+    if (file.startsWith(VIEW_DATA_DIR) && existsSync(file)) {
       res.writeHead(200, {
         "Content-Type": "application/json",
         "Cache-Control": "no-store",
@@ -373,5 +395,5 @@ createServer(async (req, res) => {
 }).listen(PORT, () => {
   console.log(`Kodiak UI: http://localhost:${PORT}/structure-setup/?mapper=my-mapper`);
   console.log(`  Schema builder: http://localhost:${PORT}/schema-builder/?mapper=my-mapper`);
-  console.log(`  Pipeline viewer: http://localhost:${PORT}/pipeline-viewer/?mapper=demo-ai-recognition-mapper`);
+  console.log(`  Pipeline viewer: http://localhost:${PORT}/pipeline-viewer/`);
 });

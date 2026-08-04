@@ -1,13 +1,20 @@
-# Point at your mapper GitHub repo (owner/name). Override with GITHUB_OWNER / GITHUB_REPO in .env.
-repo: "your-org/your-mapper-repo"
+repo: "shantanunp/Kmismomapper"
 branch: "main"
 scope:
-  - "src/main/java/**/*.java"
+  - "src/main/java/com/kodiakservice/mapper/**/*.java"
 mappers:
   - id: demo-ai-recognition-mapper
-    sourceFile: src/main/java/example/mapper/DemoAiRecognitionMapper.java
-    class: example.mapper.DemoAiRecognitionMapper
+    sourceFile: src/main/java/com/kodiakservice/mapper/DemoAiRecognitionMapper.java
+    class: com.kodiakservice.mapper.DemoAiRecognitionMapper
     entryMethod: map
-    sourceType: example.mapper.DemoAiRecognitionMapper$Person
-    targetType: example.mapper.DemoAiRecognitionMapper$Summary
-    goldenTests: src/test/java/example/mapper/DemoAiRecognitionMapperTest.java
+    sourceType: com.kodiakservice.mapper.DemoAiRecognitionMapper$Person
+    targetType: com.kodiakservice.mapper.DemoAiRecognitionMapper$Summary
+    goldenTests: src/test/java/com/kodiakservice/mapper/DemoAiRecognitionMapperTest.java
+
+  - id: lpa-request-mapper
+    sourceFile: src/main/java/com/kodiakservice/mapper/LpaRequestMapper.java
+    class: com.kodiakservice.mapper.LpaRequestMapper
+    entryMethod: map
+    sourceType: com.kodiakservice.dto.input.LoanApplicationRequest
+    targetType: com.kodiakservice.dto.output.LpaMappedResponse
+    goldenTests: src/test/java/com/kodiakservice/mapper/LpaRequestMapperTest.java

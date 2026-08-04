@@ -23,6 +23,7 @@ import {
   type PipelineJson,
 } from "./model/index.js";
 import { resolveMapperAst } from "./resolvePipeline.js";
+import { exportAgentJob } from "./agent/exportJob.js";
 import {
   filterMappingByFields,
   matchesTargetField,
@@ -144,6 +145,60 @@ async function labelFromAgentCache(
   );
 }
 
+async function offlineAgentFallback(reason: string, selectors: string[]): Promise<never> {
+  if (!values.mapper) {
+    console.error(
+      `${reason}\n` +
+        "Set MODEL_API_KEY (or ANTHROPIC_API_KEY / COPILOT_TOKEN) in .env, or use --from-cache-only after label:import.\n" +
+        "Offline: npm run label:export → VS Code agent → npm run label:import → npm run label -- --from-cache-only",
+    );
+    process.exit(1);
+  }
+
+  try {
+    const exported = await exportAgentJob({
+      mapper: values.mapper,
+      worktree: values.worktree,
+      local: values.local,
+      remote: values.remote,
+      registry: values.registry!,
+      selectors,
+    });
+    const importCmd =
+      `npm run label:import -- --mapper ${exported.mapperId}` +
+      (values.worktree ? ` --worktree ${values.worktree}` : "") +
+      (selectors.length ? ` --fields ${selectors.join(",")}` : "");
+    const cacheCmd =
+      `npm run label -- --mapper ${exported.mapperId} --from-cache-only` +
+      (values.worktree ? ` --worktree ${values.worktree}` : "") +
+      (selectors.length ? ` --fields ${selectors.join(",")}` : "");
+    console.error(
+      [
+        reason,
+        `Exported an offline agent job instead (${exported.fieldCount} field(s), no HTTP calls needed).`,
+        "",
+        "Run this agent with this input:",
+        `  Job file: ${exported.jobFile}`,
+        "",
+        "1. Open that job.json in VS Code.",
+        `2. Ask Copilot Chat (agent mode): "Complete the offline label job in ${exported.jobFile}"`,
+        "   (.github/instructions/kodiak-agent-label.instructions.md auto-attaches and tells the agent exactly what to write).",
+        `3. The agent writes ${exported.resultFile}`,
+        "4. Then run:",
+        `   ${importCmd}`,
+        `   ${cacheCmd}`,
+      ].join("\n"),
+    );
+  } catch (err) {
+    console.error(
+      `${reason}\n` +
+        "Set MODEL_API_KEY (or ANTHROPIC_API_KEY / COPILOT_TOKEN) in .env, or use --from-cache-only after label:import.\n" +
+        `Could not auto-export offline agent job: ${(err as Error).message}`,
+    );
+  }
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   if (values["clear-cache"]) {
     const cleared = clearAllTranslatorCaches(values.mapper);
@@ -153,13 +208,17 @@ async function main(): Promise<void> {
     );
   }
 
+  const selectors = parseFieldSelectors({
+    field: values.field,
+    fields: values.fields,
+  });
+
   const fromCacheOnly = Boolean(values["from-cache-only"]);
   if (!fromCacheOnly && !isModelConfigured()) {
-    console.error(
-      "Set MODEL_API_KEY (or ANTHROPIC_API_KEY / COPILOT_TOKEN) in .env, or use --from-cache-only after label:import.\n" +
-        "Offline: npm run label:export → VS Code agent → npm run label:import → npm run label -- --from-cache-only",
+    await offlineAgentFallback(
+      "No model API configured (MODEL_API_KEY / ANTHROPIC_API_KEY / COPILOT_TOKEN not set).",
+      selectors,
     );
-    process.exit(1);
   }
 
   let ast: IndexAst;
@@ -200,24 +259,28 @@ async function main(): Promise<void> {
     ast = entry.ast;
   }
 
-  const selectors = parseFieldSelectors({
-    field: values.field,
-    fields: values.fields,
-  });
-
   if (fromCacheOnly) {
     await labelFromAgentCache(ast, sourceJava, selectors);
     return;
   }
 
   const labeler = new StepLabeler();
-  const pipeline = await labeler.labelIndex(ast, {
-    fieldSelectors: selectors,
-    sourceJava,
-    noCache: Boolean(values["no-cache"]),
-    discoverAi: !values["no-discover-ai"] && values["discover-ai"] !== false,
-    useAst: Boolean(values["with-ast"]),
-  });
+  let pipeline: PipelineJson;
+  try {
+    pipeline = await labeler.labelIndex(ast, {
+      fieldSelectors: selectors,
+      sourceJava,
+      noCache: Boolean(values["no-cache"]),
+      discoverAi: !values["no-discover-ai"] && values["discover-ai"] !== false,
+      useAst: Boolean(values["with-ast"]),
+    });
+  } catch (err) {
+    await offlineAgentFallback(
+      `Model API call failed (likely blocked network/proxy at your office): ${(err as Error).message}`,
+      selectors,
+    );
+    return;
+  }
 
   if (selectors.length > 0) {
     pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
