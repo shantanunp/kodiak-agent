@@ -19,6 +19,8 @@ export interface PipelineOpLabel {
   op?: string;
   value?: string;
   condition?: string;
+  /** Short plain-English what this step does (shown under each stage in the UI). */
+  summary?: string;
 }
 
 export interface LabelResponse {
@@ -84,26 +86,28 @@ CRITICAL — business paths only:
 Rules:
 - Indexer ops (READ/CONSTANT/TRANSFORM/RAW/…) are hints — correct them when wrong.
 - Literals/static finals → single constant step with "value"; never invent a read for constants.
-- Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>"}]
+- Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads applicant.displayName from the source."}]
 - Arithmetic (e.g. termYears * 12) → read + transform multiply with value "12"
 - Name-split (parts[0]/parts[1] from trim+split helper):
-  [{"kind":"read","sourceField":"applicant.displayName"},
-   {"kind":"transform","op":"trim"},
-   {"kind":"transform","op":"split","value":" "},
-   {"kind":"transform","op":"takeFirst"}]  // or takeLast for parts[1]
+  [{"kind":"read","sourceField":"applicant.displayName","summary":"…"},
+   {"kind":"transform","op":"trim","summary":"…"},
+   {"kind":"transform","op":"split","value":" ","summary":"…"},
+   {"kind":"transform","op":"takeFirst","summary":"…"}]  // or takeLast for parts[1]
 - Letter sanitize / state-code normalize (trim + keep letters + uppercase, e.g. sanitizeAlpha / Character.isLetter loops):
-  [{"kind":"read","sourceField":"property.region"},
-   {"kind":"transform","op":"trim"},
-   {"kind":"transform","op":"lettersOnly"},
-   {"kind":"transform","op":"uppercase"}]
+  [{"kind":"read","sourceField":"property.region","summary":"…"},
+   {"kind":"transform","op":"trim","summary":"…"},
+   {"kind":"transform","op":"lettersOnly","summary":"…"},
+   {"kind":"transform","op":"uppercase","summary":"…"}]
   MUST emit lettersOnly whenever the code strips non-letters (sanitizeAlpha, Character.isLetter, letter-filter loops).
   Never omit it as "implicit" or "typical for state codes" — if the code filters letters, the pipeline must include lettersOnly.
 - Drop meaningless null-guard filters.
 - If RAW meta.code is present, expand it into the correct pipeline.
+- EVERY pipeline step MUST include "summary": one short plain-English sentence describing what THAT step does (mention the real helper/method when known, e.g. "trimPostal trims leading/trailing whitespace.").
+- "reason" is a brief overall field explanation (helpers chain + source→target). Do not put per-step detail only in reason — put it in each step's summary.
 - If unsure, return recognized=false.
 
 Respond with JSON only:
-{"recognized":true,"targetField":"MESSAGE.…","pipeline":[{"kind":"read","sourceField":"…"},…],"reason":"…"}
+{"recognized":true,"targetField":"MESSAGE.…","pipeline":[{"kind":"read","sourceField":"…","summary":"…"},{"kind":"transform","op":"trim","summary":"…"},…],"reason":"…"}
 or {"recognized":false,"reason":"…"}`;
 
 const DISCOVER_PROMPT = `You discover field writes in a Java mapper class. You do NOT label business paths.
@@ -144,6 +148,10 @@ function normalizePipeline(pipeline: PipelineOpLabel[] | undefined): PipelineOpL
     ...op,
     kind: (op.kind ?? "").toLowerCase(),
     op: op.op?.toLowerCase(),
+    summary:
+      typeof op.summary === "string" && op.summary.trim()
+        ? op.summary.trim()
+        : undefined,
   }));
 }
 

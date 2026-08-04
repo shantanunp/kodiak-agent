@@ -53,6 +53,8 @@ export interface IndexAst {
 export interface PipelineStep extends AstStep {
   labelSource?: "deterministic" | "model";
   labelReason?: string;
+  /** Per-step plain-English summary from the model (shown under each stage). */
+  summary?: string;
 }
 
 export interface FieldMappingJson {

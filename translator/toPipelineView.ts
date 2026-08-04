@@ -45,11 +45,14 @@ function flattenFieldPipeline(
     });
   }
 
-  // Attach labelReason only on the first step so the UI is not flooded.
+  // Field-level reason stays on the first step for the bottom summary.
+  // Per-step AI "summary" is kept on every op for the stage cards.
   const reason = ops.find((op) => op.labelReason)?.labelReason;
   if (reason) {
     return ops.map((op, i) =>
-      i === 0 ? { ...op, labelReason: reason } : { ...op, labelReason: undefined },
+      i === 0
+        ? { ...op, labelReason: reason }
+        : { ...op, labelReason: undefined },
     );
   }
   return ops;
@@ -89,6 +92,8 @@ export interface ViewStep {
   sourceText?: string;
   labelSource?: string;
   labelReason?: string;
+  /** Per-step summary from the model. */
+  summary?: string;
   children?: ViewStep[];
 }
 
@@ -221,6 +226,13 @@ function constantValue(step: PipelineStep): string | undefined {
   return undefined;
 }
 
+function withSummary<T extends ViewStep>(view: T, step: PipelineStep): T {
+  if (typeof step.summary === "string" && step.summary.trim()) {
+    return { ...view, summary: step.summary.trim() };
+  }
+  return view;
+}
+
 function expandWriteStep(
   step: PipelineStep,
   sourceSimple: string,
@@ -248,13 +260,16 @@ function expandWriteStep(
         param: " ",
         labelSource: step.labelSource,
       },
-      {
-        kind: "write",
-        target,
-        sourceText: text,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason,
-      },
+      withSummary(
+        {
+          kind: "write",
+          target,
+          sourceText: text,
+          labelSource: step.labelSource,
+          labelReason: step.labelReason,
+        },
+        step,
+      ),
     ];
   }
 
@@ -266,23 +281,29 @@ function expandWriteStep(
         field: target.replace(/\.[^.]+$/, ".displayName"),
         labelSource: step.labelSource,
       },
+      withSummary(
+        {
+          kind: "write",
+          target,
+          sourceText: text,
+          labelSource: step.labelSource,
+        },
+        step,
+      ),
+    ];
+  }
+
+  return [
+    withSummary(
       {
         kind: "write",
         target,
         sourceText: text,
         labelSource: step.labelSource,
+        labelReason: step.labelReason,
       },
-    ];
-  }
-
-  return [
-    {
-      kind: "write",
-      target,
-      sourceText: text,
-      labelSource: step.labelSource,
-      labelReason: step.labelReason,
-    },
+      step,
+    ),
   ];
 }
 
@@ -301,25 +322,31 @@ function convertStep(
   if (kind === "constant") {
     const target = formatWriteTarget(step.targetField, targetSimple, schemaTargetFields);
     return [
-      {
-        kind: "constant",
-        target,
-        value: constantValue(step),
-        labelSource: step.labelSource,
-        labelReason: step.labelReason,
-      },
+      withSummary(
+        {
+          kind: "constant",
+          target,
+          value: constantValue(step),
+          labelSource: step.labelSource,
+          labelReason: step.labelReason,
+        },
+        step,
+      ),
     ];
   }
 
   if (kind === "filter") {
     return [
-      {
-        kind: "filter",
-        op: "matches",
-        value: step.condition,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason,
-      },
+      withSummary(
+        {
+          kind: "filter",
+          op: "matches",
+          value: step.condition,
+          labelSource: step.labelSource,
+          labelReason: step.labelReason,
+        },
+        step,
+      ),
     ];
   }
 
@@ -345,29 +372,35 @@ function convertStep(
     const opLabel = opLabels[opRaw.toLowerCase()] ?? opRaw;
     const param = step.meta?.value;
     return [
-      {
-        kind: "transform",
-        op: opLabel,
-        param: param != null ? (Number.isNaN(Number(param)) ? String(param) : Number(param)) : undefined,
-        target: formatWriteTarget(step.targetField, targetSimple, schemaTargetFields),
-        field: step.sourceField,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason,
-      },
+      withSummary(
+        {
+          kind: "transform",
+          op: opLabel,
+          param: param != null ? (Number.isNaN(Number(param)) ? String(param) : Number(param)) : undefined,
+          target: formatWriteTarget(step.targetField, targetSimple, schemaTargetFields),
+          field: step.sourceField,
+          labelSource: step.labelSource,
+          labelReason: step.labelReason,
+        },
+        step,
+      ),
     ];
   }
 
   if (kind === "build") {
     return [
-      {
-        kind: "build",
-        rows: step.targetField
-          ? [{ source: step.sourceField ?? "", target: step.targetField }]
-          : [],
-        repeat: false,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason,
-      },
+      withSummary(
+        {
+          kind: "build",
+          rows: step.targetField
+            ? [{ source: step.sourceField ?? "", target: step.targetField }]
+            : [],
+          repeat: false,
+          labelSource: step.labelSource,
+          labelReason: step.labelReason,
+        },
+        step,
+      ),
     ];
   }
 
@@ -383,40 +416,49 @@ function convertStep(
 
   if (kind === "read") {
     return [
-      {
-        kind: "read",
-        field: step.sourceField ?? prefixField(sourceSimple, step.targetField ?? ""),
-        target: step.targetField
-          ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
-          : undefined,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason,
-      },
+      withSummary(
+        {
+          kind: "read",
+          field: step.sourceField ?? prefixField(sourceSimple, step.targetField ?? ""),
+          target: step.targetField
+            ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
+            : undefined,
+          labelSource: step.labelSource,
+          labelReason: step.labelReason,
+        },
+        step,
+      ),
     ];
   }
 
   if (kind === "raw") {
     const code = typeof step.meta?.code === "string" ? step.meta.code : step.sourceText;
     return [
-      {
-        kind: "raw",
-        sourceText: code,
-        labelSource: step.labelSource,
-        labelReason: step.labelReason ?? "Unclassified Java — needs review",
-      },
+      withSummary(
+        {
+          kind: "raw",
+          sourceText: code,
+          labelSource: step.labelSource,
+          labelReason: step.labelReason ?? "Unclassified Java — needs review",
+        },
+        step,
+      ),
     ];
   }
 
   return [
-    {
-      kind: kind as ViewStepKind,
-      target: step.targetField
-        ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
-        : undefined,
-      field: step.sourceField,
-      labelSource: step.labelSource,
-      labelReason: step.labelReason,
-    },
+    withSummary(
+      {
+        kind: kind as ViewStepKind,
+        target: step.targetField
+          ? formatWriteTarget(step.targetField, targetSimple, schemaTargetFields)
+          : undefined,
+        field: step.sourceField,
+        labelSource: step.labelSource,
+        labelReason: step.labelReason,
+      },
+      step,
+    ),
   ];
 }
 

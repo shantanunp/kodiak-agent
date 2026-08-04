@@ -75,6 +75,9 @@ export function fromPipelineOp(
     labelSource,
     labelReason: reason,
   };
+  if (typeof op.summary === "string" && op.summary.trim()) {
+    step.summary = op.summary.trim();
+  }
 
   if (kind === "READ" || kind === "WRITE" || kind === "BUILD") {
     if (op.sourceField) step.sourceField = op.sourceField;
@@ -151,6 +154,10 @@ export function normalizeFieldMappingResponse(raw: unknown): FieldMappingRespons
         ...op,
         kind: (op.kind ?? "").toLowerCase(),
         op: typeof op.op === "string" ? op.op.toLowerCase() : op.op,
+        summary:
+          typeof op.summary === "string" && op.summary.trim()
+            ? op.summary.trim()
+            : undefined,
       }))
     : undefined;
 

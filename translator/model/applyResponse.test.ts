@@ -65,4 +65,36 @@ describe("applyFieldMappingResponse", () => {
       ["READ", "trim", "lettersonly", "uppercase"],
     );
   });
+
+  it("keeps per-step summary from the model response", () => {
+    const entry: FieldMapping = {
+      targetField: "PostalCode",
+      pipeline: [{ kind: "RAW", meta: { code: "setPostalCode(trimPostal(p));" } }],
+    };
+    const labeled = applyFieldMappingResponse(entry, {
+      recognized: true,
+      targetField: "MESSAGE.DEAL.COLLATERAL.PostalCode",
+      reason: "postal pipeline",
+      pipeline: [
+        {
+          kind: "read",
+          sourceField: "property.postalCode",
+          summary: "Reads property.postalCode from the source.",
+        },
+        {
+          kind: "transform",
+          op: "trim",
+          summary: "trimPostal removes leading and trailing whitespace.",
+        },
+      ],
+    });
+    assert.equal(
+      labeled.pipeline[0]?.summary,
+      "Reads property.postalCode from the source.",
+    );
+    assert.equal(
+      labeled.pipeline[1]?.summary,
+      "trimPostal removes leading and trailing whitespace.",
+    );
+  });
 });

@@ -110,7 +110,7 @@ async function main(): Promise<void> {
       "Do not call external model APIs. Output JSON only in result.json.",
       "result.json shape:",
       '{ "mapperId", "fingerprint", "labelModel": "agent:offline", "fields": [',
-      '  { "javaTargetField": "...", "response": { "recognized": true, "targetField": "MESSAGE.…", "pipeline": [...], "reason": "…" } }',
+      '  { "javaTargetField": "...", "response": { "recognized": true, "targetField": "MESSAGE.…", "pipeline": [{"kind":"read","sourceField":"…","summary":"…"},…], "reason": "…" } }',
       "] }",
       "Keep mapperId and fingerprint exactly as in this job.",
     ].join("\n"),

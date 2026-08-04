@@ -58,6 +58,7 @@
   .step-card{flex:1;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;}
   .step-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;}
   .step-body{margin-top:8px;font-size:13px;line-height:1.55;}
+  .step-summary{margin-top:8px;font-size:12.5px;color:var(--ink-soft);line-height:1.55;}
   .mono{font-family:var(--font-mono);font-size:12px;background:var(--panel);padding:2px 6px;border-radius:4px;border:1px solid var(--line);}
   .badge{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;margin-left:6px;}
   .badge-gemini,.badge-model{background:var(--op-bg);color:var(--op);}
@@ -112,11 +113,17 @@ function badge(step) {
   return '<span class="badge badge-det">deterministic</span>';
 }
 
+function fieldReasonFromSteps(steps) {
+  return steps.find((s) => s.labelReason)?.labelReason || '';
+}
+
 function renderStepBody(step) {
   if (step.kind === 'read') return `Field <span class="mono">${esc(step.field)}</span>`;
   if (step.kind === 'filter') {
     let inner = `When <span class="mono">${esc(step.value || step.op)}</span>`;
-    if (step.children?.length) inner += `<div class="nested">${step.children.map(s => renderStep(s)).join('')}</div>`;
+    if (step.children?.length) {
+      inner += `<div class="nested">${step.children.map(s => renderStep(s)).join('')}</div>`;
+    }
     return inner;
   }
   if (step.kind === 'select') return `Take <span class="mono">${esc(step.mode)}</span>`;
@@ -140,16 +147,16 @@ function renderStepBody(step) {
   return esc(step.sourceText || '');
 }
 
-function renderStep(step, opts = {}) {
+function renderStep(step) {
   const k = step.kind;
-  const showReason = opts.showReason && step.labelReason;
+  const summary = typeof step.summary === 'string' ? step.summary.trim() : '';
   return `<div class="step">
     <div class="step-rail"><div class="step-icon" style="background:var(${BG[k]});color:var(${COLOR[k]})">${ICONS[k]||'?'}</div><div class="step-line"></div></div>
     <div class="step-card">
       <div class="step-kicker" style="color:var(${COLOR[k]})">${LABELS[k]||k}${badge(step)}</div>
       <div class="step-body">${renderStepBody(step)}</div>
+      ${summary ? `<div class="step-summary">${esc(summary)}</div>` : ''}
       ${step.sourceText ? `<div class="code-block">${esc(step.sourceText)}</div>` : ''}
-      ${showReason ? `<div style="font-size:11px;color:var(--ink-faint);margin-top:6px;line-height:1.45">${esc(step.labelReason)}</div>` : ''}
     </div>
   </div>`;
 }
@@ -235,7 +242,7 @@ function render(data, fieldIndex) {
     return;
   }
 
-  const reasonIdx = steps.findIndex((s) => s.labelReason);
+  const fieldReason = fieldReasonFromSteps(steps);
   const banner = aiGenerated
     ? `<div class="ai-banner"><span>&#10022;</span><span><b>AI wrote files in MAPPER_WORKTREE.</b>
         ${lastChangeSummary ? ` ${esc(lastChangeSummary)}.` : ''}
@@ -247,8 +254,11 @@ function render(data, fieldIndex) {
     ${banner}
     ${tabsHtml}
     <span class="target-name">${esc(targetLabel)}</span>
-    <div class="pipeline">${steps.map((s, i) => renderStep(s, { showReason: i === reasonIdx })).join('')}</div>
-    <div class="summary"><strong>Summary:</strong> ${esc(summarize(steps))}</div>`;
+    <div class="pipeline">${steps.map((s) => renderStep(s)).join('')}</div>
+    <div class="summary">
+      <strong>Summary:</strong> ${esc(summarize(steps))}
+      ${fieldReason ? `<div style="margin-top:8px">${esc(fieldReason)}</div>` : ''}
+    </div>`;
 
   document.querySelectorAll('.tab[data-field-idx]').forEach((btn) => {
     btn.addEventListener('click', () => {
