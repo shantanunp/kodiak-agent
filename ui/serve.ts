@@ -206,13 +206,16 @@ createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req)) as {
         mapperId?: string;
         intent?: string;
+        /** Target field(s) from current view / label --fields (required for POC scope). */
         fields?: string;
+        pipelineHint?: string;
         worktree?: string;
         withAst?: boolean;
       };
 
       const mapperId = body.mapperId?.trim();
       const intent = body.intent?.trim();
+      const fieldsFilter = body.fields?.trim();
       if (!mapperId) {
         sendJson(res, 400, { error: "mapperId required" });
         return;
@@ -221,13 +224,23 @@ createServer(async (req, res) => {
         sendJson(res, 400, { error: "intent required (describe the code change)" });
         return;
       }
+      if (!fieldsFilter) {
+        sendJson(res, 400, {
+          error:
+            "fields required. Run npm run label -- --fields MESSAGE.… first, then Build with AI on that field.",
+        });
+        return;
+      }
 
+      const focusFields = fieldsFilter.split(",").map((s) => s.trim()).filter(Boolean);
       const worktree = resolveMapperWorktree(body.worktree);
       const applied = await applyChangeToMapper({
         mapperId,
         intent,
         worktree,
         registryPath: paths.registry,
+        focusFields,
+        pipelineHint: body.pipelineHint,
       });
 
       let viewResult: Awaited<ReturnType<typeof labelAndWriteView>> | undefined;
@@ -236,7 +249,7 @@ createServer(async (req, res) => {
         viewResult = await labelAndWriteView({
           mapperId,
           worktree,
-          fields: body.fields,
+          fields: fieldsFilter,
           withAst: body.withAst,
           noCache: true,
         });
@@ -252,6 +265,7 @@ createServer(async (req, res) => {
         labelModel: viewResult?.labelModel,
         fieldsLabeled: viewResult?.fieldsLabeled,
         labelError,
+        labeled: true,
       });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });

@@ -106,15 +106,20 @@ npm run ui:serve
 # http://localhost:4173/pipeline-viewer/?mapper=lpa-request-mapper
 ```
 
-**Build with AI** (pipeline viewer) writes mapper source under `MAPPER_WORKTREE`, then re-labels:
+**Build with AI** (POC pipeline viewer) — scoped to one labeled field:
 
-1. Set `MAPPER_WORKTREE` in `.env` to your Kmismomapper checkout.
-2. Set `MODEL_API_KEY` (same as `npm run label`).
-3. Open the viewer, describe a code change (e.g. rename a helper), click **Build with AI**.
+1. Set `MAPPER_WORKTREE` + `MODEL_API_KEY` in `.env`.
+2. Label one field and open the viewer:
+   ```powershell
+   npm run label -- --mapper lpa-request-mapper `
+     --worktree C:\Users\<you>\Workspace\Kmismomapper `
+     --fields MESSAGE.DEAL.COLLATERAL.PostalCode --no-cache
+   npm run ui:serve
+   # http://localhost:4173/pipeline-viewer/?mapper=lpa-request-mapper&fields=MESSAGE.DEAL.COLLATERAL.PostalCode
+   ```
+3. Click **Build with AI** with a change request — only helpers for that field are edited, then that field is re-labeled.
 
-Git commit / push / PR is not done yet (later phase). Review diffs in the mapper repo yourself.
-
-Optional: append `| fields: MESSAGE.DEAL.COLLATERAL.PostalCode` to only re-label those fields after the edit.
+Git commit / push / PR is later. Review diffs in the mapper repo yourself.
 
 Tips:
 

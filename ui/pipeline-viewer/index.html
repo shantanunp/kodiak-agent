@@ -73,16 +73,16 @@
 <div class="app">
   <header>
     <div class="brand"><div class="brand-mark"><span></span></div><h1>Pipeline Viewer</h1></div>
-    <p class="tagline">Describe a change — AI edits files under MAPPER_WORKTREE, then refreshes this pipeline</p>
+    <p class="tagline">POC: <span class="mono">npm run label --fields …</span> → view field → Build with AI edits only that field’s helpers</p>
   </header>
   <div class="meta-bar" id="metaBar"></div>
 
   <div class="ai-bar">
     <span class="ai-bar-icon">&#10022;</span>
-    <input id="aiInput" type="text" placeholder="e.g. rename keepDigitsAndHyphen to keepDigits (writes files in MAPPER_WORKTREE)" />
+    <input id="aiInput" type="text" placeholder="e.g. strip hyphens in keepDigits (only helpers for the field shown below)" />
     <button type="button" id="aiBtn">Build with AI</button>
   </div>
-  <div class="ai-status" id="aiStatus">Writes Java under MAPPER_WORKTREE only (no git/PR yet). Requires MODEL_API_KEY + MAPPER_WORKTREE.</div>
+  <div class="ai-status" id="aiStatus">Edits only the currently shown field’s mapping functions in MAPPER_WORKTREE, then re-labels that field.</div>
 
   <div class="legend">
     <span><span class="dot" style="background:var(--source)"></span>Read</span>
@@ -101,6 +101,7 @@ const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Trans
 
 let currentMapper = 'demo-ai-recognition-mapper';
 let viewData = null;
+let activeFieldIndex = 0;
 let aiGenerated = false;
 let lastChangeSummary = '';
 let lastChangedFiles = [];
@@ -176,8 +177,31 @@ function fieldLeaf(path) {
   return parts[parts.length - 1] || path;
 }
 
-function render(data, activeFieldIndex) {
+function currentFocusField() {
+  const fields = viewData?.fields;
+  if (Array.isArray(fields) && fields.length) {
+    const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
+    return fields[idx]?.targetField || '';
+  }
+  return viewData?.target || '';
+}
+
+function currentPipelineHint() {
+  const fields = viewData?.fields;
+  let steps = viewData?.steps || [];
+  if (Array.isArray(fields) && fields.length) {
+    const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
+    steps = fields[idx]?.steps || [];
+  }
+  const reason = steps.find((s) => s.labelReason)?.labelReason || '';
+  const summary = summarize(steps);
+  const target = currentFocusField();
+  return [`targetField=${target}`, summary, reason].filter(Boolean).join('\n');
+}
+
+function render(data, fieldIndex) {
   viewData = data;
+  activeFieldIndex = fieldIndex || 0;
   document.getElementById('metaBar').innerHTML = [
     `<span class="pill">${esc(data.mapperId)}</span>`,
     data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
@@ -193,6 +217,7 @@ function render(data, activeFieldIndex) {
 
   if (fields && fields.length > 0) {
     const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
+    activeFieldIndex = idx;
     const active = fields[idx];
     steps = active.steps || [];
     targetLabel = active.targetField;
@@ -232,21 +257,40 @@ function render(data, activeFieldIndex) {
   });
 }
 
+function indexForFieldsParam(data, fieldsParam) {
+  if (!fieldsParam || !Array.isArray(data.fields)) return 0;
+  const want = fieldsParam.split(',')[0].trim().toLowerCase();
+  if (!want) return 0;
+  const exact = data.fields.findIndex((f) => (f.targetField || '').toLowerCase() === want);
+  if (exact >= 0) return exact;
+  const leaf = want.split('.').pop();
+  const byLeaf = data.fields.findIndex((f) => {
+    const t = (f.targetField || '').toLowerCase();
+    return t.endsWith('.' + leaf) || t === leaf;
+  });
+  return byLeaf >= 0 ? byLeaf : 0;
+}
+
 async function load() {
   const params = new URLSearchParams(location.search);
   currentMapper = params.get('mapper') || 'demo-ai-recognition-mapper';
   const fieldsParam = params.get('fields');
-  if (fieldsParam) document.getElementById('aiInput').value = fieldsParam;
+  // Pre-fill optional re-label filter for Build with AI (after "| fields: …")
+  if (fieldsParam && !document.getElementById('aiInput').value.trim()) {
+    document.getElementById('aiInput').placeholder =
+      `e.g. rename helper | fields: ${fieldsParam}`;
+  }
 
   try {
     const viewRes = await fetch(`/data/${currentMapper}.view.json?t=${Date.now()}`);
     if (!viewRes.ok) {
       document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(currentMapper)}</span>`;
       document.getElementById('canvas').innerHTML =
-        `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">No pipeline view yet for <strong>${esc(currentMapper)}</strong>. Describe a code change above and click <b>Build with AI</b>, or run <span class="mono">npm run label</span> first.</p>`;
+        `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">No pipeline view yet for <strong>${esc(currentMapper)}</strong>. Run <span class="mono">npm run label -- --mapper ${esc(currentMapper)} --fields …</span> first.</p>`;
       return;
     }
-    render(await viewRes.json(), 0);
+    const data = await viewRes.json();
+    render(data, indexForFieldsParam(data, fieldsParam));
   } catch (e) {
     document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }
@@ -265,16 +309,23 @@ function parseIntentAndFields(raw) {
 async function buildWithAi() {
   const statusEl = document.getElementById('aiStatus');
   const btn = document.getElementById('aiBtn');
-  const { intent, fields } = parseIntentAndFields(document.getElementById('aiInput').value);
+  const parsed = parseIntentAndFields(document.getElementById('aiInput').value);
+  const intent = parsed.intent;
+  const focusField = parsed.fields || currentFocusField();
   statusEl.classList.remove('error');
 
   if (!intent) {
-    statusEl.textContent = 'Describe the code change first (e.g. rename keepDigitsAndHyphen to keepDigits).';
+    statusEl.textContent = 'Describe the code change for the field shown below.';
+    statusEl.classList.add('error');
+    return;
+  }
+  if (!focusField) {
+    statusEl.textContent = 'No field in view. Run: npm run label -- --mapper … --fields MESSAGE.… first.';
     statusEl.classList.add('error');
     return;
   }
 
-  statusEl.textContent = 'AI is writing files in MAPPER_WORKTREE…';
+  statusEl.textContent = `AI is editing helpers for ${focusField}…`;
   btn.disabled = true;
 
   try {
@@ -284,7 +335,8 @@ async function buildWithAi() {
       body: JSON.stringify({
         mapperId: currentMapper,
         intent,
-        fields,
+        fields: focusField,
+        pipelineHint: currentPipelineHint(),
       }),
     });
     const data = await res.json();
@@ -295,6 +347,7 @@ async function buildWithAi() {
     lastChangedFiles = Array.isArray(data.changedFiles) ? data.changedFiles : [];
 
     const parts = [];
+    parts.push(`field ${esc(focusField)}`);
     if (data.alreadyApplied) parts.push('Already applied — no file writes');
     if (data.summary) parts.push(esc(data.summary));
     if (lastChangedFiles.length) parts.push(`files: ${lastChangedFiles.map(esc).join(', ')}`);
@@ -302,12 +355,12 @@ async function buildWithAi() {
     statusEl.innerHTML = parts.join(' · ') || 'Done.';
 
     if (data.view && (data.view.steps?.length || data.view.fields?.length)) {
-      render(data.view, 0);
+      render(data.view, indexForFieldsParam(data.view, focusField));
     } else {
       document.getElementById('canvas').innerHTML =
-        `<div class="ai-banner"><span>&#10022;</span><span><b>Files updated.</b>
+        `<div class="ai-banner"><span>&#10022;</span><span><b>Files updated for ${esc(focusField)}.</b>
         ${lastChangedFiles.length ? ` ${lastChangedFiles.map(esc).join(', ')}.` : ''}
-        Re-label failed or returned no fields${data.labelError ? `: ${esc(data.labelError)}` : ''}.</span></div>`;
+        Re-label failed${data.labelError ? `: ${esc(data.labelError)}` : ''}.</span></div>`;
     }
   } catch (err) {
     statusEl.textContent = err.message || "Couldn't apply change. Check MODEL_API_KEY and MAPPER_WORKTREE in .env.";
