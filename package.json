@@ -20,7 +20,8 @@
     "view:serve": "tsx ui/serve.ts",
     "schema:validate": "tsx schema/cli-validate.ts",
     "view": "npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve",
-    "build:indexer": "cd indexer && gradle clean shadowJar"
+    "build:indexer": "cd indexer && gradle clean shadowJar",
+    "test:translator": "tsx --test translator/model/discoverMerge.test.ts translator/filterByFields.test.ts"
   },
   "engines": {
     "node": ">=20"

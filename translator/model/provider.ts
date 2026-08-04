@@ -108,6 +108,7 @@ Return JSON only:
 Rules:
 - Prefer one entry per distinct target field. If the same field is set twice, include both snippets in codeSnippet or two entries with the same hint.
 - codeSnippet must be real code from the file (abbreviate long helpers with ... only in the middle).
+- When the setter argument is a same-class helper (or Optional/Stream chain) that trims, splits, filters, or otherwise transforms values, INLINE that helper method body (or the full chain) in codeSnippet — not only the setX(...) line. Short helpers for trim/split/take must be fully included.
 - Do not invent mappings that are not in the source.
 - javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 

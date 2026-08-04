@@ -5,6 +5,8 @@
  *   npm run label -- --mapper lpa-request-mapper --worktree /path/to/Kmismomapper
  *   --fields MESSAGE.DEAL.PARTY.FirstName
  *   --no-cache | --clear-cache
+ *   --with-ast          # opt-in JavaParser corroboration (off by default)
+ *   --no-discover-ai    # AST-only escape hatch (requires --with-ast)
  *   --from-cache-only   # offline: read agent-seeded field cache (no MODEL_API_KEY)
  */
 
@@ -45,8 +47,12 @@ const { values } = parseArgs({
     fields: { type: "string" },
     "no-cache": { type: "boolean", default: false },
     "clear-cache": { type: "boolean", default: false },
-    /** With --fields, also run model discovery (default: AST-only to save quota). */
-    "discover-ai": { type: "boolean", default: false },
+    /** AI discovery on by default (AI-primary). Kept for compatibility. */
+    "discover-ai": { type: "boolean", default: true },
+    /** Skip AI discovery; AST-only escape hatch (requires --with-ast). */
+    "no-discover-ai": { type: "boolean", default: false },
+    /** Opt-in JavaParser AST corroboration (off by default). */
+    "with-ast": { type: "boolean", default: false },
     /** Read agent/offline field cache only — no MODEL_API_KEY required. */
     "from-cache-only": { type: "boolean", default: false },
   },
@@ -149,10 +155,16 @@ async function main(): Promise<void> {
     const raw = JSON.parse(readFileSync(values.file, "utf8")) as { ast?: IndexAst } | IndexAst;
     ast = ("ast" in raw && raw.ast ? raw.ast : raw) as IndexAst;
   } else if (values.mapper) {
+    const withAst = Boolean(values["with-ast"]);
+    if (values["no-discover-ai"] && !withAst) {
+      console.error("--no-discover-ai requires --with-ast (AST escape hatch).");
+      process.exit(1);
+    }
     const resolved = await resolveMapperAst(values.mapper, values.registry!, {
       local: values.local,
       remote: values.remote || undefined,
       worktree: values.worktree,
+      withAst,
     });
     ast = resolved.ast;
     sourceJava = resolved.sourceJava;
@@ -189,7 +201,8 @@ async function main(): Promise<void> {
     fieldSelectors: selectors,
     sourceJava,
     noCache: Boolean(values["no-cache"]),
-    discoverAi: Boolean(values["discover-ai"]),
+    discoverAi: !values["no-discover-ai"] && values["discover-ai"] !== false,
+    useAst: Boolean(values["with-ast"]),
   });
 
   if (selectors.length > 0) {

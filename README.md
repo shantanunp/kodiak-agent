@@ -15,10 +15,10 @@ npm run build:indexer         # JavaParser shadow jar (needs JDK 21 — see note
 Two independent commands (do not need to run both):
 
 
-| Command         | Role                                      | AI? |
-| --------------- | ----------------------------------------- | --- |
-| `npm run ast`   | Deterministic Java AST (Java DTO paths)   | No  |
-| `npm run label` | AST + AI discovery → business paths       | Yes |
+| Command         | Role                                                       | AI? |
+| --------------- | ---------------------------------------------------------- | --- |
+| `npm run ast`   | Deterministic Java AST (Java DTO paths; corroboration)     | No  |
+| `npm run label` | AI-primary discovery → business paths (`--with-ast` optional) | Yes |
 
 
 ```bash
@@ -59,9 +59,9 @@ Registered mappers (see `registry/mapping-registry.yaml`):
 flowchart TD
   src[Java source file]
   ast[AST indexer]
-  aiDisc[Gemini discovery]
-  merge[Deterministic merge]
-  label[Gemini business label]
+  aiDisc[AI discovery]
+  merge[AI-primary merge]
+  label[AI business label]
   cache[".cache/pipelines fingerprint"]
   out[Business mapping JSON]
 
@@ -75,11 +75,13 @@ flowchart TD
   label --> out
 ```
 
-1. **AST** — deterministic setters / constants / RAW blobs  
-2. **AI discovery** — second pass over the same Java (Optional, helpers AST may under-cover)  
-3. **Merge** — never drop AST targets; AI-only hits become RAW candidates  
-4. **Business label** — Gemini rewrites to schema paths (`MESSAGE.*`)  
+1. **AI discovery** — primary (default): finds target fields + code snippets (helpers inlined when they trim/split/etc.)  
+2. **AST** — **off by default**; pass `--with-ast` to corroborate matches, raise `confidence` (`both` = 1, `ai` = 0.6), and enrich `meta.code`  
+3. **Merge** — AI hits drive the labeling set; with `--with-ast`, AST-only targets are still not labeled (counted in `discoveryMeta.astOnly`)  
+4. **Business label** — model rewrites to schema paths (`MESSAGE.*`)  
 5. **Pipeline cache** — reuse until inputs change  
+
+Escape hatch: `--with-ast --no-discover-ai` labels from AST only (`confidence` 0.4).
 
 ### Cache invalidation
 
@@ -116,7 +118,7 @@ npm run cache:clear -- --mapper lpa-request-mapper
 
 Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs reuse field cache when the fingerprint matches (`"cacheHit": true`).
 
-**Quota tip:** With `--fields`, AI discovery is **off by default** (AST only + one label call). Full dual discovery: omit `--fields`, or pass `--discover-ai`.
+**Discovery:** AI discovery is **on by default** (including with `--fields`). JavaParser AST is **off by default** — pass `--with-ast` to enable corroboration. AST-only labeling: `--with-ast --no-discover-ai`.
 
 
 ## Indexer build (local Gradle)

@@ -1,6 +1,7 @@
 /**
- * Merge AST indexer groups with model discovery hits.
- * Never drops AST targets; AI-only hits become RAW candidates.
+ * AI-primary discovery merge with AST corroboration.
+ * AI hits drive the labeling target set; AST raises confidence and may enrich code.
+ * AST-only targets are counted in meta but not emitted (unless escape-hatch path).
  */
 
 import type { ModelProvider, DiscoverHit } from "./provider.js";
@@ -15,12 +16,17 @@ export interface DiscoveryMeta {
   mergedTargets: number;
   aiOnly: number;
   astOnly: number;
+  both?: number;
 }
 
 export interface DiscoverMergeResult {
   groups: FieldMapping[];
   meta: DiscoveryMeta;
 }
+
+const CONFIDENCE_BOTH = 1;
+const CONFIDENCE_AI = 0.6;
+const CONFIDENCE_AST = 0.4;
 
 function normalizeLeaf(name: string): string {
   const leaf = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
@@ -31,107 +37,143 @@ function normalizeLeaf(name: string): string {
     .toLowerCase();
 }
 
-function tagDiscoverySource(ops: PipelineOp[], source: "ast" | "ai" | "both"): PipelineOp[] {
-  if (ops.length === 0) return ops;
+function codeFromOps(ops: PipelineOp[]): string {
+  for (const op of ops) {
+    const meta = op.meta && typeof op.meta === "object" ? op.meta : undefined;
+    if (meta && typeof meta.code === "string" && meta.code) return meta.code;
+  }
+  return "";
+}
+
+/** Prefer longer snippets and those that include helper / trim transforms. */
+export function preferRicherCode(a: string, b: string): string {
+  const score = (s: string): number => {
+    if (!s) return 0;
+    let n = s.length;
+    if (/String::trim|\.trim\s*\(/.test(s)) n += 100;
+    if (/private\s+\S+\s+\w+\s*\(/.test(s)) n += 50;
+    if (/Optional\.|Stream\./.test(s)) n += 25;
+    return n;
+  };
+  return score(a) >= score(b) ? a : b;
+}
+
+function tagFirstOp(
+  ops: PipelineOp[],
+  source: "ast" | "ai" | "both",
+  confidence: number,
+  extras: Record<string, unknown> = {},
+): PipelineOp[] {
+  if (ops.length === 0) {
+    return [
+      {
+        kind: "RAW",
+        meta: { discoverySource: source, confidence, ...extras },
+      },
+    ];
+  }
   const first = { ...ops[0]! };
   const meta = { ...(typeof first.meta === "object" && first.meta ? first.meta : {}) };
   meta.discoverySource = source;
+  meta.confidence = confidence;
+  for (const [k, v] of Object.entries(extras)) {
+    if (v !== undefined) meta[k] = v;
+  }
   first.meta = meta;
   return [first, ...ops.slice(1)];
 }
 
-function isWeakAstPipeline(ops: PipelineOp[]): boolean {
-  return ops.every((op) => {
-    const kind = (op.kind ?? "").toUpperCase();
-    return kind === "RAW" || kind === "WRITE";
-  });
+/**
+ * Escape hatch: AST groups only (no AI discovery). Used by --no-discover-ai.
+ */
+export function mergeAstOnlyEscapeHatch(astGroups: FieldMapping[]): DiscoverMergeResult {
+  const groups = astGroups.map((g) => ({
+    targetField: g.targetField,
+    pipeline: tagFirstOp(g.pipeline, "ast", CONFIDENCE_AST),
+  }));
+  return {
+    groups,
+    meta: {
+      astTargets: astGroups.length,
+      aiTargets: 0,
+      mergedTargets: groups.length,
+      aiOnly: 0,
+      astOnly: groups.length,
+      both: 0,
+    },
+  };
 }
 
 /**
- * Deterministic merge of AST groups + AI discovery hits.
+ * AI-primary merge: emit AI hits; AST corroborates confidence / enriches code.
+ * AST-only targets are not labeled.
  */
 export function mergeAstAndAiDiscovery(
   astGroups: FieldMapping[],
   aiHits: DiscoverHit[],
 ): DiscoverMergeResult {
+  const astByLeaf = new Map<string, FieldMapping>();
+  for (const g of astGroups) {
+    const leaf = normalizeLeaf(g.targetField);
+    if (!astByLeaf.has(leaf)) astByLeaf.set(leaf, g);
+  }
+
   const merged: FieldMapping[] = [];
-  const matchedAi = new Set<number>();
-
+  const usedAstLeaves = new Set<string>();
+  const seenAiLeaves = new Set<string>();
   let both = 0;
-  let astOnly = 0;
+  let aiOnly = 0;
 
-  for (const group of astGroups) {
-    const leaf = normalizeLeaf(group.targetField);
-    const aiIndex = aiHits.findIndex(
-      (h, i) => !matchedAi.has(i) && normalizeLeaf(h.javaTargetHint) === leaf,
-    );
+  for (const hit of aiHits) {
+    if (!hit.javaTargetHint?.trim()) continue;
+    const leaf = normalizeLeaf(hit.javaTargetHint);
+    if (seenAiLeaves.has(leaf)) continue;
+    seenAiLeaves.add(leaf);
 
-    if (aiIndex >= 0) {
-      matchedAi.add(aiIndex);
+    const astGroup = astByLeaf.get(leaf);
+    const aiCode = hit.codeSnippet?.trim() ?? "";
+
+    if (astGroup) {
+      usedAstLeaves.add(leaf);
       both++;
-      const hit = aiHits[aiIndex]!;
-      let pipeline = [...group.pipeline];
+      const astCode = codeFromOps(astGroup.pipeline);
+      const code =
+        preferRicherCode(astCode, aiCode) || aiCode || astCode || hit.javaTargetHint.trim();
+      const extras: Record<string, unknown> = {};
+      if (code) extras.code = code;
+      if (hit.note) extras.aiNote = hit.note;
 
-      if (isWeakAstPipeline(pipeline) && hit.codeSnippet) {
-        const hasCode = pipeline.some(
-          (op) => op.meta && typeof op.meta === "object" && "code" in (op.meta as object),
-        );
-        if (!hasCode) {
-          pipeline = [
-            {
-              kind: "RAW",
-              meta: {
-                code: hit.codeSnippet,
-                discoverySource: "both",
-                aiNote: hit.note,
-              },
-            },
-            ...pipeline.filter((op) => (op.kind ?? "").toUpperCase() !== "RAW"),
-          ];
-        } else {
-          pipeline = pipeline.map((op, idx) => {
-            if (idx !== 0) return op;
-            const meta = { ...(typeof op.meta === "object" && op.meta ? op.meta : {}) };
-            if (!meta.code) meta.code = hit.codeSnippet;
-            meta.discoverySource = "both";
-            if (hit.note) meta.aiNote = hit.note;
-            return { ...op, meta };
-          });
-        }
-      } else {
-        pipeline = tagDiscoverySource(pipeline, "both");
-      }
+      const strongAst = astGroup.pipeline.some((op) => {
+        const k = (op.kind ?? "").toUpperCase();
+        return k === "READ" || k === "TRANSFORM" || k === "CONSTANT";
+      });
+      const pipeline = strongAst
+        ? tagFirstOp([...astGroup.pipeline], "both", CONFIDENCE_BOTH, extras)
+        : tagFirstOp([{ kind: "RAW", meta: { code } }], "both", CONFIDENCE_BOTH, extras);
 
-      merged.push({ targetField: group.targetField, pipeline });
-    } else {
-      astOnly++;
       merged.push({
-        targetField: group.targetField,
-        pipeline: tagDiscoverySource(group.pipeline, "ast"),
+        targetField: astGroup.targetField,
+        pipeline,
+      });
+    } else {
+      aiOnly++;
+      const extras: Record<string, unknown> = {
+        code: aiCode || hit.javaTargetHint.trim(),
+      };
+      if (hit.note) extras.aiNote = hit.note;
+      merged.push({
+        targetField: hit.javaTargetHint.trim(),
+        pipeline: tagFirstOp(
+          [{ kind: "RAW", meta: { code: extras.code } }],
+          "ai",
+          CONFIDENCE_AI,
+          extras,
+        ),
       });
     }
   }
 
-  let aiOnly = 0;
-  aiHits.forEach((hit, i) => {
-    if (matchedAi.has(i)) return;
-    if (!hit.javaTargetHint?.trim()) return;
-    aiOnly++;
-    const hint = hit.javaTargetHint.trim();
-    merged.push({
-      targetField: hint,
-      pipeline: [
-        {
-          kind: "RAW",
-          meta: {
-            code: hit.codeSnippet || hint,
-            discoverySource: "ai",
-            aiNote: hit.note,
-          },
-        },
-      ],
-    });
-  });
+  const astOnly = Math.max(0, astGroups.length - usedAstLeaves.size);
 
   return {
     groups: merged,
@@ -141,6 +183,7 @@ export function mergeAstAndAiDiscovery(
       mergedTargets: merged.length,
       aiOnly,
       astOnly,
+      both,
     },
   };
 }
@@ -152,15 +195,33 @@ export async function discoverAndMerge(
   options: {
     fingerprint?: string;
     noCache?: boolean;
-    /** When true, skip model discovery (AST groups only). */
+    /** When true, skip model discovery (requires useAst). */
     skipAiDiscovery?: boolean;
+    /** When true, use AST groups for corroboration / escape hatch. Default false. */
+    useAst?: boolean;
   } = {},
 ): Promise<DiscoverMergeResult> {
-  const astGroups = groupOperationsByTarget(operationsOf(ast) as PipelineOp[]);
+  const useAst = Boolean(options.useAst);
+  const astGroups = useAst
+    ? groupOperationsByTarget(operationsOf(ast) as PipelineOp[])
+    : [];
   const mapperId = ast.mapperId ?? "unknown";
 
   if (options.skipAiDiscovery) {
-    return mergeAstAndAiDiscovery(astGroups, []);
+    if (!useAst) {
+      return {
+        groups: [],
+        meta: {
+          astTargets: 0,
+          aiTargets: 0,
+          mergedTargets: 0,
+          aiOnly: 0,
+          astOnly: 0,
+          both: 0,
+        },
+      };
+    }
+    return mergeAstOnlyEscapeHatch(astGroups);
   }
 
   let aiHits: DiscoverHit[] = [];
@@ -189,6 +250,7 @@ export async function discoverAndMerge(
     }
   }
 
+  // No AI hits — do not invent from AST; empty labeling set when AI-primary.
   return mergeAstAndAiDiscovery(astGroups, aiHits);
 }
 

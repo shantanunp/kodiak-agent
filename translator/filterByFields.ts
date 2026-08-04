@@ -19,22 +19,31 @@ function leaf(path: string): string {
   return part.replace(/\[\]$/, "");
 }
 
+/** Strip JavaBean get/set/is so setAddressLineText matches AddressLineText. */
+function beanLeaf(path: string): string {
+  return normalize(leaf(path)).replace(/^(set|get|is)/, "");
+}
+
 /** True if targetField matches any selector (leaf, path, or FQN; case/punct insensitive). */
 export function matchesTargetField(targetField: string, selectors: string[]): boolean {
   if (!targetField || selectors.length === 0) return false;
   const targetNorm = normalize(targetField);
   const targetLeaf = normalize(leaf(targetField));
+  const targetBean = beanLeaf(targetField);
 
   for (const raw of selectors) {
     const sel = raw.trim();
     if (!sel) continue;
     const selNorm = normalize(sel);
     const selLeaf = normalize(leaf(sel));
+    const selBean = beanLeaf(sel);
     if (!selNorm) continue;
 
     if (targetNorm === selNorm) return true;
     if (targetLeaf === selNorm || targetLeaf === selLeaf) return true;
+    if (targetBean && selBean && targetBean === selBean) return true;
     if (targetNorm.endsWith(selNorm) || selNorm.endsWith(targetLeaf)) return true;
+    if (targetBean && (selNorm.endsWith(targetBean) || targetNorm.endsWith(selBean))) return true;
   }
   return false;
 }

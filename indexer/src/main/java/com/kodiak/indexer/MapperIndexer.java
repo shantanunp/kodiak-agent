@@ -294,7 +294,7 @@ public class MapperIndexer {
 
   /**
    * setFoo(arg) → CONSTANT / READ (path mapping) / WRITE. Helpers flatten in with nest path.
-   * Array-index from a helper (e.g. parts[0] from splitName) → RAW for Gemini labeling.
+   * Array-index or scalar String helpers (e.g. parts[0] / Optional.trim) → RAW for labeling.
    */
   private List<AstStep> classifySetter(
       ClassOrInterfaceDeclaration classDecl,
@@ -332,6 +332,17 @@ public class MapperIndexer {
               sourceText));
     }
 
+    // Scalar helpers (String/Optional.trim/etc.): not inlined — bundle body as RAW for AI.
+    if (arg.isMethodCallExpr()) {
+      MethodCallExpr argCall = arg.asMethodCallExpr();
+      if (isSameClassHelperCall(classDecl, argCall)
+          && !isInlinableReturnType(argCall, classDecl)) {
+        return List.of(
+            rawForHelperDerivedSetter(
+                classDecl, argCall, targetPath, locals, varPaths, sourceText));
+      }
+    }
+
     String constantValue = resolveConstantValue(classDecl, arg);
     if (constantValue != null) {
       return List.of(AstStep.constant(targetPath, constantValue));
@@ -348,6 +359,36 @@ public class MapperIndexer {
     }
 
     return List.of(AstStep.write(targetPath, arg.toString()));
+  }
+
+  /**
+   * Bundle setter + scalar helper body so Gemini can label read/trim/filter pipelines.
+   * e.g. {@code setAddressLineText(mapAddressLineViaOptional(property))}
+   */
+  private AstStep rawForHelperDerivedSetter(
+      ClassOrInterfaceDeclaration classDecl,
+      MethodCallExpr helperCall,
+      String targetPath,
+      Map<String, String> locals,
+      Map<String, String> varPaths,
+      String setterText) {
+    StringBuilder code = new StringBuilder();
+    for (Expression helperArg : helperCall.getArguments()) {
+      String hint = resolveSourceFieldPath(helperArg, locals, varPaths);
+      if (hint != null) {
+        code.append("// sourceField: ").append(hint).append("\n");
+        break;
+      }
+    }
+    code.append(setterText);
+    MethodDeclaration helper =
+        classDecl.getMethodsByName(helperCall.getNameAsString()).stream()
+            .findFirst()
+            .orElse(null);
+    if (helper != null) {
+      code.append("\n\n").append(helper);
+    }
+    return AstStep.raw(code.toString(), targetPath);
   }
 
   /**
@@ -602,7 +643,7 @@ public class MapperIndexer {
     if (helper == null || helper.getBody().isEmpty()) {
       return Optional.empty();
     }
-    // Only inline DTO builders — never String/String[]/scalar helpers (those stay RAW for AI)
+    // Only inline DTO builders — String/scalar helpers become RAW via classifySetter
     if (!isInlinableReturnType(helper.getType().asString())) {
       return Optional.empty();
     }

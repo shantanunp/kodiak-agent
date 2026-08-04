@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { paths } from "../../src/config/env.js";
 import { resolveMapperAst } from "../resolvePipeline.js";
-import { groupAst } from "../model/discoverMerge.js";
+import { groupAst, mergeAstOnlyEscapeHatch } from "../model/discoverMerge.js";
 import {
   FIELD_MAPPING_PROMPT,
   loadSchemaJson,
@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     local: values.local,
     remote: values.remote || undefined,
     worktree: values.worktree,
+    withAst: true,
   });
   const ast = resolved.ast as IndexAst;
   const sourceJava = resolved.sourceJava;
@@ -73,7 +74,8 @@ async function main(): Promise<void> {
     version: PIPELINE_CACHE_VERSION,
   });
 
-  let groups = groupAst(ast);
+  // Offline export has no model API — AST escape-hatch ops (confidence tagged) as indexer hints.
+  let groups = mergeAstOnlyEscapeHatch(groupAst(ast)).groups;
   if (selectors.length > 0) {
     groups = filterMappingByFields(groups, selectors);
   }
@@ -81,8 +83,8 @@ async function main(): Promise<void> {
   if (groups.length === 0) {
     console.error(
       selectors.length > 0
-        ? `No AST field groups matched --fields ${selectors.join(",")}`
-        : "No AST field groups found for mapper",
+        ? `No field groups matched --fields ${selectors.join(",")}`
+        : "No field groups found for mapper",
     );
     process.exit(1);
   }

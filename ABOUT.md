@@ -8,14 +8,15 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 
 ## Core principle
 
-**AI only touches translation/suggestion.** Discovery, parsing, and verification stay deterministic and test-gated. Business users never get direct write access to prod code.
+**AI drives field discovery and business labeling.** JavaParser AST is opt-in (`--with-ast`) for confidence corroboration and never invents labeled targets on its own. Indexer/parsing stay deterministic; business users never get direct write access to prod code.
 
 
-| Layer                                      | AI?         |
-| ------------------------------------------ | ----------- |
-| Registry, GitHub fetch, JavaParser indexer | No          |
-| Gemini labeling of parsed steps            | Labels only |
-| Shadow tests, merge gates                  | No          |
+| Layer                                      | AI?                                      |
+| ------------------------------------------ | ---------------------------------------- |
+| Registry, GitHub fetch                     | No                                       |
+| JavaParser indexer                         | No (opt-in via `--with-ast`)             |
+| Discovery + business-path labeling         | Yes (AI-primary; default)                |
+| Shadow tests, merge gates                  | No                                       |
 
 
 ---
@@ -47,8 +48,8 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 
 ### Phase 2 — Read-only visualization — **Complete (v0)**
 
-- [x] AST → labeled pipeline JSON (`translator/labeler.ts`)
-- [x] Gemini REST labeling for `RAW` steps only (`translator/gemini/`, Google AI Studio)
+- [x] AI-primary discovery + AST confidence merge → labeled pipeline JSON (`translator/model/`)
+- [x] Model provider labeling (`translator/model/provider.ts`, gemini|openai styles)
 - [x] Translation cache by content hash (`translator/cache/`)
 - [x] Step-type schema stub (`translator/schema/step-types.json`)
 - [x] UI mock spec (`mock/field-mapper-builder.html`) — reference only, not wired to live data
