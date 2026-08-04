@@ -7,14 +7,19 @@ applyTo: ".cache/agent-jobs/**/*"
 
 When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` is in context):
 
-1. Read `job.json` in the same folder.
+1. Read `job.json` in the same folder — **all data is in the file**:
+   - `sourceJava` — full mapper class source
+   - `schemaJson` + `schemaContext` — allowed business paths
+   - `mapper` — registry metadata (class, entryMethod, sourceType, targetType)
+   - `fields[]` — each `businessFieldSelector` the user asked to label
+   - `indexerOps` — only when present (optional JavaParser hints)
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
-3. For **each** entry in `fields[]`, produce a `FieldMappingResponse`:
+3. For **each** entry in `fields[]`, find the Java write in `sourceJava` and produce a `FieldMappingResponse`:
    - `recognized` (boolean)
    - `targetField` (business path from schema, e.g. `DeliveryPayload.shipTo.postalCode`)
    - `pipeline` (array of steps: read / transform / constant / …)
    - `reason` (short string)
-4. Write **only** `result.json` next to `job.json` with this shape:
+4. Write **only** `result.json` next to `job.json`:
 
 ```json
 {
@@ -36,7 +41,13 @@ When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` 
 ```
 
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
-6. After writing `result.json`, run the follow-up commands yourself (don't just tell
-   the user to run them) — the user should not need to run anything manually:
-   - `npm run label:import -- --result <path-to-result.json>`
-   - `npm run label -- --mapper <id> --from-cache-only`
+6. Do **not** run npm commands yourself.
+7. After writing `result.json`, print `vscodeSteps` from the job for the user — they run these in the **VS Code integrated terminal**:
+
+```
+npm run label:import -- --result <path-to-result.json> [--fields ...]
+npm run label -- --mapper <id> --from-cache-only [--fields ...]
+npm run ui:serve
+```
+
+Copy the exact commands from `job.vscodeSteps` (steps 3 onward).

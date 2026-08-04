@@ -11,26 +11,28 @@ import { parseArgs } from "node:util";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { paths } from "../../src/config/env.js";
+import { loadRegistry } from "../../src/registry/loadRegistry.js";
 import { resolveMapperAst } from "../resolvePipeline.js";
-import { groupAst, mergeAstOnlyEscapeHatch } from "../model/discoverMerge.js";
+import { buildOfflineFieldGroups } from "./offlineFields.js";
 import {
   FIELD_MAPPING_PROMPT,
   loadSchemaJson,
   type IndexAst,
 } from "../model/index.js";
 import { schemaContextForLabeler } from "../../schema/io.js";
-import { filterMappingByFields, parseFieldSelectors } from "../filterByFields.js";
+import { parseFieldSelectors } from "../filterByFields.js";
 import {
   computePipelineFingerprint,
   PIPELINE_CACHE_VERSION,
 } from "../cache/index.js";
-import { AGENT_OFFLINE_MODEL, type AgentJob } from "./types.js";
+import { AGENT_OFFLINE_MODEL, type AgentJob, type AgentJobMapper } from "./types.js";
 import {
   agentJobDir,
   agentJobFile,
   agentReadmeFile,
   agentResultFile,
 } from "./paths.js";
+import { formatOfflineVscodePrompt, offlineVscodeSteps } from "./vscodeSteps.js";
 
 export interface ExportAgentJobOptions {
   mapper: string;
@@ -39,6 +41,8 @@ export interface ExportAgentJobOptions {
   remote?: boolean;
   registry: string;
   selectors: string[];
+  /** Opt-in JavaParser field discovery (needs JDK + build:indexer). Default false. */
+  withAst?: boolean;
 }
 
 export interface ExportAgentJobResult {
@@ -48,6 +52,8 @@ export interface ExportAgentJobResult {
   jobFile: string;
   resultFile: string;
   readmeFile: string;
+  vscodeSteps: string[];
+  vscodePrompt: string;
 }
 
 /**
@@ -57,17 +63,30 @@ export interface ExportAgentJobResult {
 export async function exportAgentJob(
   opts: ExportAgentJobOptions,
 ): Promise<ExportAgentJobResult> {
-  const { mapper, worktree, local, remote, registry, selectors } = opts;
+  const { mapper, worktree, local, remote, registry, selectors, withAst = false } = opts;
+
+  const registryDoc = loadRegistry(registry);
+  const mapperEntry = registryDoc.mappers.find((m) => m.id === mapper);
+
+  if (!mapperEntry) {
+    throw new Error(`Mapper not found in registry: ${mapper}`);
+  }
 
   const resolved = await resolveMapperAst(mapper, registry, {
     local,
     remote: remote || undefined,
     worktree,
-    withAst: true,
+    withAst,
   });
   const ast = resolved.ast as IndexAst;
   const sourceJava = resolved.sourceJava;
   const mapperId = ast.mapperId ?? mapper;
+
+  if (!sourceJava.trim()) {
+    throw new Error(
+      "Offline export needs mapper Java source. Pass --worktree <path> to your mapper checkout.",
+    );
+  }
 
   const schemaJson = loadSchemaJson(mapperId);
   const fingerprint = computePipelineFingerprint({
@@ -77,11 +96,7 @@ export async function exportAgentJob(
     version: PIPELINE_CACHE_VERSION,
   });
 
-  // Offline export has no model API — AST escape-hatch ops (confidence tagged) as indexer hints.
-  let groups = mergeAstOnlyEscapeHatch(groupAst(ast)).groups;
-  if (selectors.length > 0) {
-    groups = filterMappingByFields(groups, selectors);
-  }
+  const groups = buildOfflineFieldGroups({ ast, selectors, withAst });
 
   if (groups.length === 0) {
     throw new Error(
@@ -97,34 +112,86 @@ export async function exportAgentJob(
   const resultFile = agentResultFile(mapperId, fingerprint);
   const readmeFile = agentReadmeFile(mapperId, fingerprint);
 
+  const vscodeStepList = offlineVscodeSteps({
+    mapperId,
+    jobFile,
+    resultFile,
+    worktree,
+    fields: selectors,
+  });
+  const vscodePrompt = formatOfflineVscodePrompt({
+    mapperId,
+    jobFile,
+    resultFile,
+    worktree,
+    fields: selectors,
+  });
+
+  const mapperMeta: AgentJobMapper = {
+    id: mapperEntry.id,
+    sourceFile: mapperEntry.sourceFile,
+    class: mapperEntry.class,
+    entryMethod: mapperEntry.entryMethod,
+    sourceType: mapperEntry.sourceType,
+    targetType: mapperEntry.targetType,
+    ...(mapperEntry.goldenTests ? { goldenTests: mapperEntry.goldenTests } : {}),
+  };
+
   const job: AgentJob = {
     version: 1,
     mapperId,
     fingerprint,
     labelModel: AGENT_OFFLINE_MODEL,
     createdAt: new Date().toISOString(),
+    sourceJava,
+    schemaJson,
+    mapper: mapperMeta,
     systemPrompt: FIELD_MAPPING_PROMPT,
     schemaContext,
     instructions: [
       "You are labeling Java mapper fields into business pipelines.",
-      "Read this job.json. For EACH entry in fields[], apply systemPrompt + schemaContext",
-      "to indexerOps and produce a FieldMappingResponse object.",
+      "Everything you need is in this job.json — do not open external files.",
+      "",
+      "- sourceJava: full mapper class source",
+      "- schemaJson + schemaContext: allowed business field paths",
+      "- mapper: registry metadata (class, entryMethod, sourceType, targetType)",
+      "- fields[].businessFieldSelector: the field the user asked to label",
+      "",
+      "For EACH entry in fields[]:",
+      "1. Find the Java write(s) for that field in sourceJava (setters, builders, helpers).",
+      "2. Apply systemPrompt + schemaContext to produce a FieldMappingResponse.",
+      "3. Use indexerOps only when present (--with-ast export); otherwise derive from sourceJava.",
+      "",
       `Write the complete result to: ${resultFile}`,
-      "Do not call external model APIs. Output JSON only in result.json.",
+      "Do not call external model HTTP APIs.",
+      "",
       "result.json shape:",
       '{ "mapperId", "fingerprint", "labelModel": "agent:offline", "fields": [',
-      '  { "javaTargetField": "...", "response": { "recognized": true, "targetField": "Order.…", "pipeline": [{"kind":"read","sourceField":"…","summary":"…"},…], "reason": "…" } }',
+      '  { "javaTargetField": "<from job.fields[i].javaTargetField>",',
+      '    "response": { "recognized": true, "targetField": "Order.…",',
+      '      "pipeline": [{"kind":"read","sourceField":"…","summary":"…"},…], "reason": "…" } }',
       "] }",
+      "",
       "Keep mapperId and fingerprint exactly as in this job.",
+      "",
+      "After writing result.json, print vscodeSteps from this job for the user",
+      "(do not run npm yourself — the user runs them in the VS Code terminal).",
     ].join("\n"),
-    fields: groups.map((g) => ({
-      javaTargetField: g.targetField,
-      indexerOps: g.pipeline,
-      fieldSelector:
+    vscodeSteps: vscodeStepList,
+    fields: groups.map((g) => {
+      const selector =
         selectors.find((s) =>
           g.targetField.toLowerCase().includes(s.split(".").pop()!.toLowerCase()),
-        ) ?? selectors[0],
-    })),
+        ) ?? g.targetField;
+      const field: AgentJob["fields"][number] = {
+        businessFieldSelector: selector,
+        javaTargetField: g.targetField,
+      };
+      if (withAst && g.pipeline.length > 0) {
+        field.indexerOps = g.pipeline;
+      }
+      return field;
+    }),
     paths: {
       jobDir,
       jobFile,
@@ -134,18 +201,7 @@ export async function exportAgentJob(
 
   mkdirSync(jobDir, { recursive: true });
   writeFileSync(jobFile, JSON.stringify(job, null, 2));
-  writeFileSync(
-    readmeFile,
-    [
-      `# Offline label job — ${mapperId}`,
-      "",
-      "1. Open `job.json` in this folder.",
-      "2. Ask your VS Code / Cursor agent to complete labeling per `instructions`.",
-      "   The agent writes `result.json` in this same folder, then runs `label:import`",
-      "   and `label --from-cache-only` itself — no manual follow-up commands needed.",
-      "",
-    ].join("\n"),
-  );
+  writeFileSync(readmeFile, [`# Offline label job — ${mapperId}`, "", vscodePrompt, ""].join("\n"));
 
   return {
     mapperId,
@@ -154,6 +210,8 @@ export async function exportAgentJob(
     jobFile,
     resultFile,
     readmeFile,
+    vscodeSteps: vscodeStepList,
+    vscodePrompt,
   };
 }
 
@@ -174,6 +232,7 @@ if (isDirectRun) {
       registry: { type: "string", default: paths.registry },
       field: { type: "string", multiple: true },
       fields: { type: "string" },
+      "with-ast": { type: "boolean", default: false },
     },
   });
 
@@ -197,6 +256,7 @@ if (isDirectRun) {
       remote: values.remote,
       registry: values.registry!,
       selectors,
+      withAst: Boolean(values["with-ast"]),
     });
 
     console.log(
@@ -208,15 +268,13 @@ if (isDirectRun) {
           fieldCount: result.fieldCount,
           jobFile: result.jobFile,
           resultFile: result.resultFile,
-          next: [
-            "Have VS Code agent complete the offline label job — it writes result.json and",
-            "runs label:import + label --from-cache-only itself, no manual commands needed.",
-          ],
+          vscodeSteps: result.vscodeSteps,
         },
         null,
         2,
       ),
     );
+    console.error("\n" + result.vscodePrompt + "\n");
   };
 
   main().catch((err) => {

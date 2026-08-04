@@ -21,7 +21,7 @@
     "schema:validate": "tsx schema/cli-validate.ts",
     "view": "npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve",
     "build:indexer": "cd indexer && gradle clean shadowJar",
-    "test:translator": "tsx --test translator/model/discoverMerge.test.ts translator/model/applyResponse.test.ts translator/filterByFields.test.ts"
+    "test:translator": "tsx --test translator/model/discoverMerge.test.ts translator/model/applyResponse.test.ts translator/filterByFields.test.ts translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts"
   },
   "engines": {
     "node": ">=20"

@@ -6,12 +6,12 @@ Get labeling working on a Windows laptop in a few steps. Use **PowerShell**.
 
 ## You need
 
-| Tool                 | Version               |
-| -------------------- | --------------------- |
-| Node.js              | 20+                   |
-| JDK                  | 17+ (`JAVA_HOME` set) |
-| Gradle               | 8.x on `PATH`         |
-| Mapper repo checkout | your Java mapper repo |
+| Tool                 | Version               | Offline labeling |
+| -------------------- | --------------------- | ---------------- |
+| Node.js              | 20+                   | Required         |
+| JDK                  | 17+ (`JAVA_HOME` set) | Not required     |
+| Gradle               | 8.x on `PATH`         | Not required     |
+| Mapper repo checkout | your Java mapper repo | Required (`--worktree`) |
 
 
 ```powershell
@@ -65,8 +65,9 @@ Then:
 
 ```powershell
 npm install
-npm run build:indexer
 ```
+
+For live AI labeling (not offline), also run `npm run build:indexer` (needs JDK + Gradle).
 
 Office Artifactory / npm mirrors should already be configured on your laptop (same as other projects). This repo has **no** `gradlew`.
 
@@ -140,6 +141,9 @@ npm run ui:serve
 
 ## Offline agent jobs (no model API / blocked office network)
 
+Offline mode does **not** require the Java indexer (`npm run build:indexer`) or JDK.
+You still need a mapper checkout via `--worktree` so export can fingerprint the Java source.
+
 `npm run label` now auto-detects when it can't reach the model API — no key set, **or**
 the live call fails (blocked network/proxy) — and exports an offline job instead of just
 erroring. It prints the job path and exact next steps, so you can usually just run your
@@ -151,22 +155,34 @@ npm run label -- --mapper demo-ai-recognition-mapper `
   --fields Summary.displayName --no-cache
 ```
 
-That prints something like:
+That prints a **VS Code step-by-step** block, including:
 
 ```
-Run this agent with this input:
-  Job file: .cache\agent-jobs\demo-ai-recognition-mapper\<fingerprint>\job.json
+── VS Code offline labeling ──────────────────────────
 
-1. Open that job.json in VS Code.
-2. Ask Copilot Chat (agent mode): "Complete the offline label job in <jobFile>"
-3. The agent writes <resultFile>
-4. Then run label:import, then label --from-cache-only
+1. Open the job file in VS Code:
+   .cache\agent-jobs\demo-ai-recognition-mapper\<fingerprint>\job.json
+
+2. Copilot Chat (agent mode) — paste:
+   Complete the offline label job in <jobFile>
+
+3. After the agent writes result.json, run in the VS Code terminal:
+
+   npm run label:import -- --result <resultFile> --fields Summary.displayName
+
+   npm run label -- --mapper demo-ai-recognition-mapper --from-cache-only --fields Summary.displayName
+
+4. Optional — pipeline viewer:
+
+   npm run ui:serve
 ```
+
+`job.json` contains the **full mapper Java** (`sourceJava`), schema, and registry metadata — the agent does not need external files or the indexer.
 
 Opening `job.json` (under `.cache/agent-jobs/**`) auto-attaches
 `.github/instructions/kodiak-agent-label.instructions.md`, which tells Copilot Chat's agent
-mode exactly how to fill in `result.json` — no external model API calls, no invented schema
-paths. In Cursor, the equivalent rule lives at `.cursor/rules/kodiak-agent-label.mdc`.
+mode exactly how to fill in `result.json` and which npm commands to print for you.
+In Cursor, the equivalent rule lives at `.cursor/rules/kodiak-agent-label.mdc`.
 
 You can also run each stage manually instead of relying on auto-fallback:
 
@@ -175,24 +191,24 @@ npm run label:export -- --mapper demo-ai-recognition-mapper `
   --worktree C:\Users\<you>\Workspace\your-mapper-repo `
   --fields Summary.displayName
 
-# complete result.json via Copilot Chat (agent mode) / Cursor, then:
+# Copilot Chat completes result.json (see README.md in the job folder), then in VS Code terminal:
 
-npm run label:import -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
+npm run label:import -- --result .cache\agent-jobs\demo-ai-recognition-mapper\<fingerprint>\result.json `
   --fields Summary.displayName
 
 npm run label -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
-  --fields Summary.displayName `
-  --from-cache-only
+  --from-cache-only --fields Summary.displayName
+
+npm run ui:serve
 ```
 
 ---
 
 ## Checklist
 
-- [ ] `npm install` && `npm run build:indexer`
+- [ ] `npm install`
 - [ ] Registry points at your mapper repo
-- [ ] `MODEL_API_KEY` (or style-specific key) in `.env`
+- [ ] `MODEL_API_KEY` (or style-specific key) in `.env` for live labeling; offline needs `--fields` + `--worktree` only
+- [ ] `npm run build:indexer` only if you use live `--with-ast` labeling
 - [ ] `npm run label -- --mapper … --worktree … --fields …`
 - [ ] `npm run ui:serve` and open the pipeline viewer

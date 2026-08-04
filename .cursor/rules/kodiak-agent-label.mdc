@@ -8,33 +8,16 @@ alwaysApply: false
 
 When the user asks you to complete an offline label job (or you have `.cache/agent-jobs/**/job.json` open):
 
-1. Read `job.json` in the same folder.
+1. Read `job.json` — **everything is in the file** (`sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`).
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
-3. For **each** entry in `fields[]`, produce a `FieldMappingResponse`:
-   - `recognized` (boolean)
-   - `targetField` (business path from schema, e.g. `DeliveryPayload.shipTo.postalCode`)
-   - `pipeline` (array of steps: read / transform / constant / …)
-   - `reason` (short string)
-4. Write **only** `result.json` next to `job.json` with this shape:
-
-```json
-{
-  "mapperId": "<same as job>",
-  "fingerprint": "<same as job>",
-  "labelModel": "agent:offline",
-  "fields": [
-    {
-      "javaTargetField": "<from job.fields[i].javaTargetField>",
-      "response": {
-        "recognized": true,
-        "targetField": "DeliveryPayload.…",
-        "pipeline": [{ "kind": "read", "sourceField": "…", "summary": "…" }],
-        "reason": "…"
-      }
-    }
-  ]
-}
-```
-
+3. For **each** `fields[]` entry, find the Java write in `sourceJava` and produce a `FieldMappingResponse`.
+4. Write **only** `result.json` next to `job.json` (see shape in `.github/instructions/kodiak-agent-label.instructions.md`).
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
-6. After writing `result.json`, tell the user to run `npm run label:import`.
+6. Do **not** run npm commands yourself.
+7. After writing `result.json`, print `job.vscodeSteps` for the user to run in the **VS Code terminal**:
+
+```
+npm run label:import -- --result <result.json> [--fields ...]
+npm run label -- --mapper <id> --from-cache-only [--fields ...]
+npm run ui:serve
+```

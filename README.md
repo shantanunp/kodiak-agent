@@ -180,11 +180,14 @@ npm run label -- --mapper demo-ai-recognition-mapper --remote
 
 ## Offline mode (no model API access)
 
+Offline labeling does **not** need the Java indexer, JDK, or Gradle — only Node.js and a
+mapper checkout (`--worktree`). Pass `--fields` so export knows which fields to label.
+
 For offices that block outbound calls to the model API: `npm run label` auto-detects this —
 when `MODEL_API_KEY` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`) isn't set, **or** the live
-model call fails (blocked network/proxy) — and falls back to an offline agent job instead
-of erroring out. It writes `.cache/agent-jobs/{mapperId}/{fingerprint}/job.json` and prints
-exactly what to do next:
+model call fails (blocked network/proxy) — and exports an offline job instead
+of erroring out. It writes `.cache/agent-jobs/{mapperId}/{fingerprint}/job.json` (with full
+`sourceJava`, schema, and registry metadata) and prints **copy-paste VS Code steps**:
 
 ```bash
 npm run label -- --mapper demo-ai-recognition-mapper \
@@ -192,22 +195,27 @@ npm run label -- --mapper demo-ai-recognition-mapper \
 ```
 
 ```
-No model API configured (...).
-Exported an offline agent job instead (1 field(s), no HTTP calls needed).
+── VS Code offline labeling ──────────────────────────
 
-Run this agent with this input:
-  Job file: .cache/agent-jobs/demo-ai-recognition-mapper/<fingerprint>/job.json
+1. Open the job file in VS Code:
+   .cache/agent-jobs/demo-ai-recognition-mapper/<fingerprint>/job.json
 
-1. Open that job.json in VS Code.
-2. Ask Copilot Chat (agent mode): "Complete the offline label job in <jobFile>"
-   (.github/instructions/kodiak-agent-label.instructions.md auto-attaches and tells the agent exactly what to write).
-3. The agent writes <resultFile>
-4. Then run:
-   npm run label:import -- --mapper demo-ai-recognition-mapper --fields Summary.displayName
+2. Copilot Chat (agent mode) — paste:
+   Complete the offline label job in <jobFile>
+
+3. After the agent writes result.json, run in the VS Code terminal:
+
+   npm run label:import -- --result <resultFile> --fields Summary.displayName
+
    npm run label -- --mapper demo-ai-recognition-mapper --from-cache-only --fields Summary.displayName
+
+4. Optional — pipeline viewer:
+
+   npm run ui:serve
 ```
 
-Follow those 4 steps — no HTTP calls to the model API are made anywhere in this flow.
+Follow those steps — no HTTP calls to the model API are made anywhere in this flow.
+The agent writes `result.json` and prints the npm commands; **you** run them in VS Code.
 You can also run each stage manually:
 
 ```bash
@@ -226,8 +234,11 @@ npm run label:import -- --mapper demo-ai-recognition-mapper \
 
 # 4. Read the labeled pipeline from cache (no model API needed)
 npm run label -- --mapper demo-ai-recognition-mapper \
-  --worktree /path/to/mapper-repo --fields Summary.displayName --from-cache-only
+  --from-cache-only --fields Summary.displayName
 ```
+
+Optional: add `--with-ast` to `label:export` if you have the indexer built and want
+JavaParser hints in `job.json` (still no model API).
 
 
 

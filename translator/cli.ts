@@ -198,15 +198,9 @@ async function offlineAgentFallback(reason: string, selectors: string[]): Promis
     console.error(
       [
         reason,
-        `Exported an offline agent job instead (${exported.fieldCount} field(s), no HTTP calls needed).`,
+        `Exported an offline agent job (${exported.fieldCount} field(s), no HTTP calls).`,
         "",
-        "Run this agent with this input:",
-        `  Job file: ${exported.jobFile}`,
-        "",
-        "1. Open that job.json in VS Code.",
-        `2. Ask Copilot Chat (agent mode): "Complete the offline label job in ${exported.jobFile}"`,
-        "   (.github/instructions/kodiak-agent-label.instructions.md auto-attaches and tells the agent to write result.json,",
-        "    then run label:import and label --from-cache-only itself — no further steps needed from you).",
+        exported.vscodePrompt,
       ].join("\n"),
     );
   } catch (err) {

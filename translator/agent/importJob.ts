@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Import VS Code agent result.json into field cache (no model API).
+ * Import VS Code agent result.json into field cache (no model API, no indexer).
  *
  *   npm run label:import -- --mapper my-mapper \
  *     --worktree /path/to/mapper-repo \
@@ -14,12 +14,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "../../src/config/env.js";
 import { resolveMapperAst } from "../resolvePipeline.js";
-import { groupAst } from "../model/discoverMerge.js";
 import {
   applyFieldMappingResponse,
   loadSchemaJson,
   normalizeFieldMappingResponse,
-  type IndexAst,
 } from "../model/index.js";
 import type { FieldMapping, PipelineOp } from "../groupMapping.js";
 import { matchesTargetField, parseFieldSelectors } from "../filterByFields.js";
@@ -96,11 +94,22 @@ function fieldMatchesSelectors(
   return false;
 }
 
+function groupsFromJob(job: AgentJob | null, result: AgentResult): FieldMapping[] {
+  if (job) {
+    return job.fields.map((f) => ({
+      targetField: f.javaTargetField,
+      pipeline: (f.indexerOps ?? []) as PipelineOp[],
+    }));
+  }
+  return result.fields.map((f) => ({
+    targetField: f.javaTargetField,
+    pipeline: [] as PipelineOp[],
+  }));
+}
+
 async function main(): Promise<void> {
   let resultPath = values.result;
   let mapperId = values.mapper;
-  let fingerprint: string | undefined;
-  let ast: IndexAst | undefined;
 
   const selectors = parseFieldSelectors({
     field: values.field,
@@ -115,29 +124,32 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const resolved = await resolveMapperAst(mapperId, values.registry!, {
-      local: values.local,
-      remote: values.remote || undefined,
-      worktree: values.worktree,
-    });
-    ast = resolved.ast as IndexAst;
-    mapperId = ast.mapperId ?? mapperId;
-    fingerprint = computePipelineFingerprint({
-      sourceJava: resolved.sourceJava,
-      schemaJson: loadSchemaJson(mapperId),
-      model: AGENT_OFFLINE_MODEL,
-      version: PIPELINE_CACHE_VERSION,
-    });
+    if (values.worktree || values.local || values.remote) {
+      const resolved = await resolveMapperAst(mapperId, values.registry!, {
+        local: values.local,
+        remote: values.remote || undefined,
+        worktree: values.worktree,
+        withAst: false,
+      });
+      mapperId = resolved.ast.mapperId ?? mapperId;
+      const fingerprint = computePipelineFingerprint({
+        sourceJava: resolved.sourceJava,
+        schemaJson: loadSchemaJson(mapperId),
+        model: AGENT_OFFLINE_MODEL,
+        version: PIPELINE_CACHE_VERSION,
+      });
+      const expected = agentResultFile(mapperId, fingerprint);
+      if (existsSync(expected)) {
+        resultPath = expected;
+      }
+    }
 
-    const expected = agentResultFile(mapperId, fingerprint);
-    if (existsSync(expected)) {
-      resultPath = expected;
-    } else {
+    if (!resultPath) {
       resultPath = findLatestResult(mapperId) ?? undefined;
     }
     if (!resultPath) {
       console.error(
-        `No result.json found. Expected ${expected} (or any under .cache/agent-jobs/${mapperId}/).`,
+        `No result.json found for ${mapperId}. Run label:export, complete the agent job, or pass --result <path>.`,
       );
       process.exit(1);
     }
@@ -145,7 +157,7 @@ async function main(): Promise<void> {
 
   const result = loadResult(resultPath);
   mapperId = result.mapperId;
-  fingerprint = result.fingerprint;
+  const fingerprint = result.fingerprint;
 
   const jobPath = agentJobFile(mapperId, fingerprint);
   let job: AgentJob | null = null;
@@ -157,22 +169,7 @@ async function main(): Promise<void> {
     }
   }
 
-  if (!ast && (values.worktree || values.local || values.remote)) {
-    const resolved = await resolveMapperAst(mapperId, values.registry!, {
-      local: values.local,
-      remote: values.remote || undefined,
-      worktree: values.worktree,
-    });
-    ast = resolved.ast as IndexAst;
-  }
-
-  const groups: FieldMapping[] = ast
-    ? groupAst(ast)
-    : (job?.fields.map((f) => ({
-        targetField: f.javaTargetField,
-        pipeline: (f.indexerOps ?? []) as PipelineOp[],
-      })) ?? []);
-
+  const groups = groupsFromJob(job, result);
   const groupByJava = new Map(groups.map((g) => [g.targetField, g]));
   let imported = 0;
   const mappingOut: ReturnType<typeof applyFieldMappingResponse>[] = [];
@@ -225,6 +222,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const fieldsArg = selectors.length ? ` --fields ${selectors.join(",")}` : "";
+  const fromCacheCmd = `npm run label -- --mapper ${mapperId} --from-cache-only${fieldsArg}`;
+
   console.log(
     JSON.stringify(
       {
@@ -234,14 +234,24 @@ async function main(): Promise<void> {
         resultFile: resultPath,
         fieldsImported: imported,
         mapping: mappingOut,
-        next:
-          `npm run label -- --mapper ${mapperId} --from-cache-only` +
-          (selectors.length ? ` --fields ${selectors.join(",")}` : "") +
-          (values.worktree ? ` --worktree ${values.worktree}` : ""),
+        next: fromCacheCmd,
+        vscodeSteps: job?.vscodeSteps?.slice(2) ?? [fromCacheCmd, "npm run ui:serve"],
       },
       null,
       2,
     ),
+  );
+
+  console.error(
+    [
+      "",
+      "── Next: run in VS Code terminal ──",
+      "",
+      fromCacheCmd,
+      "",
+      "npm run ui:serve",
+      "",
+    ].join("\n"),
   );
 }
 
