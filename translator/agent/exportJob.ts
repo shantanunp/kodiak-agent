@@ -141,22 +141,8 @@ export async function exportAgentJob(
       "",
       "1. Open `job.json` in this folder.",
       "2. Ask your VS Code / Cursor agent to complete labeling per `instructions`.",
-      "3. Agent must write `result.json` in this same folder.",
-      "4. Then run:",
-      "",
-      "```bash",
-      `npm run label:import -- --mapper ${mapperId}` +
-        (worktree ? ` --worktree ${worktree}` : "") +
-        (selectors.length ? ` --fields ${selectors.join(",")}` : ""),
-      "```",
-      "",
-      "5. Read from cache (no model API):",
-      "",
-      "```bash",
-      `npm run label -- --mapper ${mapperId} --from-cache-only` +
-        (worktree ? ` --worktree ${worktree}` : "") +
-        (selectors.length ? ` --fields ${selectors.join(",")}` : ""),
-      "```",
+      "   The agent writes `result.json` in this same folder, then runs `label:import`",
+      "   and `label --from-cache-only` itself — no manual follow-up commands needed.",
       "",
     ].join("\n"),
   );
@@ -223,9 +209,8 @@ if (isDirectRun) {
           jobFile: result.jobFile,
           resultFile: result.resultFile,
           next: [
-            "Have VS Code agent write result.json beside job.json",
-            `npm run label:import -- --mapper ${result.mapperId}` +
-              (selectors.length ? ` --fields ${selectors.join(",")}` : ""),
+            "Have VS Code agent complete the offline label job — it writes result.json and",
+            "runs label:import + label --from-cache-only itself, no manual commands needed.",
           ],
         },
         null,

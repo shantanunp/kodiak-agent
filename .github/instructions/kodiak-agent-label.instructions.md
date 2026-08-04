@@ -36,5 +36,7 @@ When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` 
 ```
 
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
-6. After writing `result.json`, tell the user to run `npm run label:import`, then
-   `npm run label -- --mapper <id> --from-cache-only`.
+6. After writing `result.json`, run the follow-up commands yourself (don't just tell
+   the user to run them) — the user should not need to run anything manually:
+   - `npm run label:import -- --result <path-to-result.json>`
+   - `npm run label -- --mapper <id> --from-cache-only`

@@ -22,8 +22,9 @@ import {
   type IndexAst,
   type PipelineJson,
 } from "./model/index.js";
-import { resolveMapperAst } from "./resolvePipeline.js";
+import { resolveMapperAst, stubIndexAst } from "./resolvePipeline.js";
 import { exportAgentJob } from "./agent/exportJob.js";
+import { loadRegistry } from "../src/registry/loadRegistry.js";
 import {
   filterMappingByFields,
   matchesTargetField,
@@ -32,6 +33,7 @@ import {
 import {
   clearAllTranslatorCaches,
   computePipelineFingerprint,
+  findLatestFieldFingerprint,
   listFieldPipelineCaches,
   PIPELINE_CACHE_VERSION,
 } from "./cache/index.js";
@@ -77,12 +79,41 @@ async function labelFromAgentCache(
   selectors: string[],
 ): Promise<void> {
   const mapperId = ast.mapperId ?? "unknown";
-  const fingerprint = computePipelineFingerprint({
-    sourceJava,
-    schemaJson: loadSchemaJson(mapperId),
-    model: AGENT_OFFLINE_MODEL,
-    version: PIPELINE_CACHE_VERSION,
-  });
+
+  // `--from-cache-only` is meant to work with zero network/indexer access, so prefer
+  // whatever is already on disk. When we do have sourceJava (caller passed --worktree /
+  // --local / --remote alongside --from-cache-only), try the exact content fingerprint
+  // first, but fall back to the most recently imported fingerprint dir if that snapshot's
+  // fields were never cached (e.g. source moved since the offline job was labeled) instead
+  // of hard-failing.
+  let fingerprint = sourceJava
+    ? computePipelineFingerprint({
+        sourceJava,
+        schemaJson: loadSchemaJson(mapperId),
+        model: AGENT_OFFLINE_MODEL,
+        version: PIPELINE_CACHE_VERSION,
+      })
+    : undefined;
+
+  if (!fingerprint || listFieldPipelineCaches(mapperId, fingerprint).length === 0) {
+    const latest = findLatestFieldFingerprint(mapperId);
+    if (latest) {
+      if (fingerprint && fingerprint !== latest) {
+        console.error(
+          `Note: current source fingerprint (${fingerprint}) has no cached fields; ` +
+            `using most recently imported cache (${latest}) instead.`,
+        );
+      }
+      fingerprint = latest;
+    }
+  }
+
+  if (!fingerprint) {
+    console.error(
+      `No agent field cache for ${mapperId}. Run label:export → agent → label:import first.`,
+    );
+    process.exit(1);
+  }
 
   const cachedFields = listFieldPipelineCaches(mapperId, fingerprint);
   let mapping: FieldMappingJson[] = [];
@@ -164,14 +195,6 @@ async function offlineAgentFallback(reason: string, selectors: string[]): Promis
       registry: values.registry!,
       selectors,
     });
-    const importCmd =
-      `npm run label:import -- --mapper ${exported.mapperId}` +
-      (values.worktree ? ` --worktree ${values.worktree}` : "") +
-      (selectors.length ? ` --fields ${selectors.join(",")}` : "");
-    const cacheCmd =
-      `npm run label -- --mapper ${exported.mapperId} --from-cache-only` +
-      (values.worktree ? ` --worktree ${values.worktree}` : "") +
-      (selectors.length ? ` --fields ${selectors.join(",")}` : "");
     console.error(
       [
         reason,
@@ -182,11 +205,8 @@ async function offlineAgentFallback(reason: string, selectors: string[]): Promis
         "",
         "1. Open that job.json in VS Code.",
         `2. Ask Copilot Chat (agent mode): "Complete the offline label job in ${exported.jobFile}"`,
-        "   (.github/instructions/kodiak-agent-label.instructions.md auto-attaches and tells the agent exactly what to write).",
-        `3. The agent writes ${exported.resultFile}`,
-        "4. Then run:",
-        `   ${importCmd}`,
-        `   ${cacheCmd}`,
+        "   (.github/instructions/kodiak-agent-label.instructions.md auto-attaches and tells the agent to write result.json,",
+        "    then run label:import and label --from-cache-only itself — no further steps needed from you).",
       ].join("\n"),
     );
   } catch (err) {
@@ -228,19 +248,34 @@ async function main(): Promise<void> {
     const raw = JSON.parse(readFileSync(values.file, "utf8")) as { ast?: IndexAst } | IndexAst;
     ast = ("ast" in raw && raw.ast ? raw.ast : raw) as IndexAst;
   } else if (values.mapper) {
-    const withAst = Boolean(values["with-ast"]);
-    if (values["no-discover-ai"] && !withAst) {
-      console.error("--no-discover-ai requires --with-ast (AST escape hatch).");
-      process.exit(1);
+    const wantsSourceResolution = Boolean(values.worktree || values.local || values.remote);
+
+    if (fromCacheOnly && !wantsSourceResolution) {
+      // Pure offline read: no network, no Java indexer — registry metadata only.
+      // (Pass --worktree/--local/--remote alongside --from-cache-only to instead verify
+      // against a specific source snapshot; see the fallback logic in labelFromAgentCache.)
+      const registry = loadRegistry(values.registry!);
+      const mapper = registry.mappers.find((m) => m.id === values.mapper);
+      if (!mapper) {
+        console.error(`Mapper not found: ${values.mapper}`);
+        process.exit(1);
+      }
+      ast = stubIndexAst(mapper);
+    } else {
+      const withAst = Boolean(values["with-ast"]);
+      if (values["no-discover-ai"] && !withAst) {
+        console.error("--no-discover-ai requires --with-ast (AST escape hatch).");
+        process.exit(1);
+      }
+      const resolved = await resolveMapperAst(values.mapper, values.registry!, {
+        local: values.local,
+        remote: values.remote || undefined,
+        worktree: values.worktree,
+        withAst,
+      });
+      ast = resolved.ast;
+      sourceJava = resolved.sourceJava;
     }
-    const resolved = await resolveMapperAst(values.mapper, values.registry!, {
-      local: values.local,
-      remote: values.remote || undefined,
-      worktree: values.worktree,
-      withAst,
-    });
-    ast = resolved.ast;
-    sourceJava = resolved.sourceJava;
   } else {
     const indexDir = join(paths.cacheDir, "index");
     if (!existsSync(indexDir)) {
