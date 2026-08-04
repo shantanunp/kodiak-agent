@@ -161,13 +161,16 @@ Swap vendors via `.env` (see `translator/model/`):
 
 ```
 MODEL_API_KEY=your-key
-MODEL_API_STYLE=gemini          # or openai
+MODEL_API_STYLE=gemini          # or openai | claude
 MODEL_BASE_URL=https://generativelanguage.googleapis.com
 MODEL_NAME=gemini-flash-latest
 MODEL_TEMPERATURE=0
 ```
 
-`MODEL_API_STYLE=openai` uses OpenAI-compatible `/chat/completions` (office gateways, Azure, etc.). Legacy `GEMINI_*` env names still work.
+- `openai` → OpenAI-compatible `/chat/completions` (office gateways, Azure, DeepSeek, etc.)
+- `claude` → Anthropic Messages API (`MODEL_NAME=claude-sonnet-4-5`, key via `MODEL_API_KEY` or `ANTHROPIC_API_KEY`)
+
+Legacy `GEMINI_*` env names still work.
 
 ```bash
 npm run label -- --mapper demo-ai-recognition-mapper --remote

@@ -1,5 +1,5 @@
 /**
- * Model provider package — config, HTTP client (gemini|openai styles),
+ * Model provider package — config, HTTP client (gemini|openai|claude styles),
  * discovery merge, and business labeling.
  */
 

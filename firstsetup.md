@@ -38,13 +38,20 @@ Minimum in `.env`:
 MODEL_API_KEY=your-key
 ```
 
-Defaults use Google Gemini. For an OpenAI-compatible office gateway:
+Defaults use Google Gemini. For OpenAI-compatible or Claude:
 
 ```env
+# OpenAI / office gateway
 MODEL_API_STYLE=openai
 MODEL_BASE_URL=https://your-gateway/v1
 MODEL_NAME=gpt-4o-mini
 MODEL_API_KEY=your-key
+
+# Anthropic Claude (also accepts ANTHROPIC_API_KEY)
+# MODEL_API_STYLE=claude
+# MODEL_BASE_URL=https://api.anthropic.com/v1
+# MODEL_NAME=claude-sonnet-4-5
+# MODEL_API_KEY=sk-ant-...
 ```
 
 Then:
@@ -112,7 +119,7 @@ Tips:
 | Env var | Meaning |
 |---------|---------|
 | `MODEL_API_KEY` | Required |
-| `MODEL_API_STYLE` | `gemini` or `openai` |
+| `MODEL_API_STYLE` | `gemini`, `openai`, or `claude` |
 | `MODEL_BASE_URL` | API host (no trailing slash) |
 | `MODEL_NAME` | Model id |
 

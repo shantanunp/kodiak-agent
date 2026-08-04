@@ -49,7 +49,7 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 ### Phase 2 — Read-only visualization — **Complete (v0)**
 
 - [x] AI-primary discovery + AST confidence merge → labeled pipeline JSON (`translator/model/`)
-- [x] Model provider labeling (`translator/model/provider.ts`, gemini|openai styles)
+- [x] Model provider labeling (`translator/model/provider.ts`, gemini|openai|claude styles)
 - [x] Translation cache by content hash (`translator/cache/`)
 - [x] Step-type schema stub (`translator/schema/step-types.json`)
 - [x] UI mock spec (`mock/field-mapper-builder.html`) — reference only, not wired to live data

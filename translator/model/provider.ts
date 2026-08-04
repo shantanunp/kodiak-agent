@@ -124,6 +124,18 @@ interface OpenAiChatResponse {
   error?: { message?: string };
 }
 
+interface ClaudeMessagesResponse {
+  content?: Array<{ type?: string; text?: string }>;
+  error?: { message?: string; type?: string };
+}
+
+/** Strip ```json fences Claude sometimes wraps around JSON-only answers. */
+function unwrapJsonText(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced?.[1]?.trim() ?? trimmed;
+}
+
 function normalizePipeline(pipeline: PipelineOpLabel[] | undefined): PipelineOpLabel[] | undefined {
   if (!pipeline) return undefined;
   return pipeline.map((op) => ({
@@ -137,6 +149,7 @@ function normalizePipeline(pipeline: PipelineOpLabel[] | undefined): PipelineOpL
  * HTTP model provider. Swap vendor by changing MODEL_BASE_URL + MODEL_API_KEY + MODEL_API_STYLE.
  * - gemini: Google AI Studio / compatible generateContent
  * - openai: OpenAI-compatible /chat/completions (Azure, office gateways, Ollama, etc.)
+ * - claude: Anthropic Messages API (/v1/messages)
  */
 export class HttpModelProvider implements ModelProvider {
   readonly model: string;
@@ -227,6 +240,9 @@ export class HttpModelProvider implements ModelProvider {
     if (this.apiStyle === "openai") {
       return this.generateOpenAi(systemPrompt, userText);
     }
+    if (this.apiStyle === "claude") {
+      return this.generateClaude(systemPrompt, userText);
+    }
     return this.generateGemini(systemPrompt, userText);
   }
 
@@ -270,6 +286,31 @@ export class HttpModelProvider implements ModelProvider {
       const p = payload as OpenAiChatResponse;
       return p.choices?.[0]?.message?.content?.trim() ?? null;
     }, (payload) => (payload as OpenAiChatResponse).error?.message);
+  }
+
+  private async generateClaude(systemPrompt: string, userText: string): Promise<string> {
+    const url = `${this.baseUrl}/messages`;
+    const body = {
+      model: this.model,
+      max_tokens: 8192,
+      temperature: this.temperature,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userText }],
+    };
+
+    return this.fetchText(url, {
+      "Content-Type": "application/json",
+      "x-api-key": this.apiKey,
+      "anthropic-version": "2023-06-01",
+    }, body, (payload) => {
+      const p = payload as ClaudeMessagesResponse;
+      const text = (p.content ?? [])
+        .filter((block) => block.type === "text" && typeof block.text === "string")
+        .map((block) => block.text!)
+        .join("\n")
+        .trim();
+      return text ? unwrapJsonText(text) : null;
+    }, (payload) => (payload as ClaudeMessagesResponse).error?.message);
   }
 
   private async fetchText(
