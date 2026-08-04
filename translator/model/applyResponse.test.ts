@@ -2,67 +2,50 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyFieldMappingResponse,
-  ensureLettersOnlyTransform,
-  hasLettersOnlyEvidence,
+  normalizeKeepDigitsOp,
 } from "./applyResponse.js";
 import type { FieldMapping } from "../groupMapping.js";
 
-describe("ensureLettersOnlyTransform", () => {
-  it("detects sanitizeAlpha evidence", () => {
-    assert.equal(hasLettersOnlyEvidence("return sanitizeAlpha(region.trim());"), true);
-    assert.equal(hasLettersOnlyEvidence("Character.isLetter(c)"), true);
-    assert.equal(hasLettersOnlyEvidence("region.trim().toUpperCase()"), false);
-  });
-
-  it("inserts lettersOnly after trim when missing", () => {
-    const out = ensureLettersOnlyTransform(
-      [
-        { kind: "read", sourceField: "property.region" },
-        { kind: "transform", op: "trim" },
-        { kind: "transform", op: "uppercase" },
-      ],
-      "sanitizeAlpha(region.trim())",
-    );
-    assert.deepEqual(
-      out.map((o) => o.op ?? o.kind),
-      ["read", "trim", "lettersonly", "uppercase"],
-    );
-  });
-
-  it("does not duplicate lettersOnly", () => {
-    const out = ensureLettersOnlyTransform(
-      [
-        { kind: "transform", op: "trim" },
-        { kind: "transform", op: "lettersonly" },
-        { kind: "transform", op: "uppercase" },
-      ],
-      "sanitizeAlpha",
-    );
-    assert.equal(out.filter((o) => o.op === "lettersonly").length, 1);
+describe("normalizeKeepDigitsOp", () => {
+  it("normalizes invented digit-filter op names", () => {
+    const out = normalizeKeepDigitsOp([
+      { kind: "transform", op: "keepDigitsAndHyphen" },
+      { kind: "transform", op: "trim" },
+    ]);
+    assert.equal(out[0]?.op, "keepdigits");
+    assert.equal(out[1]?.op, "trim");
   });
 });
 
 describe("applyFieldMappingResponse", () => {
-  it("repairs lettersOnly from reason text when model omits it", () => {
+  it("keeps the model pipeline as-is (no lettersOnly repair)", () => {
     const entry: FieldMapping = {
       targetField: "StateCode",
-      pipeline: [{ kind: "RAW", meta: { code: "collateral.setStateCode(mapStateCode(p));" } }],
+      pipeline: [
+        {
+          kind: "RAW",
+          meta: {
+            code: "sanitizeAlpha(region.trim()); return toUpperToken(keepDigits(token));",
+          },
+        },
+      ],
     };
     const labeled = applyFieldMappingResponse(entry, {
       recognized: true,
-      targetField: "MESSAGE.DEAL.COLLATERAL.StateCode",
-      reason: "reads region, trim, sanitizeAlpha keep letters, uppercase",
+      targetField: "Order.shipTo.regionCode",
+      reason: "trim → keepDigits → uppercase; sanitizeAlpha wraps keepDigits",
       pipeline: [
-        { kind: "read", sourceField: "property.region" },
-        { kind: "transform", op: "trim" },
-        { kind: "transform", op: "uppercase" },
+        { kind: "read", sourceField: "address.region", summary: "Reads region." },
+        { kind: "transform", op: "trim", summary: "Trims whitespace." },
+        { kind: "transform", op: "keepdigits", summary: "keepDigits keeps digits." },
+        { kind: "transform", op: "uppercase", summary: "Uppercases." },
       ],
     });
     assert.deepEqual(
       labeled.pipeline.map((s) =>
         s.kind === "TRANSFORM" ? String(s.meta?.op) : s.kind,
       ),
-      ["READ", "trim", "lettersonly", "uppercase"],
+      ["READ", "trim", "keepdigits", "uppercase"],
     );
   });
 
@@ -73,12 +56,12 @@ describe("applyFieldMappingResponse", () => {
     };
     const labeled = applyFieldMappingResponse(entry, {
       recognized: true,
-      targetField: "MESSAGE.DEAL.COLLATERAL.PostalCode",
+      targetField: "Order.shipTo.postalCode",
       reason: "postal pipeline",
       pipeline: [
         {
           kind: "read",
-          sourceField: "property.postalCode",
+          sourceField: "address.postalCode",
           summary: "Reads property.postalCode from the source.",
         },
         {

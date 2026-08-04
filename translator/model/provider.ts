@@ -93,15 +93,18 @@ Rules:
    {"kind":"transform","op":"trim","summary":"…"},
    {"kind":"transform","op":"split","value":" ","summary":"…"},
    {"kind":"transform","op":"takeFirst","summary":"…"}]  // or takeLast for parts[1]
-- Letter sanitize / alpha-only normalize (trim + keep letters + uppercase, e.g. Character.isLetter loops or letter-filter helpers):
+- Letter sanitize / alpha-only normalize (trim + keep letters + uppercase, e.g. Character.isLetter loops):
   [{"kind":"read","sourceField":"address.region","summary":"…"},
    {"kind":"transform","op":"trim","summary":"…"},
    {"kind":"transform","op":"lettersOnly","summary":"…"},
    {"kind":"transform","op":"uppercase","summary":"…"}]
-  MUST emit lettersOnly whenever the code strips non-letters (Character.isLetter, letter-filter loops, alpha-only helpers).
-  Never omit it as "implicit" — if the code filters letters, the pipeline must include lettersOnly.
+  Emit lettersOnly only when the CODE BODY strips non-letters (Character.isLetter / letter-filter loops).
+- CRITICAL — trust method bodies, not names. Real mappers often misname helpers:
+  e.g. sanitizeAlpha(...) that actually calls keepDigits → emit keepDigits, NOT lettersOnly.
+  Follow what each helper does (trim / digit filter / letter filter / uppercase / passthrough).
+  Drop null-guard and identity passthrough helpers (no pipeline step).
 - Drop meaningless null-guard filters.
-- If RAW meta.code is present, expand it into the correct pipeline.
+- If RAW meta.code is present, expand it into the correct pipeline from the real transforms in that code.
 - EVERY pipeline step MUST include "summary": one short plain-English sentence describing what THAT step does (mention the real helper/method when known, e.g. "trimValue trims leading/trailing whitespace.").
 - "reason" is a brief overall field explanation (helpers chain + source→target). Do not put per-step detail only in reason — put it in each step's summary.
 - If unsure, return recognized=false.

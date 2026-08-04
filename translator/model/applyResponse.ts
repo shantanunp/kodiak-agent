@@ -8,29 +8,7 @@ function stripCodeMeta(meta?: Record<string, unknown>): Record<string, unknown> 
   return Object.keys(rest).length ? rest : undefined;
 }
 
-/** Java evidence that non-letter characters are stripped. */
-export function hasLettersOnlyEvidence(code: string): boolean {
-  return /Character\.isLetter|\.isLetter\s*\(|lettersOnly|keepLetters|alphaOnly|sanitizeAlpha/.test(
-    code,
-  );
-}
-
-function codeFromIndexerOps(ops: PipelineOp[] | undefined): string {
-  if (!ops?.length) return "";
-  return ops
-    .map((op) => {
-      const meta = op.meta && typeof op.meta === "object" ? (op.meta as Record<string, unknown>) : undefined;
-      return typeof meta?.code === "string" ? meta.code : "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-/**
- * Repair model omissions when indexer/RAW code clearly shows letter sanitization.
- * Inserts lettersOnly after trim (or before uppercase / at end).
- */
-/** Normalize invented postal/digit-filter op names to keepDigits. */
+/** Normalize invented digit-filter op names to keepDigits (AI wording only — does not invent steps). */
 export function normalizeKeepDigitsOp(pipeline: PipelineOpLabel[]): PipelineOpLabel[] {
   return pipeline.map((op) => {
     if (op.kind !== "transform" || typeof op.op !== "string") return op;
@@ -45,25 +23,6 @@ export function normalizeKeepDigitsOp(pipeline: PipelineOpLabel[]): PipelineOpLa
     }
     return op;
   });
-}
-
-export function ensureLettersOnlyTransform(
-  pipeline: PipelineOpLabel[],
-  code: string,
-): PipelineOpLabel[] {
-  if (!hasLettersOnlyEvidence(code)) return pipeline;
-  if (pipeline.some((op) => op.kind === "transform" && op.op === "lettersonly")) {
-    return pipeline;
-  }
-
-  const out = pipeline.map((op) => ({ ...op }));
-  const step: PipelineOpLabel = { kind: "transform", op: "lettersonly" };
-  const trimIdx = out.findIndex((op) => op.kind === "transform" && op.op === "trim");
-  const upperIdx = out.findIndex((op) => op.kind === "transform" && op.op === "uppercase");
-  if (trimIdx >= 0) out.splice(trimIdx + 1, 0, step);
-  else if (upperIdx >= 0) out.splice(upperIdx, 0, step);
-  else out.push(step);
-  return out;
 }
 
 export function fromPipelineOp(
@@ -105,6 +64,7 @@ export function fromPipelineOp(
 /**
  * Convert a model/agent FieldMappingResponse into the same FieldMappingJson
  * shape used by live labeling and field cache.
+ * Trust the model pipeline — do not invent or drop transform steps here.
  */
 export function applyFieldMappingResponse(
   entry: FieldMapping,
@@ -118,13 +78,10 @@ export function applyFieldMappingResponse(
   }));
 
   if (response.recognized && pipeline?.length && response.targetField) {
-    const evidence = [codeFromIndexerOps(entry.pipeline), response.reason ?? ""].join("\n");
-    const repaired = normalizeKeepDigitsOp(
-      ensureLettersOnlyTransform(pipeline, evidence),
-    );
+    const normalized = normalizeKeepDigitsOp(pipeline);
     return {
       targetField: response.targetField,
-      pipeline: repaired.map((op) => fromPipelineOp(op, response.reason, labelSource)),
+      pipeline: normalized.map((op) => fromPipelineOp(op, response.reason, labelSource)),
     };
   }
 
