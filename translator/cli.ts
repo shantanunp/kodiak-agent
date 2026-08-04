@@ -20,6 +20,7 @@ import {
   loadSchemaJson,
   type FieldMappingJson,
   type IndexAst,
+  type PipelineJson,
 } from "./model/index.js";
 import { resolveMapperAst } from "./resolvePipeline.js";
 import {
@@ -34,6 +35,7 @@ import {
   PIPELINE_CACHE_VERSION,
 } from "./cache/index.js";
 import { AGENT_OFFLINE_MODEL } from "./agent/types.js";
+import { writePipelineView } from "./writePipelineView.js";
 
 const { values } = parseArgs({
   options: {
@@ -112,17 +114,29 @@ async function labelFromAgentCache(
     }
   }
 
+  const labeledAt = new Date().toISOString();
+  const pipeline: PipelineJson = {
+    ...ast,
+    mapperId,
+    mapping,
+    labeledAt,
+    labelModel: AGENT_OFFLINE_MODEL,
+  };
+  const { path: viewPath, view } = writePipelineView(pipeline);
+  console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
+
   console.log(
     JSON.stringify(
       {
         mapperId,
         mapping,
-        labeledAt: new Date().toISOString(),
+        labeledAt,
         labelModel: AGENT_OFFLINE_MODEL,
         cacheHit: true,
         fieldsFromCache: mapping.length,
         fieldsLabeled: 0,
         fingerprint,
+        viewPath,
       },
       null,
       2,
@@ -209,6 +223,9 @@ async function main(): Promise<void> {
     pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
   }
 
+  const { path: viewPath, view } = writePipelineView(pipeline);
+  console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
+
   console.log(
     JSON.stringify(
       {
@@ -221,6 +238,7 @@ async function main(): Promise<void> {
         fieldsLabeled: pipeline.fieldsLabeled,
         fingerprint: pipeline.fingerprint,
         discoveryMeta: pipeline.discoveryMeta,
+        viewPath,
       },
       null,
       2,

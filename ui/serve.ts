@@ -148,7 +148,10 @@ createServer(async (req, res) => {
   if (pathname.startsWith("/data/")) {
     const file = join(UI_ROOT, "pipeline-viewer/data", pathname.slice("/data/".length));
     if (file.startsWith(join(UI_ROOT, "pipeline-viewer/data")) && existsSync(file)) {
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
       res.end(readFileSync(file));
       return;
     }

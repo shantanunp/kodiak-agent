@@ -40,6 +40,9 @@
   .schema-tree .node-name{color:var(--ink);}
   .schema-tree ul{margin:2px 0 4px 14px;padding:0;list-style:none;border-left:1px dashed var(--line);}
   .schema-ref{font-size:11px;color:var(--ink-faint);margin-top:10px;}
+  .tabs{display:flex;gap:6px;margin:0 0 14px;flex-wrap:wrap;}
+  .tab{font-family:var(--font-mono);font-size:12px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);cursor:pointer;color:var(--ink-soft);}
+  .tab.active{background:var(--target-bg);border-color:var(--target);color:var(--target);font-weight:600;}
   .target-name{font-family:var(--font-mono);font-size:15px;font-weight:500;color:var(--target);background:var(--target-bg);padding:3px 9px;border-radius:6px;display:inline-block;}
   .pipeline{margin-top:18px;padding-left:6px;}
   .step{display:flex;gap:14px;padding-bottom:20px;}
@@ -101,8 +104,10 @@ function renderStepBody(step) {
   }
   if (step.kind === 'select') return `Take <span class="mono">${esc(step.mode)}</span>`;
   if (step.kind === 'transform') {
-    let t = `Apply <span class="mono">${esc(step.op)}</span> to <span class="mono">${esc(step.field)}</span>`;
-    if (step.field2) t += ` and <span class="mono">${esc(step.field2)}</span>`;
+    let t = `Apply <span class="mono">${esc(step.op)}</span>`;
+    if (step.field2) {
+      t += ` to <span class="mono">${esc(step.field)}</span> and <span class="mono">${esc(step.field2)}</span>`;
+    }
     if (step.param !== undefined) t += ` · param <span class="mono">${esc(String(step.param))}</span>`;
     return t;
   }
@@ -118,15 +123,16 @@ function renderStepBody(step) {
   return esc(step.sourceText || '');
 }
 
-function renderStep(step) {
+function renderStep(step, opts = {}) {
   const k = step.kind;
+  const showReason = opts.showReason && step.labelReason;
   return `<div class="step">
     <div class="step-rail"><div class="step-icon" style="background:var(${BG[k]});color:var(${COLOR[k]})">${ICONS[k]||'?'}</div><div class="step-line"></div></div>
     <div class="step-card">
       <div class="step-kicker" style="color:var(${COLOR[k]})">${LABELS[k]||k}${badge(step)}</div>
       <div class="step-body">${renderStepBody(step)}</div>
       ${step.sourceText ? `<div class="code-block">${esc(step.sourceText)}</div>` : ''}
-      ${step.labelReason ? `<div style="font-size:11px;color:var(--ink-faint);margin-top:4px">${esc(step.labelReason)}</div>` : ''}
+      ${showReason ? `<div style="font-size:11px;color:var(--ink-faint);margin-top:6px;line-height:1.45">${esc(step.labelReason)}</div>` : ''}
     </div>
   </div>`;
 }
@@ -191,7 +197,13 @@ function renderSchemaPanel(data, schemaDoc) {
     ${schemaNote}`;
 }
 
-function render(data, schemaDoc) {
+function fieldLeaf(path) {
+  if (!path) return '';
+  const parts = String(path).split('.');
+  return parts[parts.length - 1] || path;
+}
+
+function render(data, schemaDoc, activeFieldIndex) {
   document.getElementById('metaBar').innerHTML = [
     `<span class="pill">${esc(data.mapperId)}</span>`,
     data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
@@ -200,19 +212,46 @@ function render(data, schemaDoc) {
     `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(data.mapperId)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
   ].join('');
   renderSchemaPanel(data, schemaDoc);
+
+  const fields = Array.isArray(data.fields) ? data.fields : null;
+  let steps = data.steps || [];
+  let targetLabel = data.target;
+  let tabsHtml = '';
+
+  if (fields && fields.length > 0) {
+    const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
+    const active = fields[idx];
+    steps = active.steps || [];
+    targetLabel = active.targetField;
+    if (fields.length > 1) {
+      tabsHtml = `<div class="tabs">${fields.map((f, i) =>
+        `<button type="button" class="tab${i === idx ? ' active' : ''}" data-field-idx="${i}">${esc(fieldLeaf(f.targetField))}</button>`
+      ).join('')}</div>`;
+    }
+  }
+
+  const reasonIdx = steps.findIndex((s) => s.labelReason);
   document.getElementById('canvas').innerHTML = `
-    <span class="target-name">${esc(data.target)}</span>
-    <div class="pipeline">${(data.steps||[]).map(renderStep).join('')}</div>
-    <div class="summary"><strong>Summary:</strong> ${esc(summarize(data.steps||[]))}</div>`;
+    ${tabsHtml}
+    <span class="target-name">${esc(targetLabel)}</span>
+    <div class="pipeline">${steps.map((s, i) => renderStep(s, { showReason: i === reasonIdx })).join('')}</div>
+    <div class="summary"><strong>Summary:</strong> ${esc(summarize(steps))}</div>`;
+
+  document.querySelectorAll('.tab[data-field-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      render(data, schemaDoc, Number(btn.getAttribute('data-field-idx')));
+    });
+  });
 }
 
 async function load() {
   const params = new URLSearchParams(location.search);
   const mapper = params.get('mapper') || 'demo-ai-recognition-mapper';
   try {
+    const bust = `?t=${Date.now()}`;
     const [viewRes, schemaRes] = await Promise.all([
-      fetch(`/data/${mapper}.view.json`),
-      fetch(`/api/schemas/${encodeURIComponent(mapper)}`),
+      fetch(`/data/${mapper}.view.json${bust}`),
+      fetch(`/api/schemas/${encodeURIComponent(mapper)}${bust}`),
     ]);
 
     let viewData = null;
@@ -226,7 +265,7 @@ async function load() {
     }
 
     if (!viewData && !schemaDoc) {
-      throw new Error(`No view data or schema for ${mapper}. Run view:export or build a schema first.`);
+      throw new Error(`No view data or schema for ${mapper}. Run: npm run label -- --mapper ${mapper}`);
     }
 
     if (!viewData) {
@@ -242,13 +281,13 @@ async function load() {
         targetSchema: schemaDoc.target?.root,
         schemaRef: `${mapper}.schema.json`,
       };
-      document.getElementById('canvas').innerHTML = `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Schema saved for <strong>${esc(mapper)}</strong>. No pipeline export yet — run <span class="mono">npm run view:export -- --mapper ${esc(mapper)}</span> to see mapping steps.</p>`;
+      document.getElementById('canvas').innerHTML = `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Schema saved for <strong>${esc(mapper)}</strong>. No pipeline view yet — run <span class="mono">npm run label -- --mapper ${esc(mapper)}</span> (writes <span class="mono">ui/pipeline-viewer/data/${esc(mapper)}.view.json</span>).</p>`;
       renderSchemaPanel(viewData, schemaDoc);
       document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(mapper)}</span><span class="pill">schema only</span>`;
       return;
     }
 
-    render(viewData, schemaDoc);
+    render(viewData, schemaDoc, 0);
   } catch (e) {
     document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }

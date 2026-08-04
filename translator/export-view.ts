@@ -8,10 +8,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { paths } from "../src/config/env.js";
-import { toPipelineView } from "./toPipelineView.js";
 import {
   operationsOf,
   StepLabeler,
@@ -21,6 +18,7 @@ import {
 } from "./model/index.js";
 import { groupOperationsByTarget } from "./groupMapping.js";
 import { resolveAstForMapper } from "./resolvePipeline.js";
+import { writePipelineView } from "./writePipelineView.js";
 
 const { values } = parseArgs({
   options: {
@@ -58,14 +56,16 @@ async function main(): Promise<void> {
     };
   }
 
-  const view = toPipelineView(pipeline);
-  const outDir = join(paths.root, "ui/pipeline-viewer/data");
-  mkdirSync(outDir, { recursive: true });
-  const outFile = join(outDir, `${values.mapper}.view.json`);
-  writeFileSync(outFile, JSON.stringify(view, null, 2));
+  const { path: outFile, view } = writePipelineView(pipeline);
 
   console.error(`Wrote ${outFile} (${view.steps.length} view steps)`);
-  console.log(JSON.stringify({ path: outFile, mapperId: view.mapperId, steps: view.steps.length }, null, 2));
+  console.log(
+    JSON.stringify(
+      { path: outFile, mapperId: view.mapperId, steps: view.steps.length, fields: view.fields?.length },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((err) => {

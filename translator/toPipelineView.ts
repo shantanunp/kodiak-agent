@@ -9,11 +9,57 @@ import { loadSchema } from "../schema/io.js";
 import { flattenPaths } from "../schema/flatten.js";
 import type { SchemaNode } from "../schema/types.js";
 
+/**
+ * Flatten one field's pipeline: attach targetField, carry READ source onto
+ * following transforms, and ensure a terminal WRITE for the UI.
+ */
+function flattenFieldPipeline(
+  targetField: string,
+  pipeline: PipelineStep[],
+): PipelineStep[] {
+  let lastSource: string | undefined;
+  const ops: PipelineStep[] = pipeline.map((op) => {
+    const kind = (op.kind ?? "").toUpperCase();
+    if (kind === "READ" && typeof op.sourceField === "string") {
+      lastSource = op.sourceField;
+    }
+    const next: PipelineStep = { ...op, targetField };
+    if (
+      (kind === "TRANSFORM" || kind === "FILTER") &&
+      !next.sourceField &&
+      lastSource
+    ) {
+      next.sourceField = lastSource;
+    }
+    return next;
+  });
+
+  const hasWrite = ops.some((op) => (op.kind ?? "").toUpperCase() === "WRITE");
+  if (!hasWrite && targetField) {
+    const last = ops[ops.length - 1];
+    ops.push({
+      kind: "WRITE",
+      targetField,
+      labelSource: last?.labelSource,
+      // reason is shown once per field in the viewer — keep WRITE clean
+    });
+  }
+
+  // Attach labelReason only on the first step so the UI is not flooded.
+  const reason = ops.find((op) => op.labelReason)?.labelReason;
+  if (reason) {
+    return ops.map((op, i) =>
+      i === 0 ? { ...op, labelReason: reason } : { ...op, labelReason: undefined },
+    );
+  }
+  return ops;
+}
+
 /** Flatten grouped mapping back to ops with targetField for the view adapter. */
 function flattenPipeline(pipeline: PipelineJson): PipelineStep[] {
   if (pipeline.mapping?.length) {
     return pipeline.mapping.flatMap((m) =>
-      m.pipeline.map((op) => ({ ...op, targetField: m.targetField })),
+      flattenFieldPipeline(m.targetField, m.pipeline),
     );
   }
   return operationsOf(pipeline) as PipelineStep[];
@@ -46,6 +92,11 @@ export interface ViewStep {
   children?: ViewStep[];
 }
 
+export interface FieldPipelineView {
+  targetField: string;
+  steps: ViewStep[];
+}
+
 export interface PipelineViewModel {
   mapperId: string;
   className?: string;
@@ -58,7 +109,10 @@ export interface PipelineViewModel {
   isList: boolean;
   sourceFields: string[];
   targetFields: string[];
+  /** Flat steps (all fields). Prefer `fields` when present. */
   steps: ViewStep[];
+  /** Per-target pipelines for tabbed UI. */
+  fields?: FieldPipelineView[];
   sourceFile?: string;
   labeledAt?: string;
   labelModel?: string;
@@ -316,7 +370,13 @@ function convertStep(
   }
 
   if (kind === "write") {
-    return expandWriteStep(step, sourceSimple, targetSimple, schemaTargetFields);
+    const expanded = expandWriteStep(step, sourceSimple, targetSimple, schemaTargetFields);
+    // Drop empty sourceText from synthetic writes (noise in JSON / UI).
+    return expanded.map((s) =>
+      s.kind === "write" && !s.sourceText
+        ? { ...s, sourceText: undefined }
+        : s,
+    );
   }
 
   if (kind === "read") {
@@ -394,9 +454,22 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const targetPathHints =
     schemaTargetFields.length > 0 ? schemaTargetFields : hints?.targetFields ?? [];
 
-  const steps = flattenPipeline(pipeline).flatMap((s) =>
-    convertStep(s, sourceSimple, targetSimple, targetPathHints),
-  );
+  const fields: FieldPipelineView[] = (pipeline.mapping ?? []).map((m) => {
+    const fieldSteps = flattenFieldPipeline(m.targetField, m.pipeline).flatMap((s) =>
+      convertStep(s, sourceSimple, targetSimple, targetPathHints),
+    );
+    return {
+      targetField: formatWriteTarget(m.targetField, targetSimple, targetPathHints),
+      steps: fieldSteps,
+    };
+  });
+
+  const steps =
+    fields.length > 0
+      ? fields.flatMap((f) => f.steps)
+      : flattenPipeline(pipeline).flatMap((s) =>
+          convertStep(s, sourceSimple, targetSimple, targetPathHints),
+        );
 
   const collected = collectFields(steps);
 
@@ -407,6 +480,9 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
     ? schemaTargetFields
     : hints?.targetFields ?? [...collected.target].sort();
 
+  const primaryTarget =
+    fields.length === 1 ? fields[0]!.targetField : targetSimple;
+
   return {
     mapperId,
     className: pipeline.className,
@@ -415,11 +491,12 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
     targetType,
     sourceSimple,
     targetSimple,
-    target: targetSimple,
+    target: primaryTarget,
     isList: hints?.isList ?? false,
     sourceFields,
     targetFields,
     steps,
+    fields: fields.length > 0 ? fields : undefined,
     sourceFile: (pipeline as { sourceFile?: string }).sourceFile,
     labeledAt: pipeline.labeledAt,
     labelModel: pipeline.labelModel,

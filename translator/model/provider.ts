@@ -94,7 +94,8 @@ Rules:
    {"kind":"transform","op":"trim"},
    {"kind":"transform","op":"lettersOnly"},
    {"kind":"transform","op":"uppercase"}]
-  Do NOT drop lettersOnly when the code strips non-letters — it is a real transform, not implicit.
+  MUST emit lettersOnly whenever the code strips non-letters (sanitizeAlpha, Character.isLetter, letter-filter loops).
+  Never omit it as "implicit" or "typical for state codes" — if the code filters letters, the pipeline must include lettersOnly.
 - Drop meaningless null-guard filters.
 - If RAW meta.code is present, expand it into the correct pipeline.
 - If unsure, return recognized=false.
