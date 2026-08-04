@@ -67,7 +67,7 @@ export function ensureLettersOnlyTransform(
 export function fromPipelineOp(
   op: PipelineOpLabel,
   reason: string | undefined,
-  labelSource: "model" | "gemini" = "model",
+  labelSource: "model" = "model",
 ): PipelineStep {
   const kind = (op.kind ?? "raw").toUpperCase();
   const step: PipelineStep = {
@@ -104,7 +104,7 @@ export function fromPipelineOp(
 export function applyFieldMappingResponse(
   entry: FieldMapping,
   response: FieldMappingResponse,
-  labelSource: "model" | "gemini" = "model",
+  labelSource: "model" = "model",
 ): FieldMappingJson {
   const pipeline = response.pipeline?.map((op) => ({
     ...op,

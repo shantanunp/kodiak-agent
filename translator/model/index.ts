@@ -1,5 +1,5 @@
 /**
- * Model provider package — config, HTTP client (gemini|openai|claude styles),
+ * Model provider package — config, HTTP client (openai|claude|copilot styles),
  * discovery merge, and business labeling.
  */
 
@@ -8,17 +8,12 @@ export {
   type ModelApiStyle,
   loadModelConfig,
   isModelConfigured,
-  // deprecated aliases
-  loadGeminiConfig,
-  isGeminiConfigured,
-  type GeminiConfig,
 } from "./config.js";
 
 export {
   type ModelProvider,
   HttpModelProvider,
   createModelProvider,
-  GeminiLabelProvider,
   FIELD_MAPPING_PROMPT,
   type LabelRequest,
   type FieldMappingRequest,

@@ -38,7 +38,7 @@ async function main(): Promise<void> {
 
   if (values.label) {
     if (!isModelConfigured()) {
-      console.error("MODEL_API_KEY (or ANTHROPIC_API_KEY / GEMINI_API_KEY) required for --label");
+      console.error("MODEL_API_KEY (or ANTHROPIC_API_KEY / COPILOT_TOKEN) required for --label");
       process.exit(1);
     }
     const ast = await resolveAstForMapper(values.mapper, values.registry);

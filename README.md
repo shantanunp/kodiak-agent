@@ -89,7 +89,7 @@ Fingerprint = SHA-256 of:
 
 - mapper `.java` source bytes  
 - `registry/schemas/{mapperId}.schema.json` (or empty)  
-- `GEMINI_MODEL`  
+- `MODEL_NAME`  
 - `PIPELINE_CACHE_VERSION` (bumped when prompts/merge rules change)  
 
 Caches under `.cache/`:
@@ -99,7 +99,7 @@ Caches under `.cache/`:
 | `pipelines/` | Unfiltered `label` (no `--fields`) | Full business `mapping` |
 | `fields/` | Every labeled field | Field-level business mapping — `--fields` warm → `"cacheHit": true` |
 | `discovery/` | After AI discovery | Skip re-discovery when source unchanged |
-| `translator/.../labels/` | Raw Gemini JSON per op | Micro-cache inside a field label |
+| `translator/.../labels/` | Raw model JSON per op | Micro-cache inside a field label |
 
 ```bash
 # Use cache (default)
@@ -161,16 +161,15 @@ Swap vendors via `.env` (see `translator/model/`):
 
 ```
 MODEL_API_KEY=your-key
-MODEL_API_STYLE=gemini          # or openai | claude
-MODEL_BASE_URL=https://generativelanguage.googleapis.com
-MODEL_NAME=gemini-flash-latest
+MODEL_API_STYLE=openai          # or claude | copilot
+MODEL_BASE_URL=https://api.openai.com/v1
+MODEL_NAME=gpt-4o-mini
 MODEL_TEMPERATURE=0
 ```
 
 - `openai` → OpenAI-compatible `/chat/completions` (office gateways, Azure, DeepSeek, etc.)
 - `claude` → Anthropic Messages API (`MODEL_NAME=claude-sonnet-4-5`, key via `MODEL_API_KEY` or `ANTHROPIC_API_KEY`)
-
-Legacy `GEMINI_*` env names still work.
+- `copilot` → GitHub Copilot `https://api.githubcopilot.com/chat/completions` (key via `MODEL_API_KEY`, `COPILOT_TOKEN`, or `GITHUB_TOKEN`)
 
 ```bash
 npm run label -- --mapper demo-ai-recognition-mapper --remote

@@ -156,7 +156,7 @@ async function main(): Promise<void> {
   const fromCacheOnly = Boolean(values["from-cache-only"]);
   if (!fromCacheOnly && !isModelConfigured()) {
     console.error(
-      "Set MODEL_API_KEY (or ANTHROPIC_API_KEY / GEMINI_API_KEY) in .env, or use --from-cache-only after label:import.\n" +
+      "Set MODEL_API_KEY (or ANTHROPIC_API_KEY / COPILOT_TOKEN) in .env, or use --from-cache-only after label:import.\n" +
         "Offline: npm run label:export → VS Code agent → npm run label:import → npm run label -- --from-cache-only",
     );
     process.exit(1);

@@ -121,13 +121,6 @@ Rules:
 - Do not invent mappings that are not in the source.
 - javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 
-interface GeminiGenerateContentResponse {
-  candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
-  }>;
-  error?: { message?: string };
-}
-
 interface OpenAiChatResponse {
   choices?: Array<{ message?: { content?: string } }>;
   error?: { message?: string };
@@ -154,11 +147,17 @@ function normalizePipeline(pipeline: PipelineOpLabel[] | undefined): PipelineOpL
   }));
 }
 
+function chatCompletionsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/$/, "");
+  if (trimmed.endsWith("/chat/completions")) return trimmed;
+  return `${trimmed}/chat/completions`;
+}
+
 /**
  * HTTP model provider. Swap vendor by changing MODEL_BASE_URL + MODEL_API_KEY + MODEL_API_STYLE.
- * - gemini: Google AI Studio / compatible generateContent
  * - openai: OpenAI-compatible /chat/completions (Azure, office gateways, Ollama, etc.)
  * - claude: Anthropic Messages API (/v1/messages)
+ * - copilot: GitHub Copilot /chat/completions (https://api.githubcopilot.com)
  */
 export class HttpModelProvider implements ModelProvider {
   readonly model: string;
@@ -246,54 +245,58 @@ export class HttpModelProvider implements ModelProvider {
 
   /** Low-level completion — routes by MODEL_API_STYLE. */
   async generate(systemPrompt: string, userText: string): Promise<string> {
-    if (this.apiStyle === "openai") {
-      return this.generateOpenAi(systemPrompt, userText);
-    }
     if (this.apiStyle === "claude") {
       return this.generateClaude(systemPrompt, userText);
     }
-    return this.generateGemini(systemPrompt, userText);
-  }
-
-  private async generateGemini(systemPrompt: string, userText: string): Promise<string> {
-    const url = `${this.baseUrl}/v1beta/models/${this.model}:generateContent`;
-    const body = {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text: userText }] }],
-      generationConfig: {
-        temperature: this.temperature,
-        responseMimeType: "application/json",
-      },
-    };
-
-    return this.fetchText(url, {
-      "Content-Type": "application/json",
-      "X-goog-api-key": this.apiKey,
-    }, body, (payload) => {
-      const p = payload as GeminiGenerateContentResponse;
-      return p.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-        ?? null;
-    }, (payload) => (payload as GeminiGenerateContentResponse).error?.message);
+    if (this.apiStyle === "copilot") {
+      return this.generateCopilot(systemPrompt, userText);
+    }
+    return this.generateOpenAi(systemPrompt, userText);
   }
 
   private async generateOpenAi(systemPrompt: string, userText: string): Promise<string> {
-    const url = `${this.baseUrl}/chat/completions`;
-    const body = {
+    return this.generateChatCompletions(systemPrompt, userText, {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    }, true);
+  }
+
+  private async generateCopilot(systemPrompt: string, userText: string): Promise<string> {
+    // Copilot rejects requests missing Copilot-Integration-Id.
+    // copilot-developer-cli works with PAT / GITHUB_TOKEN; vscode-chat is for session tokens.
+    return this.generateChatCompletions(systemPrompt, userText, {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+      "Copilot-Integration-Id": process.env.COPILOT_INTEGRATION_ID?.trim() || "copilot-developer-cli",
+      "Editor-Version": "vscode/1.96.0",
+      "Editor-Plugin-Version": "copilot-chat/0.23.2",
+      "User-Agent": "GitHubCopilotChat/0.23.2",
+    }, false);
+  }
+
+  private async generateChatCompletions(
+    systemPrompt: string,
+    userText: string,
+    headers: Record<string, string>,
+    jsonObjectFormat: boolean,
+  ): Promise<string> {
+    const url = chatCompletionsUrl(this.baseUrl);
+    const body: Record<string, unknown> = {
       model: this.model,
       temperature: this.temperature,
-      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userText },
       ],
     };
+    if (jsonObjectFormat) {
+      body.response_format = { type: "json_object" };
+    }
 
-    return this.fetchText(url, {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this.apiKey}`,
-    }, body, (payload) => {
+    return this.fetchText(url, headers, body, (payload) => {
       const p = payload as OpenAiChatResponse;
-      return p.choices?.[0]?.message?.content?.trim() ?? null;
+      const text = p.choices?.[0]?.message?.content?.trim() ?? null;
+      return text ? unwrapJsonText(text) : null;
     }, (payload) => (payload as OpenAiChatResponse).error?.message);
   }
 
@@ -362,9 +365,6 @@ export class HttpModelProvider implements ModelProvider {
     throw new Error(`Model API failed: ${lastError}`);
   }
 }
-
-/** @deprecated use HttpModelProvider */
-export const GeminiLabelProvider = HttpModelProvider;
 
 export function createModelProvider(config?: ModelConfig): ModelProvider {
   return new HttpModelProvider(config ?? loadModelConfig());

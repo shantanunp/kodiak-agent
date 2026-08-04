@@ -51,7 +51,7 @@ export interface IndexAst {
 }
 
 export interface PipelineStep extends AstStep {
-  labelSource?: "deterministic" | "model" | "gemini";
+  labelSource?: "deterministic" | "model";
   labelReason?: string;
 }
 

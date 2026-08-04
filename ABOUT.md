@@ -49,7 +49,7 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 ### Phase 2 — Read-only visualization — **Complete (v0)**
 
 - [x] AI-primary discovery + AST confidence merge → labeled pipeline JSON (`translator/model/`)
-- [x] Model provider labeling (`translator/model/provider.ts`, gemini|openai|claude styles)
+- [x] Model provider labeling (`translator/model/provider.ts`, openai|claude|copilot styles)
 - [x] Translation cache by content hash (`translator/cache/`)
 - [x] Step-type schema stub (`translator/schema/step-types.json`)
 - [x] UI mock spec (`mock/field-mapper-builder.html`) — reference only, not wired to live data
@@ -77,7 +77,7 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 
 ### Phase 5 — Reproducibility & audit — **Partial**
 
-- [x] Model pinned (`GEMINI_MODEL`), temperature `0`
+- [x] Model pinned (`MODEL_NAME`), temperature `0`
 - [x] Label cache by `(model, sourceText)` hash
 - [ ] Full audit log (`audit/log-store.ts`)
 
@@ -97,7 +97,7 @@ Orchestrator for viewing and proposing changes to prod Java mapping logic. Java 
 flowchart TD
   subgraph config [Config]
     Registry["registry/mapping-registry.yaml"]
-    Env[".env GITHUB_TOKEN GEMINI_API_KEY"]
+    Env[".env GITHUB_TOKEN MODEL_API_KEY"]
   end
 
   subgraph phase0 [Phase 0 — no AI]
@@ -113,7 +113,7 @@ flowchart TD
 
   subgraph phase2 [Phase 2 — labeling + viewer]
     Labeler["translator/labeler.ts"]
-    Gemini["Gemini REST API"]
+    ModelApi["Model API openai|claude|copilot"]
     LabelCache["translator/cache/labels/"]
     Adapter["translator/toPipelineView.ts"]
     Viewer["ui/pipeline-viewer/"]
@@ -133,12 +133,12 @@ flowchart TD
 
   Registry --> ManualScan
   Env --> Fetch
-  Env --> Gemini
+  Env --> ModelApi
   ManualScan --> GitHub
   GitHub --> Fetch --> Worktree --> Indexer --> AstCache
   ManualLabel --> AstCache
   AstCache --> Labeler
-  Labeler --> Gemini --> LabelCache
+  Labeler --> ModelApi --> LabelCache
   LabelCache --> Adapter --> Viewer
   Incremental --> GitHub
   Poll --> Incremental
@@ -155,7 +155,7 @@ Fetch to .cache/worktrees/{sha}/
     ↓  JavaParser jar
 AST JSON (WRITE, FILTER, RAW, …) → .cache/index/
     ↓  npm run label  (optional)
-Gemini labels RAW steps → pipeline JSON
+Model labels RAW steps → pipeline JSON
     ↓  npm run view:export --label
 Pipeline view JSON → ui/pipeline-viewer/
     ↓  npm run view:serve
@@ -206,10 +206,10 @@ npm run golden:capture
 
 | Variable                | Purpose                                                         |
 | ----------------------- | --------------------------------------------------------------- |
-| `GITHUB_TOKEN`          | Optional for public repo; recommended for polling (5000 req/hr) |
-| `GEMINI_API_KEY`        | Google AI Studio — required for `npm run label`                 |
-| `GEMINI_MODEL`          | Default `gemini-flash-latest`                                   |
-| `GEMINI_TEMPERATURE`    | Default `0`                                                     |
+| `GITHUB_TOKEN`          | Optional for public repo; recommended for polling (5000 req/hr); also used by `copilot` style |
+| `MODEL_API_KEY`         | Required for `npm run label` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`) |
+| `MODEL_API_STYLE`       | `openai` \| `claude` \| `copilot`                               |
+| `MODEL_NAME`            | Model id (e.g. `gpt-4o`, `claude-sonnet-4-5`)                   |
 | `POLL_INTERVAL_MINUTES` | Default `15`                                                    |
 
 
@@ -224,7 +224,7 @@ kodiak-agent/
 ├── registry/mapping-registry.yaml   # what to scan
 ├── indexer/                         # JavaParser sidecar (no AI)
 ├── src/                             # orchestration, MCP, cache, scan
-├── translator/                      # Gemini labeling (Phase 2)
+├── translator/                      # Model labeling (Phase 2)
 ├── validator/golden-dataset/        # ground-truth fixtures
 ├── mock/field-mapper-builder.html   # UI spec (not connected yet)
 ├── mcp-config/                      # GitHub MCP read-only config

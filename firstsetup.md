@@ -38,7 +38,7 @@ Minimum in `.env`:
 MODEL_API_KEY=your-key
 ```
 
-Defaults use Google Gemini. For OpenAI-compatible or Claude:
+Defaults use OpenAI-compatible chat completions. Examples:
 
 ```env
 # OpenAI / office gateway
@@ -52,6 +52,12 @@ MODEL_API_KEY=your-key
 # MODEL_BASE_URL=https://api.anthropic.com/v1
 # MODEL_NAME=claude-sonnet-4-5
 # MODEL_API_KEY=sk-ant-...
+
+# GitHub Copilot (https://api.githubcopilot.com/chat/completions)
+# MODEL_API_STYLE=copilot
+# MODEL_BASE_URL=https://api.githubcopilot.com
+# MODEL_NAME=gpt-4o
+# MODEL_API_KEY=...   # or COPILOT_TOKEN / GITHUB_TOKEN
 ```
 
 Then:
@@ -134,17 +140,17 @@ Tips:
 | Env var | Meaning |
 |---------|---------|
 | `MODEL_API_KEY` | Required |
-| `MODEL_API_STYLE` | `gemini`, `openai`, or `claude` |
-| `MODEL_BASE_URL` | API host (no trailing slash) |
+| `MODEL_API_STYLE` | `openai`, `claude`, or `copilot` |
+| `MODEL_BASE_URL` | API host (no trailing slash; copilot: `https://api.githubcopilot.com`) |
 | `MODEL_NAME` | Model id |
 
-`STYLE` must match the endpoint shape (don’t point `gemini` style at an OpenAI URL).
+`STYLE` must match the endpoint shape (don’t point `claude` style at an OpenAI URL).
 
 ---
 
 ## Offline (no model API)
 
-When the office blocks Gemini/OpenAI:
+When the office blocks model APIs:
 
 ```powershell
 npm run label:export -- --mapper lpa-request-mapper `
