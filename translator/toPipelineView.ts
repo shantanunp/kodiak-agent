@@ -339,6 +339,8 @@ function convertStep(
       lowercase: "Lowercase",
       join: "Join",
       lettersonly: "Letters only",
+      keepdigits: "Keep digits",
+      keepdigitsandhyphen: "Keep digits",
     };
     const opLabel = opLabels[opRaw.toLowerCase()] ?? opRaw;
     const param = step.meta?.value;

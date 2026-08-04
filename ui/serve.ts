@@ -11,11 +11,24 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
-import { paths } from "../src/config/env.js";
+import { getEnvOptional, paths } from "../src/config/env.js";
 import { loadSchema, saveSchema, SCHEMAS_DIR } from "../schema/io.js";
 import { parseImport } from "../schema/parse.js";
 import { validateSchemaDocument } from "../schema/validate.js";
 import type { ImportMode, MappingSchemaDocument } from "../schema/types.js";
+import {
+  StepLabeler,
+  isModelConfigured,
+  type PipelineJson,
+} from "../translator/model/index.js";
+import { resolveMapperAst } from "../translator/resolvePipeline.js";
+import { filterMappingByFields, parseFieldSelectors } from "../translator/filterByFields.js";
+import { writePipelineView } from "../translator/writePipelineView.js";
+import {
+  applyChangeToMapper,
+  resolveMapperWorktree,
+} from "../translator/applyChange.js";
+import type { PipelineViewModel } from "../translator/toPipelineView.js";
 
 const PORT = Number(process.env.VIEW_PORT ?? 4173);
 const UI_ROOT = join(paths.root, "ui");
@@ -48,6 +61,59 @@ function sendJson(res: import("node:http").ServerResponse, status: number, body:
   res.end(JSON.stringify(body));
 }
 
+async function labelAndWriteView(options: {
+  mapperId: string;
+  worktree?: string;
+  fields?: string;
+  withAst?: boolean;
+  noCache?: boolean;
+}): Promise<{
+  viewPath: string;
+  view: PipelineViewModel;
+  fieldsLabeled?: number;
+  labelModel?: string;
+}> {
+  const worktree = options.worktree;
+  const resolved = await resolveMapperAst(options.mapperId, paths.registry, {
+    worktree,
+    remote: !worktree,
+    withAst: Boolean(options.withAst),
+  });
+
+  const selectors = parseFieldSelectors({ fields: options.fields });
+  const pipeline = await new StepLabeler().labelIndex(resolved.ast, {
+    fieldSelectors: selectors,
+    sourceJava: resolved.sourceJava,
+    noCache: options.noCache !== false,
+    useAst: Boolean(options.withAst),
+  });
+
+  if (selectors.length > 0) {
+    pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
+  }
+
+  if (!pipeline.mapping?.length) {
+    throw new Error(
+      "No labeled fields matched. Pass schema paths like MESSAGE.DEAL.COLLATERAL.PostalCode, or omit fields to label all.",
+    );
+  }
+
+  const labeled: PipelineJson = {
+    ...resolved.ast,
+    mapperId: pipeline.mapperId ?? options.mapperId,
+    mapping: pipeline.mapping,
+    labeledAt: pipeline.labeledAt,
+    labelModel: pipeline.labelModel,
+  };
+  const { path: viewPath, view } = writePipelineView(labeled);
+  return {
+    viewPath,
+    view,
+    fieldsLabeled: pipeline.fieldsLabeled,
+    labelModel: pipeline.labelModel,
+  };
+}
+
 function serveStatic(urlPath: string, res: import("node:http").ServerResponse): boolean {
   const normalized = urlPath.replace(/\/$/, "") || "/";
   let rel = ROUTES[normalized];
@@ -73,6 +139,125 @@ function serveStatic(urlPath: string, res: import("node:http").ServerResponse): 
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const pathname = url.pathname;
+
+  // Label → write pipeline-viewer data (server-side model; no browser → vendor API)
+  if (pathname === "/api/label" && req.method === "POST") {
+    try {
+      if (!isModelConfigured()) {
+        sendJson(res, 503, {
+          error:
+            "MODEL_API_KEY not configured in .env (label runs on the server, not in the browser).",
+        });
+        return;
+      }
+
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string;
+        fields?: string;
+        worktree?: string;
+        withAst?: boolean;
+        noCache?: boolean;
+      };
+
+      const mapperId = body.mapperId?.trim();
+      if (!mapperId) {
+        sendJson(res, 400, { error: "mapperId required" });
+        return;
+      }
+
+      let worktree: string | undefined;
+      try {
+        worktree = resolveMapperWorktree(body.worktree);
+      } catch {
+        worktree =
+          body.worktree?.trim() ||
+          getEnvOptional("MAPPER_WORKTREE") ||
+          getEnvOptional("LABEL_WORKTREE") ||
+          undefined;
+      }
+
+      const result = await labelAndWriteView({
+        mapperId,
+        worktree,
+        fields: body.fields,
+        withAst: body.withAst,
+        noCache: body.noCache,
+      });
+
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sendJson(res, msg.includes("No labeled fields") ? 404 : 500, { error: msg });
+    }
+    return;
+  }
+
+  // Natural-language edit of mapper worktree (file writes only) → re-label
+  if (pathname === "/api/apply-change" && req.method === "POST") {
+    try {
+      if (!isModelConfigured()) {
+        sendJson(res, 503, {
+          error:
+            "MODEL_API_KEY not configured in .env (edits run on the server, not in the browser).",
+        });
+        return;
+      }
+
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string;
+        intent?: string;
+        fields?: string;
+        worktree?: string;
+        withAst?: boolean;
+      };
+
+      const mapperId = body.mapperId?.trim();
+      const intent = body.intent?.trim();
+      if (!mapperId) {
+        sendJson(res, 400, { error: "mapperId required" });
+        return;
+      }
+      if (!intent) {
+        sendJson(res, 400, { error: "intent required (describe the code change)" });
+        return;
+      }
+
+      const worktree = resolveMapperWorktree(body.worktree);
+      const applied = await applyChangeToMapper({
+        mapperId,
+        intent,
+        worktree,
+        registryPath: paths.registry,
+      });
+
+      let viewResult: Awaited<ReturnType<typeof labelAndWriteView>> | undefined;
+      let labelError: string | undefined;
+      try {
+        viewResult = await labelAndWriteView({
+          mapperId,
+          worktree,
+          fields: body.fields,
+          withAst: body.withAst,
+          noCache: true,
+        });
+      } catch (err) {
+        labelError = err instanceof Error ? err.message : String(err);
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        ...applied,
+        view: viewResult?.view,
+        viewPath: viewResult?.viewPath,
+        labelModel: viewResult?.labelModel,
+        fieldsLabeled: viewResult?.fieldsLabeled,
+        labelError,
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
 
   // Schema API
   if (pathname.startsWith("/api/schemas/")) {

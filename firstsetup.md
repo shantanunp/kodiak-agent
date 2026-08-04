@@ -106,6 +106,16 @@ npm run ui:serve
 # http://localhost:4173/pipeline-viewer/?mapper=lpa-request-mapper
 ```
 
+**Build with AI** (pipeline viewer) writes mapper source under `MAPPER_WORKTREE`, then re-labels:
+
+1. Set `MAPPER_WORKTREE` in `.env` to your Kmismomapper checkout.
+2. Set `MODEL_API_KEY` (same as `npm run label`).
+3. Open the viewer, describe a code change (e.g. rename a helper), click **Build with AI**.
+
+Git commit / push / PR is not done yet (later phase). Review diffs in the mapper repo yourself.
+
+Optional: append `| fields: MESSAGE.DEAL.COLLATERAL.PostalCode` to only re-label those fields after the edit.
+
 Tips:
 
 - Prefer `--fields` so you don’t burn quota labeling everything.

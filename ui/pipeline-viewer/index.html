@@ -27,6 +27,21 @@
   .tagline{color:var(--ink-soft);font-size:13.5px;margin:4px 0 0 36px;}
   .meta-bar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0;font-size:12px;color:var(--ink-soft);}
   .pill{font-family:var(--font-mono);background:var(--panel);border:1px solid var(--line);padding:4px 10px;border-radius:6px;}
+
+  .ai-bar{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 14px;margin-top:4px;}
+  .ai-bar-icon{color:var(--op);font-size:14px;flex-shrink:0;}
+  .ai-bar input{flex:1;border:none;outline:none;font-family:var(--font-body);font-size:14px;background:transparent;color:var(--ink);padding:6px 0;}
+  .ai-bar input::placeholder{color:var(--ink-faint);}
+  .ai-bar button{border:none;background:var(--ink);color:var(--bg);font-family:var(--font-body);font-weight:600;font-size:13px;padding:8px 16px;border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .ai-bar button:hover{opacity:.88;}
+  .ai-bar button:disabled{opacity:.5;cursor:default;}
+  .ai-status{font-size:12.5px;color:var(--ink-faint);margin:8px 2px 0;min-height:16px;line-height:1.45;}
+  .ai-status.error{color:var(--cond);}
+  .ai-status a{color:var(--op);font-weight:600;}
+  .ai-banner{display:flex;align-items:flex-start;gap:8px;background:var(--op-bg);color:var(--op);border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:12.5px;line-height:1.45;}
+  .ai-banner b{font-weight:600;}
+  .ai-banner a{color:inherit;font-weight:600;}
+
   .legend{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;font-size:12.5px;color:var(--ink-soft);}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
   .canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;}
@@ -58,9 +73,17 @@
 <div class="app">
   <header>
     <div class="brand"><div class="brand-mark"><span></span></div><h1>Pipeline Viewer</h1></div>
-    <p class="tagline">Read-only view of indexed + labeled mapping logic (Phase 2)</p>
+    <p class="tagline">Describe a change — AI edits files under MAPPER_WORKTREE, then refreshes this pipeline</p>
   </header>
   <div class="meta-bar" id="metaBar"></div>
+
+  <div class="ai-bar">
+    <span class="ai-bar-icon">&#10022;</span>
+    <input id="aiInput" type="text" placeholder="e.g. rename keepDigitsAndHyphen to keepDigits (writes files in MAPPER_WORKTREE)" />
+    <button type="button" id="aiBtn">Build with AI</button>
+  </div>
+  <div class="ai-status" id="aiStatus">Writes Java under MAPPER_WORKTREE only (no git/PR yet). Requires MODEL_API_KEY + MAPPER_WORKTREE.</div>
+
   <div class="legend">
     <span><span class="dot" style="background:var(--source)"></span>Read</span>
     <span><span class="dot" style="background:var(--op)"></span>Transform / Build</span>
@@ -76,6 +99,12 @@ const COLOR = { read:'--source', filter:'--cond', select:'--op', transform:'--op
 const BG = { read:'--source-bg', filter:'--cond-bg', select:'--op-bg', transform:'--op-bg', build:'--op-bg', write:'--target-bg', constant:'--target-bg', raw:'--raw-bg' };
 const LABELS = { read:'Read', filter:'Filter', select:'Select', transform:'Transform', build:'Build object', write:'Write to target', constant:'Constant', raw:'Unclassified (raw)' };
 
+let currentMapper = 'demo-ai-recognition-mapper';
+let viewData = null;
+let aiGenerated = false;
+let lastChangeSummary = '';
+let lastChangedFiles = [];
+
 function badge(step) {
   if (step.kind === 'raw') return '<span class="badge badge-raw">needs review</span>';
   if (step.labelSource === 'model' || step.labelSource === 'gemini') return '<span class="badge badge-model">AI labeled</span>';
@@ -86,7 +115,7 @@ function renderStepBody(step) {
   if (step.kind === 'read') return `Field <span class="mono">${esc(step.field)}</span>`;
   if (step.kind === 'filter') {
     let inner = `When <span class="mono">${esc(step.value || step.op)}</span>`;
-    if (step.children?.length) inner += `<div class="nested">${step.children.map(renderStep).join('')}</div>`;
+    if (step.children?.length) inner += `<div class="nested">${step.children.map(s => renderStep(s)).join('')}</div>`;
     return inner;
   }
   if (step.kind === 'select') return `Take <span class="mono">${esc(step.mode)}</span>`;
@@ -100,7 +129,7 @@ function renderStepBody(step) {
   }
   if (step.kind === 'build') {
     const rows = (step.rows || []).map(r => `<span class="mono">${esc(r.source)}</span> → <span class="mono">${esc(r.target)}</span>`).join(', ');
-    return rows ? `Map fields: ${rows}` : `Create object${step.sourceText ? '' : ''}`;
+    return rows ? `Map fields: ${rows}` : 'Create object';
   }
   if (step.kind === 'write') return `Save to <span class="mono">${esc(step.target)}</span>`;
   if (step.kind === 'constant') {
@@ -131,7 +160,7 @@ function esc(s) {
 function summarize(steps) {
   return steps.map(s => {
     if (s.kind === 'read') return `read ${s.field}`;
-    if (s.kind === 'transform') return `${s.op}(${s.field}${s.field2?', '+s.field2:''})`;
+    if (s.kind === 'transform') return `${s.op}`;
     if (s.kind === 'write') return `write ${s.target}`;
     if (s.kind === 'constant') return `constant ${s.target}=${s.value??''}`;
     if (s.kind === 'filter') return `filter ${s.value||''}`;
@@ -148,6 +177,7 @@ function fieldLeaf(path) {
 }
 
 function render(data, activeFieldIndex) {
+  viewData = data;
   document.getElementById('metaBar').innerHTML = [
     `<span class="pill">${esc(data.mapperId)}</span>`,
     data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
@@ -173,8 +203,23 @@ function render(data, activeFieldIndex) {
     }
   }
 
+  if (!steps.length) {
+    document.getElementById('canvas').innerHTML = `
+      <p class="error">No pipeline steps yet. Describe a mapper code change above and click <b>Build with AI</b>,
+      or run <span class="mono">npm run label</span>.</p>`;
+    return;
+  }
+
   const reasonIdx = steps.findIndex((s) => s.labelReason);
+  const banner = aiGenerated
+    ? `<div class="ai-banner"><span>&#10022;</span><span><b>AI wrote files in MAPPER_WORKTREE.</b>
+        ${lastChangeSummary ? ` ${esc(lastChangeSummary)}.` : ''}
+        ${lastChangedFiles.length ? ` Files: ${lastChangedFiles.map(esc).join(', ')}.` : ''}
+        Pipeline below was re-labeled from the updated source.</span></div>`
+    : '';
+
   document.getElementById('canvas').innerHTML = `
+    ${banner}
     ${tabsHtml}
     <span class="target-name">${esc(targetLabel)}</span>
     <div class="pipeline">${steps.map((s, i) => renderStep(s, { showReason: i === reasonIdx })).join('')}</div>
@@ -189,17 +234,94 @@ function render(data, activeFieldIndex) {
 
 async function load() {
   const params = new URLSearchParams(location.search);
-  const mapper = params.get('mapper') || 'demo-ai-recognition-mapper';
+  currentMapper = params.get('mapper') || 'demo-ai-recognition-mapper';
+  const fieldsParam = params.get('fields');
+  if (fieldsParam) document.getElementById('aiInput').value = fieldsParam;
+
   try {
-    const viewRes = await fetch(`/data/${mapper}.view.json?t=${Date.now()}`);
+    const viewRes = await fetch(`/data/${currentMapper}.view.json?t=${Date.now()}`);
     if (!viewRes.ok) {
-      throw new Error(`No pipeline view for ${mapper}. Run: npm run label -- --mapper ${mapper}`);
+      document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(currentMapper)}</span>`;
+      document.getElementById('canvas').innerHTML =
+        `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">No pipeline view yet for <strong>${esc(currentMapper)}</strong>. Describe a code change above and click <b>Build with AI</b>, or run <span class="mono">npm run label</span> first.</p>`;
+      return;
     }
     render(await viewRes.json(), 0);
   } catch (e) {
     document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
   }
 }
+
+function parseIntentAndFields(raw) {
+  const text = raw.trim();
+  if (!text) return { intent: '', fields: undefined };
+  // Optional trailing "fields: a,b" so re-label can focus after edit
+  const m = text.match(/^(.*?)(?:\s*\|\s*fields:\s*(.+))?$/i);
+  const intent = (m?.[1] || text).trim();
+  const fields = m?.[2]?.trim() || undefined;
+  return { intent, fields };
+}
+
+async function buildWithAi() {
+  const statusEl = document.getElementById('aiStatus');
+  const btn = document.getElementById('aiBtn');
+  const { intent, fields } = parseIntentAndFields(document.getElementById('aiInput').value);
+  statusEl.classList.remove('error');
+
+  if (!intent) {
+    statusEl.textContent = 'Describe the code change first (e.g. rename keepDigitsAndHyphen to keepDigits).';
+    statusEl.classList.add('error');
+    return;
+  }
+
+  statusEl.textContent = 'AI is writing files in MAPPER_WORKTREE…';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/apply-change', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mapperId: currentMapper,
+        intent,
+        fields,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    aiGenerated = true;
+    lastChangeSummary = data.summary || '';
+    lastChangedFiles = Array.isArray(data.changedFiles) ? data.changedFiles : [];
+
+    const parts = [];
+    if (data.alreadyApplied) parts.push('Already applied — no file writes');
+    if (data.summary) parts.push(esc(data.summary));
+    if (lastChangedFiles.length) parts.push(`files: ${lastChangedFiles.map(esc).join(', ')}`);
+    if (data.labelError) parts.push(`label warning: ${esc(data.labelError)}`);
+    statusEl.innerHTML = parts.join(' · ') || 'Done.';
+
+    if (data.view && (data.view.steps?.length || data.view.fields?.length)) {
+      render(data.view, 0);
+    } else {
+      document.getElementById('canvas').innerHTML =
+        `<div class="ai-banner"><span>&#10022;</span><span><b>Files updated.</b>
+        ${lastChangedFiles.length ? ` ${lastChangedFiles.map(esc).join(', ')}.` : ''}
+        Re-label failed or returned no fields${data.labelError ? `: ${esc(data.labelError)}` : ''}.</span></div>`;
+    }
+  } catch (err) {
+    statusEl.textContent = err.message || "Couldn't apply change. Check MODEL_API_KEY and MAPPER_WORKTREE in .env.";
+    statusEl.classList.add('error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('aiBtn').addEventListener('click', buildWithAi);
+document.getElementById('aiInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') buildWithAi();
+});
+
 load();
 </script>
 </body>

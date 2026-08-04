@@ -70,7 +70,9 @@ The JavaParser indexer already extracted operations (hints only). You own the fi
 kinds, pipeline steps, and business/schema field paths.
 
 Allowed operation kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
-Transform "op" values: trim, split, takeFirst, takeLast, takeIndex, multiply, add, subtract, divide, uppercase, lowercase, join, lettersOnly.
+Transform "op" values: trim, split, takeFirst, takeLast, takeIndex, multiply, add, subtract, divide, uppercase, lowercase, join, lettersOnly, keepDigits.
+
+keepDigits = keep digit characters (and optional hyphens for postal codes). Prefer "keepDigits" — never invent names like keepDigitsAndHyphen.
 
 CRITICAL — business paths only:
 - targetField and sourceField MUST come from the Known source/target fields in context (or a close leaf match).
@@ -299,7 +301,7 @@ export class HttpModelProvider implements ModelProvider {
     const url = `${this.baseUrl}/messages`;
     const body = {
       model: this.model,
-      max_tokens: 8192,
+      max_tokens: 16384,
       temperature: this.temperature,
       system: systemPrompt,
       messages: [{ role: "user", content: userText }],

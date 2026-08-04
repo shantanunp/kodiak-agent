@@ -28,6 +28,23 @@ function codeFromIndexerOps(ops: PipelineOp[] | undefined): string {
  * Repair model omissions when indexer/RAW code clearly shows letter sanitization.
  * Inserts lettersOnly after trim (or before uppercase / at end).
  */
+/** Normalize invented postal/digit-filter op names to keepDigits. */
+export function normalizeKeepDigitsOp(pipeline: PipelineOpLabel[]): PipelineOpLabel[] {
+  return pipeline.map((op) => {
+    if (op.kind !== "transform" || typeof op.op !== "string") return op;
+    const name = op.op.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (
+      name === "keepdigits" ||
+      name === "keepdigitsandhyphen" ||
+      name === "digitsandhyphen" ||
+      name === "keepdigitshyphen"
+    ) {
+      return { ...op, op: "keepdigits" };
+    }
+    return op;
+  });
+}
+
 export function ensureLettersOnlyTransform(
   pipeline: PipelineOpLabel[],
   code: string,
@@ -97,7 +114,9 @@ export function applyFieldMappingResponse(
 
   if (response.recognized && pipeline?.length && response.targetField) {
     const evidence = [codeFromIndexerOps(entry.pipeline), response.reason ?? ""].join("\n");
-    const repaired = ensureLettersOnlyTransform(pipeline, evidence);
+    const repaired = normalizeKeepDigitsOp(
+      ensureLettersOnlyTransform(pipeline, evidence),
+    );
     return {
       targetField: response.targetField,
       pipeline: repaired.map((op) => fromPipelineOp(op, response.reason, labelSource)),
