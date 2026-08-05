@@ -1,0 +1,13 @@
+# Point at your mapper GitHub repo (owner/name). Override with GITHUB_OWNER / GITHUB_REPO in .env.
+repo: "your-org/your-mapper-repo"
+branch: "main"
+scope:
+  - "src/main/java/**/*.java"
+mappers:
+  - id: demo-ai-recognition-mapper
+    sourceFile: src/main/java/example/mapper/DemoAiRecognitionMapper.java
+    class: example.mapper.DemoAiRecognitionMapper
+    entryMethod: map
+    sourceType: example.mapper.DemoAiRecognitionMapper$Person
+    targetType: example.mapper.DemoAiRecognitionMapper$Summary
+    goldenTests: src/test/java/example/mapper/DemoAiRecognitionMapperTest.java
