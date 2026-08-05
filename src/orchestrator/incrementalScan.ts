@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Incremental re-scan: only index changed in-scope files when commit SHA advances.
+ * Incremental re-fetch: only pull changed in-scope files when commit SHA advances.
  */
 
 import { loadRegistry, parseRepoSlug } from "../registry/loadRegistry.js";

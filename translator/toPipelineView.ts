@@ -1,5 +1,5 @@
 /**
- * Converts indexer/labeler pipeline JSON → read-only UI view model
+ * Converts labeler pipeline JSON → read-only UI view model
  * (same step vocabulary as mock/field-mapper-builder.html).
  */
 

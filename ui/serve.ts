@@ -67,7 +67,6 @@ async function labelAndWriteView(options: {
   mapperId: string;
   worktree?: string;
   fields?: string;
-  withAst?: boolean;
   noCache?: boolean;
 }): Promise<{
   viewPath: string;
@@ -79,7 +78,6 @@ async function labelAndWriteView(options: {
   const resolved = await resolveMapperAst(options.mapperId, paths.registry, {
     worktree,
     remote: !worktree,
-    withAst: Boolean(options.withAst),
   });
 
   const selectors = parseFieldSelectors({ fields: options.fields });
@@ -87,7 +85,6 @@ async function labelAndWriteView(options: {
     fieldSelectors: selectors,
     sourceJava: resolved.sourceJava,
     noCache: options.noCache !== false,
-    useAst: Boolean(options.withAst),
   });
 
   if (selectors.length > 0) {
@@ -157,7 +154,6 @@ createServer(async (req, res) => {
         mapperId?: string;
         fields?: string;
         worktree?: string;
-        withAst?: boolean;
         noCache?: boolean;
       };
 
@@ -182,7 +178,6 @@ createServer(async (req, res) => {
         mapperId,
         worktree,
         fields: body.fields,
-        withAst: body.withAst,
         noCache: body.noCache,
       });
 
@@ -212,7 +207,6 @@ createServer(async (req, res) => {
         fields?: string;
         pipelineHint?: string;
         worktree?: string;
-        withAst?: boolean;
       };
 
       const mapperId = body.mapperId?.trim();
@@ -252,7 +246,6 @@ createServer(async (req, res) => {
           mapperId,
           worktree,
           fields: fieldsFilter,
-          withAst: body.withAst,
           noCache: true,
         });
       } catch (err) {

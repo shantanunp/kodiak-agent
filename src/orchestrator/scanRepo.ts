@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Full scan: registry → fetch → JavaParser index → cache.
+ * Full scan: registry → fetch mapper sources → worktree cache.
  */
 
 import { parseArgs } from "node:util";
@@ -11,11 +11,7 @@ import { loadRegistry, parseRepoSlug, type MapperEntry } from "../registry/loadR
 import { assertMapperInScope } from "../registry/scope.js";
 import { GitHubClient } from "../mcp/githubClient.js";
 import * as cache from "../cache/index.js";
-import {
-  indexAndCache,
-  materializeFile,
-  writeRuntimeRegistry,
-} from "../indexer/runIndexer.js";
+import { materializeFile } from "../source/worktree.js";
 
 export interface ScanOptions {
   local?: boolean;
@@ -54,6 +50,24 @@ async function fetchOrReadLocal(
   }
 }
 
+export function fetchAndCache(
+  mapper: MapperEntry,
+  commitSha: string,
+  blobSha: string,
+): cache.CacheEntry {
+  const existing = cache.get(mapper.sourceFile, blobSha);
+  if (existing) return existing;
+
+  const entry: cache.CacheEntry = {
+    filePath: mapper.sourceFile,
+    blobSha,
+    commitSha,
+    fetchedAt: new Date().toISOString(),
+  };
+  cache.set(entry);
+  return entry;
+}
+
 export async function scanFiles(
   mapperIds: string[],
   options: ScanOptions = {},
@@ -62,7 +76,6 @@ export async function scanFiles(
   const registry = loadRegistry(registryPath);
   const useRemote = options.remote ?? false;
   const useLocal = options.local ?? !useRemote;
-  const runtimeRegistry = join(paths.cacheDir, "runtime-registry.yaml");
 
   let commitSha = options.commitSha ?? "local";
   if (useRemote) {
@@ -89,8 +102,6 @@ export async function scanFiles(
     assertMapperInScope(mapper.sourceFile, registry.scope);
   }
 
-  writeRuntimeRegistry(mappers, runtimeRegistry);
-
   const results: cache.CacheEntry[] = [];
   for (const mapper of mappers) {
     const { blobSha } = await fetchOrReadLocal(
@@ -100,8 +111,7 @@ export async function scanFiles(
       useRemote && !useLocal,
       registryPath,
     );
-    const entry = indexAndCache(mapper, worktree, commitSha, blobSha, runtimeRegistry);
-    results.push(entry);
+    results.push(fetchAndCache(mapper, commitSha, blobSha));
   }
 
   return results;
@@ -136,11 +146,7 @@ async function main(): Promise<void> {
           filePath: entry.filePath,
           blobSha: entry.blobSha,
           commitSha: entry.commitSha,
-          cached: entry.indexedAt,
-          stepCount:
-            (entry.ast as { operations?: unknown[]; steps?: unknown[] })?.operations?.length ??
-            (entry.ast as { steps?: unknown[] })?.steps?.length ??
-            0,
+          fetched: entry.fetchedAt,
         },
         null,
         2,

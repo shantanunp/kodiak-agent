@@ -1,6 +1,6 @@
 # Kodiak Agent — About
 
-Orchestrator for viewing and proposing changes to prod Java mapping logic. Java classes in GitHub (or a local worktree) are the source of truth; this tool discovers, indexes, and labels them — without migrating logic to a new framework.
+Orchestrator for viewing and proposing changes to prod Java mapping logic. Java classes in GitHub (or a local worktree) are the source of truth; this tool discovers and labels them — without migrating logic to a new framework.
 
 It is **not** tied to a specific domain schema: any registered mapper + optional schema works. Configure `registry/mapping-registry.yaml` for your Java mapper repo.
 
@@ -8,15 +8,14 @@ It is **not** tied to a specific domain schema: any registered mapper + optional
 
 ## Core principle
 
-**AI drives field discovery and business labeling.** JavaParser AST is opt-in (`--with-ast`) for confidence corroboration and never invents labeled targets on its own. Indexer/parsing stay deterministic; business users never get direct write access to prod code.
+**AI drives field discovery and business labeling.** Registry, GitHub fetch, and source resolution stay deterministic and non-AI; business users never get direct write access to prod code.
 
 
-| Layer                                      | AI?                                      |
-| ------------------------------------------ | ---------------------------------------- |
-| Registry, GitHub fetch                     | No                                       |
-| JavaParser indexer                         | No (opt-in via `--with-ast`)             |
-| Discovery + business-path labeling         | Yes (AI-primary; default)                |
-| Shadow tests, merge gates                  | No                                       |
+| Layer                              | AI?           |
+| ---------------------------------- | ------------- |
+| Registry, GitHub fetch             | No            |
+| Discovery + business-path labeling | Yes (default) |
+| Shadow tests, merge gates          | No            |
 
 
 ---
@@ -35,20 +34,19 @@ It is **not** tied to a specific domain schema: any registered mapper + optional
 
 
 
-### Phase 1 — Discovery & Indexing — **Complete**
+### Phase 1 — Source fetch & cache — **Complete**
 
-- [x] JavaParser static indexer (`indexer/`) — deterministic AST walk, `RAW` for unclassified constructs
+- [x] GitHub / worktree fetch → `.cache/worktrees/{commitSha}/`
 - [x] Cache keyed by `(commit SHA, file hash)` / `filePath:blobSha` (`src/cache/index.ts`)
-- [x] CLI `index-mappings` (`indexer/cli.ts`, `npm run index-mappings`)
-- [x] Scan orchestrator (`src/orchestrator/scanRepo.ts`) — fetch → index → cache
-- [x] Incremental re-scan (`src/orchestrator/incrementalScan.ts`) — only changed in-scope files
+- [x] Scan orchestrator (`src/orchestrator/scanRepo.ts`) — fetch → cache
+- [x] Incremental re-fetch (`src/orchestrator/incrementalScan.ts`) — only changed in-scope files
 - [x] Poll cron (`src/poll/cron.ts`, 15 min) — webhooks deferred
 
 
 
 ### Phase 2 — Read-only visualization — **Complete (v0)**
 
-- [x] AI-primary discovery + AST confidence merge → labeled pipeline JSON (`translator/model/`)
+- [x] AI discovery → labeled pipeline JSON (`translator/model/`)
 - [x] Model provider labeling (`translator/model/provider.ts`, openai|claude|copilot styles)
 - [x] Translation cache by content hash (`translator/cache/`)
 - [x] Step-type schema stub (`translator/schema/step-types.json`)
@@ -106,11 +104,6 @@ flowchart TD
     Worktree[".cache/worktrees/commitSha/"]
   end
 
-  subgraph phase1 [Phase 1 — deterministic]
-    Indexer["JavaParser jar indexer/"]
-    AstCache[".cache/index/ filePath:blobSha"]
-  end
-
   subgraph phase2 [Phase 2 — labeling + viewer]
     Labeler["translator/labeler.ts"]
     ModelApi["Model API openai|claude|copilot"]
@@ -135,9 +128,9 @@ flowchart TD
   Env --> Fetch
   Env --> ModelApi
   ManualScan --> GitHub
-  GitHub --> Fetch --> Worktree --> Indexer --> AstCache
-  ManualLabel --> AstCache
-  AstCache --> Labeler
+  GitHub --> Fetch --> Worktree
+  ManualLabel --> Worktree
+  Worktree --> Labeler
   Labeler --> ModelApi --> LabelCache
   LabelCache --> Adapter --> Viewer
   Incremental --> GitHub
@@ -152,10 +145,8 @@ flowchart TD
 GitHub (mapper repo)
     ↓  npm run scan --remote
 Fetch to .cache/worktrees/{sha}/
-    ↓  JavaParser jar
-AST JSON (WRITE, FILTER, RAW, …) → .cache/index/
-    ↓  npm run label  (optional)
-Model labels RAW steps → pipeline JSON
+    ↓  npm run label
+AI discovers fields → model labels → pipeline JSON
     ↓  npm run view:export --label
 Pipeline view JSON → ui/pipeline-viewer/
     ↓  npm run view:serve
@@ -181,7 +172,6 @@ Business user views pipeline (read-only)
 
 ```bash
 npm install
-npm run build:indexer
 
 # GitHub
 npm run latest-sha
@@ -189,8 +179,7 @@ npm run scan -- --mapper demo-ai-recognition-mapper --remote
 npm run scan:incremental
 npm run poll
 
-# Index + label
-npm run index-mappings -- --mapper demo-ai-recognition-mapper
+# Label
 npm run label -- --mapper demo-ai-recognition-mapper
 
 # Golden fixtures (Phase 0)
@@ -231,7 +220,6 @@ tells the agent exactly how to write `result.json`), then run `npm run label:imp
 ```
 kodiak-agent/
 ├── registry/mapping-registry.yaml   # what to scan
-├── indexer/                         # JavaParser sidecar (no AI)
 ├── src/                             # orchestration, MCP, cache, scan
 ├── translator/                      # Model labeling (Phase 2)
 ├── validator/golden-dataset/        # ground-truth fixtures
@@ -246,7 +234,7 @@ kodiak-agent/
 
 ## Backend JSON vs mock UI
 
-The labeler outputs **Java-centric** steps (`kind`, `targetField`, `sourceField`, `sourceText`). The mock HTML expects **business-centric** steps (`kind`, `field`, `target`, `op`, `rows`). A pipeline adapter and viewer app (Phase 2 remaining work) will bridge the two.
+The labeler outputs **business** JSON keyed by `mapperId` + `mapping`, using schema paths (e.g. `DeliveryPayload.fullName`) with a `pipeline` of ops (`READ`, `TRANSFORM`, `CONSTANT`, …). The mock HTML expects **business-centric** steps (`kind`, `field`, `target`, `op`, `rows`). A pipeline adapter and viewer app bridge the two.
 
 See [README.md](./README.md) for setup and [CLAUDE.md](./CLAUDE.md) for phase boundaries.
 
@@ -261,4 +249,3 @@ See [README.md](./README.md) for setup and [CLAUDE.md](./CLAUDE.md) for phase bo
 - Registry auto-discovery
 - PR write scope / patch bot
 - Postgres (file cache for v0)
-

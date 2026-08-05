@@ -1,5 +1,5 @@
 /**
- * Phase 2 — AI-primary discovery (AST corroborates confidence), then business labeling.
+ * Phase 2 — AI discovery, then business labeling.
  */
 
 import {
@@ -89,15 +89,6 @@ export interface LabelIndexOptions {
   sourceJava?: string;
   /** Skip pipeline / field / discovery cache read/write */
   noCache?: boolean;
-  /**
-   * Run AI discovery (default true). Set false for --no-discover-ai (needs useAst).
-   */
-  discoverAi?: boolean;
-  /**
-   * Use JavaParser AST for corroboration / --no-discover-ai escape hatch.
-   * Default false — pass true for --with-ast.
-   */
-  useAst?: boolean;
 }
 
 export function operationsOf(ast: IndexAst | { operations?: AstStep[]; steps?: AstStep[] }): AstStep[] {
@@ -144,11 +135,7 @@ export class StepLabeler {
     const fieldSelectors = options.fieldSelectors ?? [];
     const sourceJava = options.sourceJava ?? "";
     const noCache = Boolean(options.noCache);
-    // AI discovery on by default; AST corroboration off unless useAst.
-    const discoverAi = options.discoverAi !== false;
-    const useAst = Boolean(options.useAst);
     const mapperId = ast.mapperId ?? "unknown";
-    const skipAiDiscovery = !discoverAi;
 
     const schemaJson = loadSchemaJson(ast.mapperId);
     const fingerprint = computePipelineFingerprint({
@@ -216,8 +203,6 @@ export class StepLabeler {
     const { groups, meta } = await discoverAndMerge(ast, sourceJava, this.provider, {
       fingerprint,
       noCache,
-      skipAiDiscovery,
-      useAst,
     });
 
     const toLabel =

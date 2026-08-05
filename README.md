@@ -1,6 +1,6 @@
 # Kodiak Agent
 
-Orchestrator for Java mapping discovery, indexing, and pipeline visualization — generic for any source→target data transformation.
+Orchestrator for Java mapping discovery and pipeline visualization — generic for any source→target data transformation.
 
 Register your mapper in `registry/mapping-registry.yaml` and optionally add `registry/schemas/{mapperId}.schema.json`.
 
@@ -9,24 +9,10 @@ Register your mapper in `registry/mapping-registry.yaml` and optionally add `reg
 ```bash
 cp .env.example .env          # MODEL_API_KEY required for label; GITHUB_TOKEN optional
 npm install
-npm run build:indexer         # JavaParser shadow jar (needs JDK — see note below)
 ```
 
-Two independent commands (do not need to run both):
-
-
-| Command         | Role                                                       | AI? |
-| --------------- | ---------------------------------------------------------- | --- |
-| `npm run ast`   | Deterministic Java AST (Java DTO paths; corroboration)     | No  |
-| `npm run label` | AI-primary discovery → business paths (`--with-ast` optional) | Yes |
-
-
 ```bash
-# 1) AST only — local checkout, no AI
-npm run ast -- --mapper demo-ai-recognition-mapper \
-  --worktree /path/to/your-mapper-repo
-
-# 2) AI label — remote GitHub, or local worktree for unpushed mapper changes
+# AI label — remote GitHub, or local worktree for unpushed mapper changes
 npm run label -- --mapper demo-ai-recognition-mapper --remote
 
 npm run label -- --mapper demo-ai-recognition-mapper \
@@ -37,13 +23,11 @@ npm run label -- --mapper demo-ai-recognition-mapper \
   --fields Summary.displayName
 ```
 
-Prefer business `--fields` paths from your schema. Leaf names and Java paths also match for filtering.
+Prefer business `--fields` paths from your schema. Leaf names and Java setter hints also match for filtering.
 
-`npm run label` output is AI-owned business JSON: `mapperId` + `mapping` (schema paths like `DeliveryPayload.fullName`, `Customer.profile.firstName`) — no Java DTO envelope. `npm run ast` keeps Java paths for debugging.
+`npm run label` output is AI-owned business JSON: `mapperId` + `mapping` (schema paths like `DeliveryPayload.fullName`, `Customer.profile.firstName`) — no Java DTO envelope.
 
 Each `mapping` entry has a `pipeline` of ops (`READ`, `TRANSFORM`, `CONSTANT`, …). No `sourceText` / `children`.
-
-After changing indexer Java, rebuild once: `npm run build:indexer`.
 
 Registered mappers (see `registry/mapping-registry.yaml`):
 
@@ -59,30 +43,21 @@ Add more mappers by editing the registry (and optional schema JSON).
 ```mermaid
 flowchart TD
   src[Java source file]
-  ast[AST indexer]
   aiDisc[AI discovery]
-  merge[AI-primary merge]
   label[AI business label]
   cache[".cache/pipelines fingerprint"]
   out[Business mapping JSON]
 
-  src --> ast
   src --> aiDisc
-  ast --> merge
-  aiDisc --> merge
   cache -->|"hit: same source+schema+model"| out
-  merge -->|"miss"| label
+  aiDisc -->|"miss"| label
   label --> cache
   label --> out
 ```
 
-1. **AI discovery** — primary (default): finds target fields + code snippets (helpers inlined when they trim/split/etc.)  
-2. **AST** — **off by default**; pass `--with-ast` to corroborate matches, raise `confidence` (`both` = 1, `ai` = 0.6), and enrich `meta.code`  
-3. **Merge** — AI hits drive the labeling set; with `--with-ast`, AST-only targets are still not labeled (counted in `discoveryMeta.astOnly`)  
-4. **Business label** — model rewrites to schema paths from your mapper schema  
-5. **Pipeline cache** — reuse until inputs change  
-
-Escape hatch: `--with-ast --no-discover-ai` labels from AST only (`confidence` 0.4).
+1. **AI discovery** — finds target fields + code snippets (helpers inlined when they trim/split/etc.)  
+2. **Business label** — model rewrites to schema paths from your mapper schema  
+3. **Pipeline cache** — reuse until inputs change  
 
 ### Cache invalidation
 
@@ -119,29 +94,16 @@ npm run cache:clear -- --mapper demo-ai-recognition-mapper
 
 Unfiltered warm runs set `"cacheHit": true`. Filtered `--fields` runs reuse field cache when the fingerprint matches (`"cacheHit": true`).
 
-**Discovery:** AI discovery is **on by default** (including with `--fields`). JavaParser AST is **off by default** — pass `--with-ast` to enable corroboration. AST-only labeling: `--with-ast --no-discover-ai`.
-
-
-## Indexer build (local Gradle)
-
-Uses your machine's `gradle` and `JAVA_HOME` (office artifactory / JDK). No Gradle Wrapper in-repo.
-
-```bash
-# requires JDK 17+ on PATH / JAVA_HOME, and `gradle` installed
-npm run build:indexer
-# or: cd indexer && gradle shadowJar
-```
-
+**Discovery:** AI discovery runs on every label (including with `--fields`).
 
 
 ## Phase 0–1 scope (this delivery)
 
 - `registry/mapping-registry.yaml` — scoped mapper list
-- `indexer/` — JavaParser deterministic AST indexer (no AI)
 - `validator/golden-dataset/` — ground-truth capture harness
 - `src/mcp/githubClient.ts` — read-only GitHub via MCP + REST fallback
-- `src/orchestrator/scanRepo.ts` — fetch → index → cache
-- `src/orchestrator/incrementalScan.ts` — re-index changed files only
+- `src/orchestrator/scanRepo.ts` — fetch → cache
+- `src/orchestrator/incrementalScan.ts` — re-fetch changed files only
 - `src/poll/cron.ts` — 15-minute poll (webhooks deferred)
 
 
@@ -180,8 +142,7 @@ npm run label -- --mapper demo-ai-recognition-mapper --remote
 
 ## Offline mode (no model API access)
 
-Offline labeling does **not** need the Java indexer, JDK, or Gradle — only Node.js and a
-mapper checkout (`--worktree`). Pass `--fields` so export knows which fields to label.
+Offline labeling needs only Node.js and a mapper checkout (`--worktree`). Pass `--fields` so export knows which fields to label.
 
 For offices that block outbound calls to the model API: `npm run label` auto-detects this —
 when `MODEL_API_KEY` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`) isn't set, **or** the live
@@ -237,9 +198,6 @@ npm run label -- --mapper demo-ai-recognition-mapper \
   --from-cache-only --fields Summary.displayName
 ```
 
-Optional: add `--with-ast` to `label:export` if you have the indexer built and want
-JavaParser hints in `job.json` (still no model API).
-
 
 
 ## Schema builder
@@ -275,6 +233,6 @@ Or: `npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm r
 
 ## Architecture
 
-See [CLAUDE.md](./CLAUDE.md) for phase boundaries (indexer stays deterministic; AI lives in `translator/`).
+See [CLAUDE.md](./CLAUDE.md) for phase boundaries (AI lives in `translator/`; `src/` stays deterministic).
 
 See [ABOUT.md](./ABOUT.md) for phase completion status and project overview.

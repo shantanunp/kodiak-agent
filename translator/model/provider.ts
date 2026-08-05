@@ -66,9 +66,9 @@ export interface ModelProvider {
 }
 
 /** Shared with offline VS Code agent jobs — do not diverge. */
-export const FIELD_MAPPING_PROMPT = `You rewrite one already-parsed Java mapper field into a business pipeline.
+export const FIELD_MAPPING_PROMPT = `You rewrite one Java mapper field into a business pipeline.
 
-The JavaParser indexer already extracted operations (hints only). You own the final output:
+AI discovery already found the target field and a code snippet (hints only). You own the final output:
 kinds, pipeline steps, and business/schema field paths.
 
 Allowed operation kinds (lowercase): read, filter, select, transform, build, write, constant, raw.
@@ -84,7 +84,7 @@ CRITICAL — business paths only:
 - Good sources: customer.displayName, order.quantity, account.refNumber
 
 Rules:
-- Indexer ops (READ/CONSTANT/TRANSFORM/RAW/…) are hints — correct them when wrong.
+- Discovery hints (RAW snippets) are hints — correct them when wrong.
 - Literals/static finals → single constant step with "value"; never invent a read for constants.
 - Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads customer.displayName from the source."}]
 - Arithmetic (e.g. quantity * 12) → read + transform multiply with value "12"

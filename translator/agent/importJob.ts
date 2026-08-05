@@ -129,7 +129,6 @@ async function main(): Promise<void> {
         local: values.local,
         remote: values.remote || undefined,
         worktree: values.worktree,
-        withAst: false,
       });
       mapperId = resolved.ast.mapperId ?? mapperId;
       const fingerprint = computePipelineFingerprint({

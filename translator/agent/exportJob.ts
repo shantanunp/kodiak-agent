@@ -41,8 +41,6 @@ export interface ExportAgentJobOptions {
   remote?: boolean;
   registry: string;
   selectors: string[];
-  /** Opt-in JavaParser field discovery (needs JDK + build:indexer). Default false. */
-  withAst?: boolean;
 }
 
 export interface ExportAgentJobResult {
@@ -63,7 +61,7 @@ export interface ExportAgentJobResult {
 export async function exportAgentJob(
   opts: ExportAgentJobOptions,
 ): Promise<ExportAgentJobResult> {
-  const { mapper, worktree, local, remote, registry, selectors, withAst = false } = opts;
+  const { mapper, worktree, local, remote, registry, selectors } = opts;
 
   const registryDoc = loadRegistry(registry);
   const mapperEntry = registryDoc.mappers.find((m) => m.id === mapper);
@@ -76,7 +74,6 @@ export async function exportAgentJob(
     local,
     remote: remote || undefined,
     worktree,
-    withAst,
   });
   const ast = resolved.ast as IndexAst;
   const sourceJava = resolved.sourceJava;
@@ -96,7 +93,7 @@ export async function exportAgentJob(
     version: PIPELINE_CACHE_VERSION,
   });
 
-  const groups = buildOfflineFieldGroups({ ast, selectors, withAst });
+  const groups = buildOfflineFieldGroups({ selectors });
 
   if (groups.length === 0) {
     throw new Error(
@@ -160,7 +157,7 @@ export async function exportAgentJob(
       "For EACH entry in fields[]:",
       "1. Find the Java write(s) for that field in sourceJava (setters, builders, helpers).",
       "2. Apply systemPrompt + schemaContext to produce a FieldMappingResponse.",
-      "3. Use indexerOps only when present (--with-ast export); otherwise derive from sourceJava.",
+      "3. Derive pipeline steps from sourceJava and schemaContext.",
       "",
       `Write the complete result to: ${resultFile}`,
       "Do not call external model HTTP APIs.",
@@ -187,9 +184,6 @@ export async function exportAgentJob(
         businessFieldSelector: selector,
         javaTargetField: g.targetField,
       };
-      if (withAst && g.pipeline.length > 0) {
-        field.indexerOps = g.pipeline;
-      }
       return field;
     }),
     paths: {
@@ -232,7 +226,6 @@ if (isDirectRun) {
       registry: { type: "string", default: paths.registry },
       field: { type: "string", multiple: true },
       fields: { type: "string" },
-      "with-ast": { type: "boolean", default: false },
     },
   });
 
@@ -256,7 +249,6 @@ if (isDirectRun) {
       remote: values.remote,
       registry: values.registry!,
       selectors,
-      withAst: Boolean(values["with-ast"]),
     });
 
     console.log(

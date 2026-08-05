@@ -1,11 +1,9 @@
 {
   "name": "kodiak-agent",
   "version": "0.1.0",
-  "description": "Orchestrator for Java mapping discovery, indexing, and pipeline visualization",
+  "description": "Orchestrator for Java mapping discovery and pipeline visualization",
   "type": "module",
   "scripts": {
-    "ast": "tsx indexer/cli.ts",
-    "index-mappings": "tsx indexer/cli.ts",
     "scan": "tsx src/orchestrator/scanRepo.ts",
     "scan:incremental": "tsx src/orchestrator/incrementalScan.ts",
     "poll": "tsx src/poll/cron.ts",
@@ -20,7 +18,6 @@
     "view:serve": "tsx ui/serve.ts",
     "schema:validate": "tsx schema/cli-validate.ts",
     "view": "npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve",
-    "build:indexer": "cd indexer && gradle clean shadowJar",
     "test:translator": "tsx --test translator/model/discoverMerge.test.ts translator/model/applyResponse.test.ts translator/filterByFields.test.ts translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts"
   },
   "engines": {

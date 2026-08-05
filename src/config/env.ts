@@ -22,8 +22,4 @@ export const paths = {
   root: __root,
   registry: resolve(__root, "registry/mapping-registry.yaml"),
   cacheDir: resolve(process.cwd(), getEnvOptional("CACHE_DIR", "./.cache")),
-  indexerJar: resolve(
-    process.cwd(),
-    getEnvOptional("KODIAK_INDEXER_JAR", "./indexer/build/libs/kodiak-indexer.jar"),
-  ),
 };

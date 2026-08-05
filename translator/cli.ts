@@ -5,14 +5,11 @@
  *   npm run label -- --mapper my-mapper --worktree /path/to/mapper-repo
  *   --fields Order.shipTo.postalCode
  *   --no-cache | --clear-cache
- *   --with-ast          # opt-in JavaParser corroboration (off by default)
- *   --no-discover-ai    # AST-only escape hatch (requires --with-ast)
  *   --from-cache-only   # offline: read agent-seeded field cache (no MODEL_API_KEY)
  */
 
 import { parseArgs } from "node:util";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { paths } from "../src/config/env.js";
 import {
   StepLabeler,
@@ -52,12 +49,6 @@ const { values } = parseArgs({
     fields: { type: "string" },
     "no-cache": { type: "boolean", default: false },
     "clear-cache": { type: "boolean", default: false },
-    /** AI discovery on by default (AI-primary). Kept for compatibility. */
-    "discover-ai": { type: "boolean", default: true },
-    /** Skip AI discovery; AST-only escape hatch (requires --with-ast). */
-    "no-discover-ai": { type: "boolean", default: false },
-    /** Opt-in JavaParser AST corroboration (off by default). */
-    "with-ast": { type: "boolean", default: false },
     /** Read agent/offline field cache only — no MODEL_API_KEY required. */
     "from-cache-only": { type: "boolean", default: false },
   },
@@ -80,7 +71,7 @@ async function labelFromAgentCache(
 ): Promise<void> {
   const mapperId = ast.mapperId ?? "unknown";
 
-  // `--from-cache-only` is meant to work with zero network/indexer access, so prefer
+  // `--from-cache-only` is meant to work with zero network access, so prefer
   // whatever is already on disk. When we do have sourceJava (caller passed --worktree /
   // --local / --remote alongside --from-cache-only), try the exact content fingerprint
   // first, but fall back to the most recently imported fingerprint dir if that snapshot's
@@ -245,9 +236,6 @@ async function main(): Promise<void> {
     const wantsSourceResolution = Boolean(values.worktree || values.local || values.remote);
 
     if (fromCacheOnly && !wantsSourceResolution) {
-      // Pure offline read: no network, no Java indexer — registry metadata only.
-      // (Pass --worktree/--local/--remote alongside --from-cache-only to instead verify
-      // against a specific source snapshot; see the fallback logic in labelFromAgentCache.)
       const registry = loadRegistry(values.registry!);
       const mapper = registry.mappers.find((m) => m.id === values.mapper);
       if (!mapper) {
@@ -256,36 +244,19 @@ async function main(): Promise<void> {
       }
       ast = stubIndexAst(mapper);
     } else {
-      const withAst = Boolean(values["with-ast"]);
-      if (values["no-discover-ai"] && !withAst) {
-        console.error("--no-discover-ai requires --with-ast (AST escape hatch).");
-        process.exit(1);
-      }
       const resolved = await resolveMapperAst(values.mapper, values.registry!, {
         local: values.local,
         remote: values.remote || undefined,
         worktree: values.worktree,
-        withAst,
       });
       ast = resolved.ast;
       sourceJava = resolved.sourceJava;
     }
   } else {
-    const indexDir = join(paths.cacheDir, "index");
-    if (!existsSync(indexDir)) {
-      console.error(
-        "Usage: label --mapper <id> [--remote | --worktree <path>] | --file <cache.json>",
-      );
-      process.exit(1);
-    }
-    const files = readdirSync(indexDir).filter((f) => f.endsWith(".json"));
-    if (files.length === 0) {
-      console.error("No cached index entries. Run: npm run label -- --mapper <id> --remote");
-      process.exit(1);
-    }
-    const latest = join(indexDir, files[files.length - 1]!);
-    const entry = JSON.parse(readFileSync(latest, "utf8")) as { ast: IndexAst };
-    ast = entry.ast;
+    console.error(
+      "Usage: label --mapper <id> [--remote | --worktree <path>] | --file <cache.json>",
+    );
+    process.exit(1);
   }
 
   if (fromCacheOnly) {
@@ -300,8 +271,6 @@ async function main(): Promise<void> {
       fieldSelectors: selectors,
       sourceJava,
       noCache: Boolean(values["no-cache"]),
-      discoverAi: !values["no-discover-ai"] && values["discover-ai"] !== false,
-      useAst: Boolean(values["with-ast"]),
     });
   } catch (err) {
     await offlineAgentFallback(

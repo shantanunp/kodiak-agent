@@ -49,7 +49,7 @@ proceeding. Do not guess a mapper id or field path.
    - Read `job.json` at the parsed path. All data needed is in this one file:
      `sourceJava` (full mapper class source), `schemaJson` + `schemaContext` (allowed
      business paths), `mapper` (registry metadata), `fields[]` (each
-     `businessFieldSelector` to label), and optional `indexerOps`.
+     `businessFieldSelector` to label).
    - Follow `systemPrompt` and `schemaContext` in the job exactly.
    - For each entry in `fields[]`, locate the corresponding Java write in
      `sourceJava` and produce a `FieldMappingResponse` with `recognized` (boolean),

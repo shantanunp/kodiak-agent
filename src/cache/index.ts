@@ -14,8 +14,10 @@ export interface CacheEntry {
   filePath: string;
   blobSha: string;
   commitSha: string;
-  ast: unknown;
-  indexedAt: string;
+  fetchedAt: string;
+  /** @deprecated legacy index cache entries */
+  ast?: unknown;
+  indexedAt?: string;
 }
 
 export interface RepoMeta {
@@ -88,7 +90,9 @@ export function findLatestByFilePath(filePath: string): CacheEntry | null {
     if (!name.endsWith(".json")) continue;
     const entry = JSON.parse(readFileSync(join(dir, name), "utf8")) as CacheEntry;
     if (entry.filePath !== filePath) continue;
-    if (!latest || entry.indexedAt > latest.indexedAt) {
+    const at = entry.fetchedAt ?? entry.indexedAt ?? "";
+    const latestAt = latest?.fetchedAt ?? latest?.indexedAt ?? "";
+    if (!latest || at > latestAt) {
       latest = entry;
     }
   }

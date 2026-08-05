@@ -12,7 +12,6 @@ When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` 
    - `schemaJson` + `schemaContext` — allowed business paths
    - `mapper` — registry metadata (class, entryMethod, sourceType, targetType)
    - `fields[]` — each `businessFieldSelector` the user asked to label
-   - `indexerOps` — only when present (optional JavaParser hints)
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
 3. For **each** entry in `fields[]`, find the Java write in `sourceJava` and produce a `FieldMappingResponse`:
    - `recognized` (boolean)

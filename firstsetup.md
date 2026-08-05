@@ -6,19 +6,14 @@ Get labeling working on a Windows laptop in a few steps. Use **PowerShell**.
 
 ## You need
 
-| Tool                 | Version               | Offline labeling |
-| -------------------- | --------------------- | ---------------- |
-| Node.js              | 20+                   | Required         |
-| JDK                  | 17+ (`JAVA_HOME` set) | Not required     |
-| Gradle               | 8.x on `PATH`         | Not required     |
-| Mapper repo checkout | your Java mapper repo | Required (`--worktree`) |
+| Tool                 | Version               |
+| -------------------- | --------------------- |
+| Node.js              | 20+                   |
+| Mapper repo checkout | your Java mapper repo (`--worktree`) |
 
 
 ```powershell
 node -v
-java -version
-gradle -v
-echo $env:JAVA_HOME
 ```
 
 Also clone your mapper repo so you can use `--worktree` and skip GitHub for daily work.
@@ -67,9 +62,7 @@ Then:
 npm install
 ```
 
-For live AI labeling (not offline), also run `npm run build:indexer` (needs JDK + Gradle).
-
-Office Artifactory / npm mirrors should already be configured on your laptop (same as other projects). This repo has **no** `gradlew`.
+Office Artifactory / npm mirrors should already be configured on your laptop (same as other projects).
 
 Edit `registry/mapping-registry.yaml` to point at your mapper repo and class files. Optionally add `registry/schemas/{mapperId}.schema.json`.
 
@@ -95,13 +88,6 @@ Clear caches:
 
 ```powershell
 npm run cache:clear -- --mapper demo-ai-recognition-mapper
-```
-
-AST only (no AI):
-
-```powershell
-npm run ast -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo
 ```
 
 ---
@@ -141,8 +127,7 @@ npm run ui:serve
 
 ## Offline agent jobs (no model API / blocked office network)
 
-Offline mode does **not** require the Java indexer (`npm run build:indexer`) or JDK.
-You still need a mapper checkout via `--worktree` so export can fingerprint the Java source.
+Offline mode needs only Node.js and a mapper checkout (`--worktree`). Pass `--fields` so export knows which fields to label.
 
 `npm run label` now auto-detects when it can't reach the model API — no key set, **or**
 the live call fails (blocked network/proxy) — and exports an offline job instead of just
@@ -177,7 +162,7 @@ That prints a **VS Code step-by-step** block, including:
    npm run ui:serve
 ```
 
-`job.json` contains the **full mapper Java** (`sourceJava`), schema, and registry metadata — the agent does not need external files or the indexer.
+`job.json` contains the **full mapper Java** (`sourceJava`), schema, and registry metadata — the agent does not need external files.
 
 Opening `job.json` (under `.cache/agent-jobs/**`) auto-attaches
 `.github/instructions/kodiak-agent-label.instructions.md`, which tells Copilot Chat's agent
@@ -209,6 +194,5 @@ npm run ui:serve
 - [ ] `npm install`
 - [ ] Registry points at your mapper repo
 - [ ] `MODEL_API_KEY` (or style-specific key) in `.env` for live labeling; offline needs `--fields` + `--worktree` only
-- [ ] `npm run build:indexer` only if you use live `--with-ast` labeling
 - [ ] `npm run label -- --mapper … --worktree … --fields …`
 - [ ] `npm run ui:serve` and open the pipeline viewer

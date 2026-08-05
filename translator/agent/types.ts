@@ -22,7 +22,7 @@ export interface AgentJobField {
    * the agent finds the real setter/write in sourceJava).
    */
   javaTargetField: string;
-  /** JavaParser ops when export used --with-ast; omitted otherwise (not stubbed). */
+  /** Legacy optional hints from older offline jobs. */
   indexerOps?: unknown[];
 }
 

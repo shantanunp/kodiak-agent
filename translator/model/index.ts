@@ -45,10 +45,6 @@ export {
 
 export {
   discoverAndMerge,
-  mergeAstAndAiDiscovery,
-  mergeAstOnlyEscapeHatch,
-  preferRicherCode,
-  groupAst,
   type DiscoveryMeta,
   type DiscoverMergeResult,
 } from "./discoverMerge.js";
