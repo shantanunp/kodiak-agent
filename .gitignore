@@ -44,3 +44,4 @@ coverage/
 # TypeScript
 *.tsbuildinfo
 registry/mapping-registry.yaml
+CLAUDE.md
