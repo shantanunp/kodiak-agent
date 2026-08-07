@@ -225,6 +225,7 @@ export function buildLabelTasks(options: {
     mapperClass,
     targetClass,
     source: options.sourceJava,
+    worktree: options.worktree,
   });
 
   const adapter = adapterFor(language);
@@ -277,6 +278,13 @@ export function buildLabelTasks(options: {
   // POC assumption: one instance per nested type (typical for DTO builders).
   const extraSites: WriteSite[] = [];
   for (const ref of nestedTypes) {
+    const instances = [...options.sourceJava.matchAll(new RegExp(`new\\s+${ref.typeName}\\s*\\(`, "g"))].length;
+    if (instances > 1) {
+      diagnostics.push(
+        `${ref.pathPrefix}: type "${ref.typeName}" is instantiated ${instances} times — ` +
+          "write attribution assumes one instance per type and may merge them (see HANDOFF.md: multi-instance)",
+      );
+    }
     const nestedSites = adapter.findWriteSites(parsed, options.sourceJava, ref.typeName);
     for (const site of nestedSites) {
       extraSites.push({ ...site, targetField: `${ref.pathPrefix}.${site.targetField}` });

@@ -8,8 +8,9 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { LanguageAdapter, ParsedSource, WriteSite, WriteSlice } from "./types.js";
+import type { LanguageAdapter, ParsedSource, SourceMethod, WriteSite, WriteSlice } from "./types.js";
 import { javaAdapter } from "./adapters/java.js";
+import { findTypeFile } from "./resolveType.js";
 
 const ADAPTERS: Record<string, LanguageAdapter> = {
   [javaAdapter.language]: javaAdapter,
@@ -99,23 +100,41 @@ function calledHelperNames(expression: string): string[] {
 }
 
 function collectClosure(
-  parsed: ParsedSource,
-  mapperClass: string,
+  pool: SourceMethod[],
+  adapter: LanguageAdapter,
+  worktree: string | undefined,
   expression: string,
   depth: number,
   visited: Set<string>,
   out: Array<{ name: string; text: string }>,
 ): void {
   if (depth > MAX_CLOSURE_DEPTH) return;
+
+  // Bare calls -> mapper class + inherited pool.
   for (const name of calledHelperNames(expression)) {
     if (visited.has(name)) continue;
-    const helper = parsed.methods.find(
-      (m) => m.name === name && m.className === mapperClass,
-    );
+    const helper = pool.find((m) => m.name === name);
     if (!helper) continue;
     visited.add(name);
     out.push({ name: helper.name, text: helper.fullText });
-    collectClosure(parsed, mapperClass, helper.bodyText, depth + 1, visited, out);
+    collectClosure(pool, adapter, worktree, helper.bodyText, depth + 1, visited, out);
+  }
+
+  // Qualified calls -> resolve the class file cross-file and inline the method.
+  if (!worktree) return;
+  for (const q of qualifiedCalls(expression)) {
+    const key = `${q.cls}.${q.method}`;
+    if (visited.has(key)) continue;
+    const file = findTypeFile(worktree, q.cls);
+    if (!file) continue;
+    const other = parseFileCached(adapter, file);
+    const helper = other?.methods.find(
+      (m) => m.name === q.method && m.className === q.cls,
+    );
+    if (!helper) continue;
+    visited.add(key);
+    out.push({ name: key, text: helper.fullText });
+    collectClosure(pool, adapter, worktree, helper.bodyText, depth + 1, visited, out);
   }
 }
 
@@ -124,16 +143,74 @@ export interface ScanResult {
   slices: WriteSlice[];
 }
 
+// Per-run parse cache for cross-file resolution (keyed by absolute path).
+const parseCache = new Map<string, ParsedSource>();
+
+function parseFileCached(adapter: LanguageAdapter, file: string): ParsedSource | null {
+  const hit = parseCache.get(file);
+  if (hit) return hit;
+  try {
+    const parsed = adapter.parse(file, readFileSync(file, "utf8"));
+    parseCache.set(file, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Helper pool: methods callable by bare name from the mapper — its own class
+ * plus superclass chain (resolved cross-file via extends, depth-capped).
+ */
+function buildHelperPool(
+  adapter: LanguageAdapter,
+  parsed: ParsedSource,
+  source: string,
+  mapperClass: string,
+  worktree?: string,
+): SourceMethod[] {
+  const pool = parsed.methods.filter((m) => m.className === mapperClass);
+  if (!worktree) return pool;
+  let cls = mapperClass;
+  let src = source;
+  for (let hop = 0; hop < 3; hop++) {
+    const ext = new RegExp(`class\\s+${cls}\\s+extends\\s+([\\w.]+)`).exec(src);
+    if (!ext) break;
+    const superSimple = ext[1]!.split(".").pop()!;
+    const file = findTypeFile(worktree, ext[1]!);
+    if (!file) break;
+    const superParsed = parseFileCached(adapter, file);
+    if (!superParsed) break;
+    pool.push(...superParsed.methods.filter((m) => m.className === superSimple));
+    cls = superSimple;
+    src = readFileSync(file, "utf8");
+  }
+  return pool;
+}
+
+/** Qualified static-style calls in an expression: Utils.method( -> [Utils, method]. */
+function qualifiedCalls(expression: string): Array<{ cls: string; method: string }> {
+  const out: Array<{ cls: string; method: string }> = [];
+  for (const m of expression.matchAll(/(?<![\w.])([A-Z]\w*)\.(\w+)\s*\(/g)) {
+    out.push({ cls: m[1]!, method: m[2]! });
+  }
+  return out;
+}
+
 export function scanWriteSites(options: {
   filePath: string;
   language: string;
   mapperClass: string;
   targetClass: string;
   source?: string;
+  /** Enables cross-file helper closure (static utils, superclass helpers). */
+  worktree?: string;
 }): ScanResult {
   const adapter = adapterFor(options.language);
   const source = options.source ?? readFileSync(options.filePath, "utf8");
+  parseCache.clear();
   const parsed = adapter.parse(options.filePath, source);
+  const pool = buildHelperPool(adapter, parsed, source, options.mapperClass, options.worktree);
 
   const sites: WriteSite[] = adapter.findWriteSites(parsed, source, options.targetClass);
 
@@ -148,7 +225,7 @@ export function scanWriteSites(options: {
     );
 
     const helperClosure: Array<{ name: string; text: string }> = [];
-    collectClosure(parsed, options.mapperClass, combinedText, 0, new Set(), helperClosure);
+    collectClosure(pool, adapter, options.worktree, combinedText, 0, new Set(), helperClosure);
 
     const sliceText = [
       `// write site (line ${site.line}, in ${site.inMethod}, via ${site.via})`,

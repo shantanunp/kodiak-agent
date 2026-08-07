@@ -90,4 +90,4 @@ Online and offline are therefore the same pipeline with a different driver in th
 | Slice-enriched offline jobs + gap-job re-export on import | Built |
 | Additional language adapters | Later |
 
-Plan, decision log, and detailed progress: [PROJECT.md](./PROJECT.md).
+Plan, decision log, and detailed progress: [PROJECT.md](./PROJECT.md). Continuation guide for the next agent: [HANDOFF.md](./HANDOFF.md).

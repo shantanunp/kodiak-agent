@@ -490,6 +490,30 @@ async function main(): Promise<void> {
 
   let promoted: string | undefined;
   if (values.promote && sourceJava && pipeline.resultSource !== "verified") {
+    // Audit gate applies to the legacy path too: refuse when the deterministic
+    // checklist says fields are unresolved.
+    try {
+      const reg = loadRegistry(values.registry!);
+      const me = reg.mappers.find((m) => m.id === (pipeline.mapperId ?? values.mapper));
+      if (me) {
+        const gate = buildLabelTasks({
+          mapper: me, sourceJava,
+          worktree: values.worktree ?? inferWorktree(undefined, me.sourceFile) ?? undefined,
+        });
+        if (gate.report.unresolved > 0) {
+          console.error(
+            `Refusing to promote: audit gate NOT PASSED — unresolved: ` +
+              gate.report.checklist.filter((c) => c.state === "unresolved").map((c) => c.field).join(", "),
+          );
+          promoted = undefined;
+          values.promote = false;
+        }
+      }
+    } catch {
+      // analyzer unavailable for this source — legacy promote proceeds as before
+    }
+  }
+  if (values.promote && sourceJava && pipeline.resultSource !== "verified") {
     const vfp = computeVerifiedFingerprint({
       sourceJava,
       schemaJson: loadSchemaJson(pipeline.mapperId),

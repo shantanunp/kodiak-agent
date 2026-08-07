@@ -63,16 +63,18 @@ Companion to [ARCHITECTURE.md](./ARCHITECTURE.md) (the finalized design). This f
 | Worktree inference from resolved source path (UI/exports work without MAPPER_WORKTREE) | `analyzer/resolveType.ts` | agentloop tests |
 | Flatten diagnostics — every skipped expansion named in API/CLI/viewer | `translator/agentloop/tasks.ts` | viewer expansion notes |
 | Getter-only (JAXB/generated) target classes contribute fields | `analyzer/adapters/java.ts` | agentloop tests |
+| Cross-file helper closure: static utils + superclass chain inlined into slices | `analyzer/scanWriteSites.ts` | agentloop tests |
+| Viewer bulk-label (sequential, stoppable) + unresolved triage grouped by cause | `ui/pipeline-viewer/` | open viewer |
+| Audit gate wired into legacy --promote path; multi-instance detection diagnostic | `translator/cli.ts`, `tasks.ts` | label --promote |
+| HANDOFF.md: invariants, repo map, done/pending checkboxes for the next agent | `HANDOFF.md` | read it |
 | All suites | — | `npm run test:all` |
 
 ### Todo
 
 - Multiple instances of the same nested type (attribution currently assumes one)
-- Cross-file helper closure (helpers in other classes inlined into slices)
 - Python language adapter (tree-sitter core, per-language queries)
 - Real defect-tracker integration (replace `defects.jsonl` + mock KOD ids)
 - Viewer: bulk "label all mapped fields" action with progress; unresolved-field triage view
-- Wire the audit gate into `--promote` on the legacy (non-analyzer) label path
 
 ## Log
 
@@ -84,3 +86,4 @@ Companion to [ARCHITECTURE.md](./ARCHITECTURE.md) (the finalized design). This f
 - **Increment 6 (field report)** — collections flattened (`parties[].roleCode`); viewer surfaces checklist failures with a MAPPER_WORKTREE hint instead of silently hiding; `gemini` vendor alias (OpenAI-compat endpoint, config-only switch, zero SDKs); wire-format tests for claude/openai/gemini + retry (stubbed fetch, no network); `npm run e2e:online` real-API smoke (analyzer -> loop -> gate -> temp store round trip).
 - **Increment 7 (field report)** — viewer field panel was silently missing (markup-match bug); now built dynamically at runtime, immune to markup drift. Offline steering: `judge:export`/`judge:import` jobs with the same mechanically-checked citation rigor as online (a bogus agreeable verdict cannot overwrite a good correction — tested); in offline mode the viewer auto-exports a single-field labeling job on field click and a judge job on correction submit, showing copy-paste steps inline. Network policy unchanged.
 - **Increment 8 (field report)** — single-message checklist on the real mapper diagnosed as missing worktree at the checklist endpoint (CLI always passed --worktree; the UI relied on unset MAPPER_WORKTREE, so nested flattening silently skipped). Fixed threefold: worktree now inferred automatically from the resolved mapper source path (UI, exports, judge -- no env var needed for reads); every non-expanded nested type now emits a named diagnostic surfaced in the API, CLI, and viewer (expansion notes under the field list) so flattening can never fail silently again; getter-only generated classes (JAXB-style) now contribute fields via get/is accessor union. Network policy unchanged.
+- **Increment 9 (handoff)** — cross-file helper closure (static utility classes and superclass-chain helpers resolved via findTypeFile and inlined into slices, per-run parse cache); viewer bulk-label with progress/stop and unresolved triage grouped by opaque-call cause; audit gate now also blocks the legacy --promote path; multi-instance nested types detected and diagnosed (full attribution documented in HANDOFF.md as the next implementation); HANDOFF.md written with invariants, repo map, and done/pending checkboxes so any agent can continue. Network policy unchanged and test-enforced.

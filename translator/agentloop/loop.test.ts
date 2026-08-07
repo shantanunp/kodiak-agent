@@ -337,3 +337,47 @@ test("diagnostics: missing worktree and unresolvable types are named, not silent
     "missing worktree is called out");
   void src;
 });
+
+test("cross-file closure: static util and superclass helpers inlined into slices", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-xfile-"));
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  const utilDir = join(wt, "src/main/java/com/acme/util");
+  mkdirSync(mapDir, { recursive: true });
+  mkdirSync(utilDir, { recursive: true });
+  writeFileSync(join(utilDir, "TextUtils.java"), `package com.acme.util;
+public class TextUtils {
+  public static String squeeze(String v) { return v.replaceAll("\\\\s+", ""); }
+}`);
+  writeFileSync(join(mapDir, "BaseMapper.java"), `package com.acme.mapper;
+public abstract class BaseMapper {
+  protected String pad(String v) { return v == null ? "" : v; }
+}`);
+  const mapperFile = join(mapDir, "XMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.util.TextUtils;
+public class XMapper extends BaseMapper {
+  public Out map(In in) {
+    Out out = new Out();
+    out.setCode(TextUtils.squeeze(pad(in.getRaw())));
+    return out;
+  }
+}
+class Out { private String code; public void setCode(String v){this.code=v;} }`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "xfile", sourceFile: "src/main/java/com/acme/mapper/XMapper.java",
+      class: "com.acme.mapper.XMapper", entryMethod: "map",
+      sourceType: "In", targetType: "Out",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+
+  const code = tasks.tasks.find((t) => t.field === "code")!;
+  assert.ok(code.sliceText.includes("TextUtils.squeeze"), "qualified call named");
+  assert.ok(code.sliceText.includes('replaceAll'), "static util BODY inlined cross-file");
+  assert.ok(code.sliceText.includes("v == null"), "superclass helper body inlined");
+  rmSync(wt, { recursive: true, force: true });
+});
