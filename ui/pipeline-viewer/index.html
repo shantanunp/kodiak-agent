@@ -438,6 +438,24 @@ document.getElementById('aiInput').addEventListener('keydown', (e) => {
 });
 
 
+function ensureFieldPanel(){
+  let el = document.getElementById('fieldlist');
+  if(el) return el;
+  const canvas = document.getElementById('canvas');
+  const layout = document.createElement('div');
+  layout.className = 'layout';
+  canvas.parentNode.insertBefore(layout, canvas);
+  const aside = document.createElement('aside');
+  aside.className = 'fieldlist';
+  aside.id = 'fieldlist';
+  aside.innerHTML = `<h2>Target fields</h2><div id="fieldItems"></div>
+    <div id="flDiag"></div>
+    <div class="fl-legend">Badge: analyzer state.&nbsp; Dot: label — <span style="color:var(--source)">verified</span> · <span style="color:var(--op)">corrected</span> · <span style="color:var(--target)">cached</span> · gray = labeled on click.</div>`;
+  layout.appendChild(aside);
+  layout.appendChild(canvas);
+  return aside;
+}
+
 let checklist = null;
 let activeField = null;
 const fieldPipelines = {};   // field -> viewSteps (loaded on demand)
@@ -448,8 +466,12 @@ async function loadChecklist(){
   if(!currentMapper) return;
   try{
     const res = await fetch(`/api/checklist?mapper=${encodeURIComponent(currentMapper)}&t=${Date.now()}`);
-    if(!res.ok) return;
-    checklist = await res.json();
+    const body = await res.json();
+    if(!res.ok){ showChecklistError(body.error||`HTTP ${res.status}`); return; }
+    checklist = body;
+    if(Array.isArray(body.diagnostics) && body.diagnostics.length){
+      console.warn('checklist diagnostics:', body.diagnostics);
+    }
     // Seed pipelines already present in the last full view, keyed by leaf.
     if(Array.isArray(viewData?.fields)){
       for(const f of viewData.fields){
@@ -457,12 +479,20 @@ async function loadChecklist(){
       }
     }
     renderFieldList();
-  }catch{ /* checklist is an enhancement; viewer still works without it */ }
+  }catch(e){ showChecklistError(e.message); }
+}
+
+function showChecklistError(msg){
+  const el = ensureFieldPanel();
+  el.style.display = '';
+  document.getElementById('fieldItems').innerHTML =
+    `<div style="font-size:12px;color:var(--cond);line-height:1.5;padding:6px">Checklist unavailable: ${esc(msg)}<br><br>
+     Set <b>MAPPER_WORKTREE</b> in .env (path to your mapper checkout) and restart <span style="font-family:var(--font-mono)">npm run ui:serve</span>.</div>`;
 }
 
 function renderFieldList(){
   if(!checklist?.fields?.length) return;
-  const el = document.getElementById('fieldlist');
+  const el = ensureFieldPanel();
   el.style.display = '';
   document.getElementById('fieldItems').innerHTML = checklist.fields.map(f => `
     <button type="button" class="fielditem${activeField===f.field?' active':''}" data-field="${esc(f.field)}" title="${esc(f.note||'')}">
@@ -473,6 +503,13 @@ function renderFieldList(){
   document.querySelectorAll('.fielditem').forEach(btn => {
     btn.addEventListener('click', () => openField(btn.getAttribute('data-field')));
   });
+  const diagEl = document.getElementById('flDiag');
+  if(diagEl){
+    const diags = checklist.diagnostics||[];
+    diagEl.innerHTML = diags.length
+      ? `<details style="margin:8px 4px 0;font-size:11px;color:var(--cond)"><summary style="cursor:pointer">${diags.length} expansion note(s)</summary><div style="white-space:pre-wrap;line-height:1.5;margin-top:6px">${diags.map(esc).join('\n\n')}</div></details>`
+      : '';
+  }
 }
 
 function renderFieldSteps(field, steps, sourceNote){
@@ -507,6 +544,13 @@ async function openField(field){
       body:JSON.stringify({mapperId:currentMapper, field})});
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+    if(data.outcome==='offline-exported'){
+      renderFieldSteps(field, null,
+        'Offline mode — a single-field job was exported for your editor agent:');
+      document.getElementById('canvas').insertAdjacentHTML('beforeend',
+        `<div class="code-block" style="margin-top:10px;white-space:pre-wrap">${esc((data.steps||[]).join('\n'))}</div>`);
+      return;
+    }
     if(data.state==='unmapped'){
       renderFieldSteps(field, null, `Explicitly unmapped — ${data.note||'no write in the source'}.`);
       return;
@@ -545,7 +589,10 @@ function wireCorrectionBox(field, currentSteps){
         body:JSON.stringify({mapperId:currentMapper, field, claim, currentPipeline:currentSteps})});
       const data = await res.json();
       if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
-      if(data.outcome==='corrected'){
+      if(data.outcome==='offline-exported'){
+        box.innerHTML = `<div class="verdict"><b>Offline mode — judge job exported.</b><br>
+          <span style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11.5px">${esc((data.steps||[]).join('\n'))}</span></div>`;
+      } else if(data.outcome==='corrected'){
         fieldPipelines[fieldLeaf(field).toLowerCase()] = data.viewSteps||[];
         renderFieldSteps(field, data.viewSteps||[],
           'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');

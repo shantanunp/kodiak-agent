@@ -67,3 +67,20 @@ export function findTypeFile(
   }
   return walkFor(worktree, fileName, 0);
 }
+
+/**
+ * Infer the worktree root from a resolved mapper source path:
+ * "/wt/src/main/java/com/x/M.java" + sourceFile "src/main/java/com/x/M.java"
+ * -> "/wt". Removes the need to set MAPPER_WORKTREE for reads.
+ */
+export function inferWorktree(
+  sourcePath: string | undefined,
+  mapperSourceFile: string,
+): string | null {
+  if (!sourcePath) return null;
+  const norm = sourcePath.replace(/\\/g, "/");
+  const rel = mapperSourceFile.replace(/\\/g, "/");
+  if (!norm.endsWith(rel)) return null;
+  const root = norm.slice(0, norm.length - rel.length).replace(/\/$/, "");
+  return root || null;
+}

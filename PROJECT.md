@@ -34,6 +34,8 @@ Companion to [ARCHITECTURE.md](./ARCHITECTURE.md) (the finalized design). This f
 
 **100-field targets / UI scale.** Users click fields one by one and may never need most pipelines. Decision: the viewer loads the *deterministic checklist* instantly (no model calls — fine at 100+ fields) and labels a field only when opened, with precedence verified → cache → model. Repeat opens are free.
 
+**Model vendor switching (no SDKs).** All model calls are plain `fetch` against each vendor's HTTP API — no vendor SDKs anywhere, so switching is config-only in `.env`: `MODEL_API_STYLE=claude|openai|gemini|copilot` + `MODEL_API_KEY` (+ optional `MODEL_BASE_URL`/`MODEL_NAME`). `gemini` is an alias for Google's OpenAI-compatible endpoint. The only SDK in the project is the optional MCP client for the read-only GitHub fetcher — never used for model calls. When a native tool-use loop is added later, it will also be raw HTTP (Anthropic and OpenAI tool schemas differ slightly; that difference lives in `provider.ts`, still config-switched). Wire formats are pinned by `npm run test:wire` (stubbed fetch — no network). Real-API path: `npm run e2e:online`.
+
 **Network policy.** No external calls of any kind except: `npm install`, the model API (only when a key is configured), and GitHub (only with `--remote`). The UI is fully self-contained — no CDN fonts/scripts/styles — enforced by `npm run test:policy`.
 
 ## Progress
@@ -52,15 +54,33 @@ Companion to [ARCHITECTURE.md](./ARCHITECTURE.md) (the finalized design). This f
 | Checklist API + on-demand per-field labeling UI | `ui/serve.ts`, `ui/pipeline-viewer/` | `/api/checklist`, `/api/label-field` |
 | Steering judge + verified-correction + mock defects | `translator/judge/` | `npm run test:judge` |
 | No-external-network policy test | `analyzer/noExternal.test.ts` | `npm run test:policy` |
+| Collections flattening (`List<X>` -> `path[].field`, scalar-element lists stay leaves) | `translator/agentloop/tasks.ts` | agentloop tests |
+| Vendor-switch wire tests (claude/openai/gemini alias/retry, stubbed fetch) | `translator/model/provider.wire.test.ts` | `npm run test:wire` |
+| Online E2E smoke against the real configured model | `translator/e2e/onlineSmoke.ts` | `npm run e2e:online` |
+| Viewer surfaces checklist errors (MAPPER_WORKTREE hint) instead of hiding | `ui/pipeline-viewer/` | open viewer without worktree |
+| Offline steering: judge export/import jobs, UI auto-exports single-field + judge jobs when no key | `translator/judge/offline.ts`, `judge:export` / `judge:import` | `npm run test:judge` |
+| Viewer field panel created dynamically (fixes silently-missing panel) | `ui/pipeline-viewer/` | open viewer |
+| Worktree inference from resolved source path (UI/exports work without MAPPER_WORKTREE) | `analyzer/resolveType.ts` | agentloop tests |
+| Flatten diagnostics — every skipped expansion named in API/CLI/viewer | `translator/agentloop/tasks.ts` | viewer expansion notes |
+| Getter-only (JAXB/generated) target classes contribute fields | `analyzer/adapters/java.ts` | agentloop tests |
 | All suites | — | `npm run test:all` |
 
 ### Todo
 
-- Offline steering: judge as an exported job (today the judge needs the model API; offline offices raise defects manually)
-- Collections in nested flattening (`List<Item>` element fields as `items[].x`)
 - Multiple instances of the same nested type (attribution currently assumes one)
 - Cross-file helper closure (helpers in other classes inlined into slices)
 - Python language adapter (tree-sitter core, per-language queries)
 - Real defect-tracker integration (replace `defects.jsonl` + mock KOD ids)
 - Viewer: bulk "label all mapped fields" action with progress; unresolved-field triage view
 - Wire the audit gate into `--promote` on the legacy (non-analyzer) label path
+
+## Log
+
+- **Increment 1** — analyzer: parser-backed write-site scanner, local dataflow tracing, helper-closure slices, audit gate (mapped/unmapped/unresolved, opaque escapes), CLI + tests.
+- **Increment 2** — verified store: git-tracked, content-only fingerprint, precedence above all caches, `--promote`, correction stickiness, convergence context for changed sources.
+- **Increment 3** — agent loop: slice-fed per-field labeling, escalation pass for unresolved, gate-controlled promote; offline jobs enriched with checklist + slices; gap-job re-export on import.
+- **Increment 4 (field report)** — split-file targets: package-path/walk type resolution, `var` receivers, write-site fallback checklist with explicit weaker marking.
+- **Increment 5 (field report)** — nested targets flattened to dotted paths; nested writes path-prefixed; on-demand UI (`/api/checklist` instant for 100+ fields, `/api/label-field` per click); steering judge with mechanically verified citations, verified-store corrections, mock KOD defects + `registry/defects.jsonl`; no-external-network policy test.
+- **Increment 6 (field report)** — collections flattened (`parties[].roleCode`); viewer surfaces checklist failures with a MAPPER_WORKTREE hint instead of silently hiding; `gemini` vendor alias (OpenAI-compat endpoint, config-only switch, zero SDKs); wire-format tests for claude/openai/gemini + retry (stubbed fetch, no network); `npm run e2e:online` real-API smoke (analyzer -> loop -> gate -> temp store round trip).
+- **Increment 7 (field report)** — viewer field panel was silently missing (markup-match bug); now built dynamically at runtime, immune to markup drift. Offline steering: `judge:export`/`judge:import` jobs with the same mechanically-checked citation rigor as online (a bogus agreeable verdict cannot overwrite a good correction — tested); in offline mode the viewer auto-exports a single-field labeling job on field click and a judge job on correction submit, showing copy-paste steps inline. Network policy unchanged.
+- **Increment 8 (field report)** — single-message checklist on the real mapper diagnosed as missing worktree at the checklist endpoint (CLI always passed --worktree; the UI relied on unset MAPPER_WORKTREE, so nested flattening silently skipped). Fixed threefold: worktree now inferred automatically from the resolved mapper source path (UI, exports, judge -- no env var needed for reads); every non-expanded nested type now emits a named diagnostic surfaced in the API, CLI, and viewer (expansion notes under the field list) so flattening can never fail silently again; getter-only generated classes (JAXB-style) now contribute fields via get/is accessor union. Network policy unchanged.

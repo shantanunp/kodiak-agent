@@ -41,6 +41,7 @@ import {
   promoteToVerified,
 } from "./verified/store.js";
 import { buildLabelTasks } from "./agentloop/tasks.js";
+import { inferWorktree } from "../analyzer/resolveType.js";
 import { runAgentLoop, toPipelineJson } from "./agentloop/loop.js";
 import { createModelProvider, loadModelConfig } from "./model/index.js";
 import { schemaContextForLabeler } from "../schema/io.js";
@@ -351,7 +352,10 @@ async function main(): Promise<void> {
     const mapperEntry = registry.mappers.find((m) => m.id === values.mapper)!;
     let tasks;
     try {
-      tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava, worktree: values.worktree });
+      tasks = buildLabelTasks({
+        mapper: mapperEntry, sourceJava,
+        worktree: values.worktree, // CLI always resolves via explicit worktree/local/remote
+      });
     } catch (err) {
       console.error(
         `Analyzer could not parse source (${(err as Error).message}); ` +

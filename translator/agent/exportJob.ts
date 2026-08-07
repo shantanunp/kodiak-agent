@@ -15,6 +15,7 @@ import { loadRegistry } from "../../src/registry/loadRegistry.js";
 import { resolveMapperAst } from "../resolvePipeline.js";
 import { buildOfflineFieldGroups } from "./offlineFields.js";
 import { buildLabelTasks } from "../agentloop/tasks.js";
+import { inferWorktree } from "../../analyzer/resolveType.js";
 import type { LabelTasks } from "../agentloop/tasks.js";
 import {
   FIELD_MAPPING_PROMPT,
@@ -99,7 +100,11 @@ export async function exportAgentJob(
   // selector-only groups when the source cannot be parsed.
   let tasks: LabelTasks | null = null;
   try {
-    tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava, worktree });
+    tasks = buildLabelTasks({
+      mapper: mapperEntry,
+      sourceJava,
+      worktree: worktree ?? inferWorktree(resolved.sourcePath, mapperEntry.sourceFile) ?? undefined,
+    });
   } catch (err) {
     console.error(
       `Analyzer could not parse source (${(err as Error).message}); exporting selector-only job.`,

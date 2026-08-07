@@ -85,6 +85,72 @@ export function verifyCitations(evidence: string, sliceText: string, source: str
   );
 }
 
+export interface RawVerdictInput {
+  agree: unknown;
+  evidence?: unknown;
+  reason?: unknown;
+  pipeline?: unknown;
+}
+
+/**
+ * Shared verdict application — used by the online judge AND the offline
+ * judge:import. The citation check runs here, so an offline agent's agreeable
+ * verdict without checkable evidence is rejected exactly like an online one.
+ */
+export function applyJudgeVerdict(options: {
+  mapperId: string;
+  fingerprint: string;
+  field: string;
+  sliceText: string;
+  sourceJava: string;
+  userClaim: string;
+  raw: RawVerdictInput;
+}):
+  | { outcome: "corrected"; verdict: JudgeVerdict; pipeline: unknown[] }
+  | { outcome: "rejected"; verdict: JudgeVerdict; defectId: string }
+  | { outcome: "invalid"; verdict: JudgeVerdict } {
+  const raw = options.raw;
+  const verdict: JudgeVerdict = {
+    agree: Boolean(raw.agree),
+    evidence: typeof raw.evidence === "string" ? raw.evidence : "",
+    reason: typeof raw.reason === "string" ? raw.reason : undefined,
+    pipeline: Array.isArray(raw.pipeline)
+      ? normalizeFieldMappingResponse({ recognized: true, pipeline: raw.pipeline }).pipeline
+      : undefined,
+    citationsVerified: verifyCitations(
+      typeof raw.evidence === "string" ? raw.evidence : "",
+      options.sliceText,
+      options.sourceJava,
+    ),
+  };
+
+  if (verdict.agree && verdict.pipeline?.length) {
+    if (!verdict.citationsVerified) {
+      return { outcome: "invalid", verdict };
+    }
+    const steps = verdict.pipeline.map((op) => fromPipelineOp(op, verdict.reason, "model"));
+    upsertCorrectedField({
+      mapperId: options.mapperId,
+      fingerprint: options.fingerprint,
+      targetField: options.field,
+      pipeline: steps,
+      userClaim: options.userClaim,
+      judgeEvidence: verdict.evidence,
+    });
+    return { outcome: "corrected", verdict, pipeline: steps };
+  }
+
+  const defectId = mockDefectId(`${options.mapperId}:${options.field}:${options.userClaim}`);
+  logDefect({
+    mapperId: options.mapperId,
+    field: options.field,
+    userClaim: options.userClaim,
+    judgeEvidence: verdict.evidence,
+    defectId,
+  });
+  return { outcome: "rejected", verdict, defectId };
+}
+
 export async function judgeSuggestion(options: {
   provider: ModelProvider;
   mapperId: string;
@@ -118,44 +184,13 @@ export async function judgeSuggestion(options: {
     raw = { agree: false, evidence: "", reason: `invalid judge JSON: ${text.slice(0, 120)}` };
   }
 
-  const verdict: JudgeVerdict = {
-    agree: Boolean(raw.agree),
-    evidence: typeof raw.evidence === "string" ? raw.evidence : "",
-    reason: typeof raw.reason === "string" ? raw.reason : undefined,
-    pipeline: Array.isArray(raw.pipeline)
-      ? normalizeFieldMappingResponse({ recognized: true, pipeline: raw.pipeline }).pipeline
-      : undefined,
-    citationsVerified: verifyCitations(
-      typeof raw.evidence === "string" ? raw.evidence : "",
-      options.sliceText,
-      options.sourceJava,
-    ),
-  };
-
-  if (verdict.agree && verdict.pipeline?.length) {
-    if (!verdict.citationsVerified) {
-      // Agreement without checkable evidence never reaches the store.
-      return { outcome: "invalid", verdict };
-    }
-    const steps = verdict.pipeline.map((op) => fromPipelineOp(op, verdict.reason, "model"));
-    upsertCorrectedField({
-      mapperId: options.mapperId,
-      fingerprint: options.fingerprint,
-      targetField: options.field,
-      pipeline: steps,
-      userClaim: options.userClaim,
-      judgeEvidence: verdict.evidence,
-    });
-    return { outcome: "corrected", verdict, pipeline: steps };
-  }
-
-  const defectId = mockDefectId(`${options.mapperId}:${options.field}:${options.userClaim}`);
-  logDefect({
+  return applyJudgeVerdict({
     mapperId: options.mapperId,
+    fingerprint: options.fingerprint,
     field: options.field,
+    sliceText: options.sliceText,
+    sourceJava: options.sourceJava,
     userClaim: options.userClaim,
-    judgeEvidence: verdict.evidence,
-    defectId,
+    raw: raw as unknown as RawVerdictInput,
   });
-  return { outcome: "rejected", verdict, defectId };
 }

@@ -96,3 +96,77 @@ test("disagreement -> mock defect id + defects.jsonl record, store untouched", a
   // deterministic id for the same claim
   assert.equal(mockDefectId("judge-test:recipientFirst:it should uppercase the name"), rec.defectId);
 });
+
+test("offline judge round trip: export -> agent verdict -> import applies with same rigor", async () => {
+  const { exportJudgeJob, importJudgeResult } = await import("./offline.js");
+  const { writeFileSync } = await import("node:fs");
+
+  // registry temp entry via existing fixture mapper
+  const exported = await exportJudgeJob({
+    mapper: "judge-offline-test",
+    field: "trackingDigits",
+    claim: "there should be a trim before keeping digits",
+    worktree: ".",
+    registry: "/tmp/judge-offline-registry.yaml",
+  }).catch(async () => {
+    // build a minimal registry on the fly, then retry
+    writeFileSync("/tmp/judge-offline-registry.yaml", `repo: "x/y"
+branch: "main"
+scope: ["fixtures/**/*.java"]
+mappers:
+  - id: judge-offline-test
+    sourceFile: fixtures/ShipmentNoticeMapper.java
+    class: com.kodiak.fixtures.ShipmentNoticeMapper
+    entryMethod: map
+    sourceType: com.kodiak.fixtures.ShipmentNoticeMapper$Shipment
+    targetType: com.kodiak.fixtures.ShipmentNoticeMapper$DeliveryNotice
+`);
+    const { exportJudgeJob: e2 } = await import("./offline.js");
+    return e2({
+      mapper: "judge-offline-test",
+      field: "trackingDigits",
+      claim: "there should be a trim before keeping digits",
+      worktree: ".",
+      registry: "/tmp/judge-offline-registry.yaml",
+    });
+  });
+
+  const job = JSON.parse(readFileSync(exported.jobFile, "utf8"));
+  assert.equal(job.kind, "judge");
+  assert.ok(job.sliceText.includes("keepDigits"), "job carries the slice");
+  assert.ok(job.systemPrompt.includes("verification judge"));
+
+  // Agent agrees WITH checkable evidence (quotes real code)
+  writeFileSync(exported.resultFile, JSON.stringify({
+    mapperId: job.mapperId, fingerprint: job.fingerprint, field: job.field,
+    verdict: {
+      agree: true,
+      evidence: 'the helper calls "keepDigits(trimValue(raw))" so trim precedes digit filtering',
+      reason: "trim is already in the chain",
+      pipeline: [
+        { kind: "read", sourceField: "shipment.refCode", summary: "Reads ref." },
+        { kind: "transform", op: "trim", summary: "Trims." },
+        { kind: "transform", op: "keepDigits", summary: "Digits only." },
+      ],
+    },
+  }));
+
+  const outcome = importJudgeResult(exported.resultFile);
+  assert.equal(outcome.outcome, "corrected");
+  const entry = getVerified(job.mapperId, job.fingerprint)!;
+  const f = entry.fields.find((x) => x.targetField === "trackingDigits")!;
+  assert.equal(f.status, "user-corrected");
+
+  // Agent agrees WITHOUT checkable evidence -> import refuses, store untouched
+  writeFileSync(exported.resultFile, JSON.stringify({
+    mapperId: job.mapperId, fingerprint: job.fingerprint, field: job.field,
+    verdict: { agree: true, evidence: "the user is clearly right",
+      pipeline: [{ kind: "read", sourceField: "x", summary: "." }] },
+  }));
+  const invalid = importJudgeResult(exported.resultFile);
+  assert.equal(invalid.outcome, "invalid", "offline import enforces citation check too");
+  const still = getVerified(job.mapperId, job.fingerprint)!;
+  assert.equal(
+    still.fields.find((x) => x.targetField === "trackingDigits")!.pipeline.length, 3,
+    "bogus verdict did not overwrite the good correction");
+});

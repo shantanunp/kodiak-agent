@@ -25,7 +25,11 @@
     "test:agentloop": "tsx --test translator/agentloop/loop.test.ts",
     "test:judge": "tsx --test translator/judge/judge.test.ts",
     "test:policy": "tsx --test analyzer/noExternal.test.ts",
-    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy"
+    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy && npm run test:wire",
+    "test:wire": "tsx --test translator/model/provider.wire.test.ts",
+    "e2e:online": "tsx translator/e2e/onlineSmoke.ts",
+    "judge:export": "tsx translator/judge/offline.ts",
+    "judge:import": "tsx translator/judge/offline.ts"
   },
   "engines": {
     "node": ">=20"

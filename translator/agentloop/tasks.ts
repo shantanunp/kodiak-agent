@@ -40,6 +40,8 @@ export interface LabelTasks {
   checklistSource: "target-type" | "write-sites";
   /** File the target type was read from, when found outside the mapper file. */
   targetTypeFile?: string;
+  /** Human-readable notes on why nested expansion did or didn't happen. */
+  diagnostics: string[];
 }
 
 /** "com.acme.dto.Out$Notice" -> "Notice"; "Notice" -> "Notice". */
@@ -62,8 +64,18 @@ const SCALAR_TYPES = new Set([
 function isScalarType(type?: string): boolean {
   if (!type) return true;
   const t = type.trim();
-  if (t.includes("<")) return true; // collections: not expanded in this POC
+  if (t.includes("<")) return true; // handled by collectionElementType first
   return SCALAR_TYPES.has(t.replace(/\[\]$/, "").toLowerCase());
+}
+
+/** "List<com.a.Item>" / "Set<Item>" / "Item[]" -> element type, else null. */
+function collectionElementType(type?: string): string | null {
+  if (!type) return null;
+  const t = type.trim();
+  const generic = t.match(/^(?:java\.util\.)?(?:List|Set|Collection|ArrayList|LinkedList)\s*<\s*([\w.$]+)\s*>$/);
+  if (generic) return generic[1]!;
+  if (t.endsWith("[]")) return t.slice(0, -2).trim();
+  return null;
 }
 
 export interface NestedTypeRef {
@@ -88,25 +100,83 @@ function flattenTargetType(options: {
   depth: number;
   visitedTypes: Set<string>;
   nested: NestedTypeRef[];
+  diagnostics: string[];
 }): SourceField[] {
-  const { adapter, worktree, typeName, prefix, depth, visitedTypes, nested } = options;
+  const { adapter, worktree, typeName, prefix, depth, visitedTypes, nested, diagnostics } = options;
   const parsed = adapter.parse(options.typeFilePath, options.typeSource);
   const fields = adapter.targetFields(parsed, typeName);
   const out: SourceField[] = [];
 
   for (const f of fields) {
     const dotted = prefix ? `${prefix}.${f.name}` : f.name;
-    if (isScalarType(f.type) || depth >= MAX_NEST_DEPTH || !worktree) {
+
+    // Collections: expand the ELEMENT type under "path[]." when it is a
+    // resolvable project class; scalar-element collections stay a leaf.
+    const elementType = collectionElementType(f.type);
+    if (elementType && depth < MAX_NEST_DEPTH && worktree && !isScalarType(elementType)) {
+      const elemSimple = simpleTypeName(elementType);
+      const elemFile = !visitedTypes.has(elemSimple)
+        ? findTypeFile(worktree, elementType)
+        : null;
+      if (!elemFile && !visitedTypes.has(elemSimple)) {
+        diagnostics.push(
+          `${dotted}: collection element type "${elementType}" — no .java file found under worktree; kept as leaf`,
+        );
+      }
+      if (elemFile) {
+        visitedTypes.add(elemSimple);
+        const listPrefix = `${dotted}[]`;
+        nested.push({ pathPrefix: listPrefix, typeName: elemSimple });
+        try {
+          out.push(
+            ...flattenTargetType({
+              adapter, worktree,
+              typeName: elemSimple,
+              typeSource: readFileSync(elemFile, "utf8"),
+              typeFilePath: elemFile,
+              prefix: listPrefix,
+              depth: depth + 1,
+              visitedTypes, nested, diagnostics,
+            }),
+          );
+          continue;
+        } catch (err) {
+          diagnostics.push(
+            `${dotted}: element type "${elemSimple}" found but parse failed (${(err as Error).message}); kept as leaf`,
+          );
+        }
+      }
+      out.push({ ...f, name: dotted });
+      continue;
+    }
+
+    if (isScalarType(f.type)) {
+      out.push({ ...f, name: dotted });
+      continue;
+    }
+    if (!worktree) {
+      diagnostics.push(
+        `${dotted}: type "${f.type}" not expanded — no worktree available (set MAPPER_WORKTREE or pass --worktree)`,
+      );
+      out.push({ ...f, name: dotted });
+      continue;
+    }
+    if (depth >= MAX_NEST_DEPTH) {
+      diagnostics.push(`${dotted}: type "${f.type}" not expanded — depth limit ${MAX_NEST_DEPTH}`);
       out.push({ ...f, name: dotted });
       continue;
     }
     const childType = simpleTypeName(f.type!.replace(/\[\]$/, ""));
     if (visitedTypes.has(childType)) {
+      diagnostics.push(`${dotted}: type "${childType}" already expanded elsewhere (cycle guard); kept as leaf`);
       out.push({ ...f, name: dotted });
       continue;
     }
     const childFile = findTypeFile(worktree, f.type!);
     if (!childFile) {
+      diagnostics.push(
+        `${dotted}: type "${f.type}" — no .java file found under worktree; kept as leaf`,
+      );
       out.push({ ...f, name: dotted });
       continue;
     }
@@ -121,10 +191,13 @@ function flattenTargetType(options: {
           typeFilePath: childFile,
           prefix: dotted,
           depth: depth + 1,
-          visitedTypes, nested,
+          visitedTypes, nested, diagnostics,
         }),
       );
-    } catch {
+    } catch (err) {
+      diagnostics.push(
+        `${dotted}: type "${childType}" found at ${childFile} but parse failed (${(err as Error).message}); kept as leaf`,
+      );
       out.push({ ...f, name: dotted });
     }
   }
@@ -162,6 +235,13 @@ export function buildLabelTasks(options: {
   // Target type in a separate file (the common real-world case): resolve it
   // via package-path convention / bounded walk, parse it, read its fields.
   const nestedTypes: NestedTypeRef[] = [];
+  const diagnostics: string[] = [];
+  if (declared.length === 0 && !options.worktree) {
+    diagnostics.push(
+      `target type "${options.mapper.targetType}" not declared in the mapper file and no worktree available — ` +
+        "nested fields cannot be expanded (set MAPPER_WORKTREE in .env or pass --worktree)",
+    );
+  }
   if (declared.length === 0 && options.worktree) {
     const file = findTypeFile(options.worktree, options.mapper.targetType);
     if (file) {
@@ -176,11 +256,18 @@ export function buildLabelTasks(options: {
           depth: 0,
           visitedTypes: new Set([targetClass]),
           nested: nestedTypes,
+          diagnostics,
         });
         if (declared.length > 0) targetTypeFile = file;
-      } catch {
-        // fall through to write-site checklist
+      } catch (err) {
+        diagnostics.push(
+          `target type file found but parse failed (${(err as Error).message}) — falling back`,
+        );
       }
+    } else {
+      diagnostics.push(
+        `target type "${options.mapper.targetType}" — no .java file found under worktree "${options.worktree}"`,
+      );
     }
   }
 
@@ -217,6 +304,9 @@ export function buildLabelTasks(options: {
   // but explicitly weaker — unmapped fields cannot be detected this way.
   if (declared.length === 0) {
     checklistSource = "write-sites";
+    diagnostics.push(
+      "checklist derived from write sites only — unmapped fields cannot be detected in this mode",
+    );
     const seen = new Set<string>();
     declared = [];
     for (const site of slices) {
@@ -265,5 +355,5 @@ export function buildLabelTasks(options: {
     };
   });
 
-  return { report, tasks, mapperClass, targetClass, checklistSource, targetTypeFile };
+  return { report, tasks, mapperClass, targetClass, checklistSource, targetTypeFile, diagnostics };
 }

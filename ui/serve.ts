@@ -47,6 +47,9 @@ import {
   getVerified,
 } from "../translator/verified/store.js";
 import { judgeSuggestion } from "../translator/judge/judge.js";
+import { inferWorktree } from "../analyzer/resolveType.js";
+import { exportJudgeJob } from "../translator/judge/offline.js";
+import { exportAgentJob } from "../translator/agent/exportJob.js";
 import type { PipelineViewModel } from "../translator/toPipelineView.js";
 import { toPipelineView } from "../translator/toPipelineView.js";
 
@@ -316,6 +319,9 @@ createServer(async (req, res) => {
       const registry = loadRegistry(paths.registry);
       const mapperEntry = registry.mappers.find((m) => m.id === mapperId);
       if (!mapperEntry) { sendJson(res, 404, { error: `mapper not found: ${mapperId}` }); return; }
+      worktree = worktree
+        ?? inferWorktree(resolved.sourcePath, mapperEntry.sourceFile)
+        ?? undefined;
 
       const tasks = buildLabelTasks({
         mapper: mapperEntry, sourceJava: resolved.sourceJava, worktree,
@@ -347,6 +353,8 @@ createServer(async (req, res) => {
         mapperId,
         checklistSource: tasks.checklistSource,
         targetTypeFile: tasks.targetTypeFile,
+        worktreeUsed: worktree ?? null,
+        diagnostics: tasks.diagnostics,
         declaredFields: tasks.report.declaredFields,
         fields: tasks.tasks.map((t) => {
           const leaf = t.field.split(".").pop()!.toLowerCase();
@@ -384,6 +392,7 @@ createServer(async (req, res) => {
       const resolved = await resolveMapperAst(mapperId, paths.registry, { worktree, remote: false });
       const registry = loadRegistry(paths.registry);
       const mapperEntry = registry.mappers.find((m) => m.id === mapperId)!;
+      worktree = worktree ?? inferWorktree(resolved.sourcePath, mapperEntry.sourceFile) ?? undefined;
       const tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava: resolved.sourceJava, worktree });
 
       const leaf = field.split(".").pop()!.toLowerCase();
@@ -416,10 +425,25 @@ createServer(async (req, res) => {
       }
 
       if (!isModelConfigured()) {
-        sendJson(res, 503, { error:
-          "MODEL_API_KEY not configured. Offline: npm run label:export -- --mapper " +
-          mapperId + " --worktree <path> --fields " + task.field +
-          " -> Copilot agent -> label:import, then reopen this field." });
+        try {
+          const exported = await exportAgentJob({
+            mapper: mapperId,
+            worktree,
+            registry: paths.registry,
+            selectors: [task.field],
+          });
+          sendJson(res, 200, {
+            outcome: "offline-exported",
+            mapperId, field: task.field, state: task.state,
+            jobFile: exported.jobFile,
+            steps: exported.vscodeSteps,
+            note: "No model API configured — single-field job exported for the editor agent. Complete it, import, then reopen this field.",
+          });
+        } catch (err) {
+          sendJson(res, 503, { error:
+            "MODEL_API_KEY not configured and offline export failed: " +
+            (err instanceof Error ? err.message : String(err)) });
+        }
         return;
       }
 
@@ -461,10 +485,6 @@ createServer(async (req, res) => {
   // ── Steering: user challenges a field's pipeline; judge verifies ──────────
   if (pathname === "/api/verify-suggestion" && req.method === "POST") {
     try {
-      if (!isModelConfigured()) {
-        sendJson(res, 503, { error: "MODEL_API_KEY not configured (judge runs on the server)." });
-        return;
-      }
       const body = JSON.parse(await readBody(req)) as {
         mapperId?: string; field?: string; claim?: string;
         currentPipeline?: unknown[]; worktree?: string;
@@ -483,6 +503,7 @@ createServer(async (req, res) => {
       const resolved = await resolveMapperAst(mapperId, paths.registry, { worktree, remote: false });
       const registry = loadRegistry(paths.registry);
       const mapperEntry = registry.mappers.find((m) => m.id === mapperId)!;
+      worktree = worktree ?? inferWorktree(resolved.sourcePath, mapperEntry.sourceFile) ?? undefined;
       const tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava: resolved.sourceJava, worktree });
       const leaf = field.split(".").pop()!.toLowerCase();
       const task = tasks.tasks.find(
@@ -492,6 +513,22 @@ createServer(async (req, res) => {
 
       const schemaJson = loadSchemaJson(mapperId);
       const vfp = computeVerifiedFingerprint({ sourceJava: resolved.sourceJava, schemaJson });
+
+      if (!isModelConfigured()) {
+        const exported = await exportJudgeJob({
+          mapper: mapperId,
+          field,
+          claim,
+          worktree,
+        });
+        sendJson(res, 200, {
+          outcome: "offline-exported",
+          jobFile: exported.jobFile,
+          steps: exported.steps,
+          note: "No model API configured — judge job exported for the editor agent.",
+        });
+        return;
+      }
 
       const outcome = await judgeSuggestion({
         provider: createModelProvider(),

@@ -217,3 +217,123 @@ public class EnvMapper {
   assert.ok(version.sliceText.includes('setVersionTag("6.1.00")'));
   rmSync(wt, { recursive: true, force: true });
 });
+
+test("collections: List<Element> flattened to path[].field, element writes attributed", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-coll-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "Deal.java"), `package com.acme.dto;
+import java.util.List;
+public class Deal {
+  private String dealId;
+  private List<com.acme.dto.Party> parties;
+  private List<String> tags;
+  public void setDealId(String v) { this.dealId = v; }
+  public void setParties(List<com.acme.dto.Party> v) { this.parties = v; }
+  public void setTags(List<String> v) { this.tags = v; }
+}`);
+  writeFileSync(join(dtoDir, "Party.java"), `package com.acme.dto;
+public class Party {
+  private String partyName;
+  private String roleCode;
+  public void setPartyName(String v) { this.partyName = v; }
+  public void setRoleCode(String v) { this.roleCode = v; }
+}`);
+  const mapperFile = join(mapDir, "DealMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.Deal;
+import com.acme.dto.Party;
+public class DealMapper {
+  public Deal map(In in) {
+    Deal deal = new Deal();
+    deal.setDealId(in.getId());
+    deal.setParties(java.util.List.of(buildParty(in)));
+    return deal;
+  }
+  private Party buildParty(In in) {
+    Party party = new Party();
+    party.setPartyName(in.getName().trim());
+    party.setRoleCode("BORROWER");
+    return party;
+  }
+}`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "coll", sourceFile: mapperFile, class: "com.acme.mapper.DealMapper",
+      entryMethod: "map", sourceType: "com.acme.dto.In", targetType: "com.acme.dto.Deal",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+
+  const names = tasks.tasks.map((t) => t.field).sort();
+  assert.deepEqual(names, ["dealId", "parties[].partyName", "parties[].roleCode", "tags"],
+    "project-class element expanded under path[]; scalar-element list stays a leaf");
+  const role = tasks.tasks.find((t) => t.field === "parties[].roleCode")!;
+  assert.equal(role.state, "mapped", "writes inside buildParty attributed to parties[].*");
+  assert.ok(role.sliceText.includes('setRoleCode("BORROWER")'));
+  rmSync(wt, { recursive: true, force: true });
+});
+
+test("worktree inference: nested expansion works with no explicit worktree passed", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const { inferWorktree } = await import("../../analyzer/resolveType.js");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-infer-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "Wrap.java"), `package com.acme.dto;
+public class Wrap {
+  private com.acme.dto.Inner inner;
+  public void setInner(com.acme.dto.Inner v) { this.inner = v; }
+}`);
+  writeFileSync(join(dtoDir, "Inner.java"), `package com.acme.dto;
+public class Inner {
+  private String code;
+  public String getCode() { return code; }
+}`);
+  const rel = "src/main/java/com/acme/mapper/WMapper.java";
+  const mapperFile = join(mapDir, "WMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.Wrap;
+public class WMapper {
+  public Wrap map(In in) { Wrap w = new Wrap(); return w; }
+}`);
+
+  const inferred = inferWorktree(mapperFile, rel);
+  assert.equal(inferred, wt, "root derived from sourcePath minus registry sourceFile");
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "infer", sourceFile: rel, class: "com.acme.mapper.WMapper",
+      entryMethod: "map", sourceType: "com.acme.dto.In", targetType: "com.acme.dto.Wrap",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: inferred!,
+  });
+  assert.deepEqual(tasks.tasks.map((t) => t.field), ["inner.code"],
+    "getter-only Inner class still yields its field; nested expansion via inferred worktree");
+  assert.equal(tasks.tasks[0]!.state, "unmapped");
+  rmSync(wt, { recursive: true, force: true });
+});
+
+test("diagnostics: missing worktree and unresolvable types are named, not silent", () => {
+  const src = readFileSync("fixtures/ShipmentNoticeMapper.java", "utf8");
+  const noWt = buildLabelTasks({
+    mapper: {
+      id: "d1", sourceFile: "x/M.java", class: "M",
+      entryMethod: "map", sourceType: "In",
+      targetType: "com.missing.Elsewhere",
+    } as any,
+    sourceJava: "public class M { public void map(In i) { Elsewhere e = new Elsewhere(); e.setCode(i.getC()); } }",
+  });
+  assert.equal(noWt.checklistSource, "write-sites");
+  assert.ok(noWt.diagnostics.some((d) => d.includes("no worktree available")),
+    "missing worktree is called out");
+  void src;
+});

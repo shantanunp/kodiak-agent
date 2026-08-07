@@ -256,9 +256,9 @@ export const javaAdapter: LanguageAdapter = {
     const seen = new Set(declared.map((f) => f.name.toLowerCase()));
     for (const m of parsed.methods) {
       if (m.className !== targetClass) continue;
-      const setter = /^set([A-Z]\w*)$/.exec(m.name);
-      if (!setter) continue;
-      const name = decap(setter[1]!);
+      const accessor = /^(?:set|get|is)([A-Z]\w*)$/.exec(m.name);
+      if (!accessor) continue;
+      const name = decap(accessor[1]!);
       if (!seen.has(name.toLowerCase())) {
         seen.add(name.toLowerCase());
         declared.push({ className: targetClass, name, line: m.startLine });
