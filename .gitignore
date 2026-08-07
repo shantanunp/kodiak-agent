@@ -3,11 +3,6 @@ node_modules/
 
 # Build output
 dist/
-indexer/build/
-indexer/.gradle/
-*.class
-*.jar
-!indexer/gradle/wrapper/gradle-wrapper.jar
 
 # Environment & secrets (never commit keys)
 .env
@@ -18,9 +13,6 @@ indexer/.gradle/
 .cache/
 translator/cache/cache/
 ui/pipeline-viewer/data/*.view.json
-
-# Portable JDK downloaded for Gradle
-.jdk/
 
 # Logs
 *.log

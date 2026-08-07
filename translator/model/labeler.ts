@@ -21,6 +21,10 @@ import {
   PIPELINE_CACHE_VERSION,
 } from "../cache/index.js";
 import { schemaContextForLabeler, schemaFilePath } from "../../schema/io.js";
+import {
+  computeVerifiedFingerprint,
+  getVerified,
+} from "../verified/store.js";
 import { filterMappingByFields, matchesTargetField } from "../filterByFields.js";
 import { discoverAndMerge, type DiscoveryMeta } from "./discoverMerge.js";
 import { existsSync, readFileSync } from "node:fs";
@@ -77,6 +81,8 @@ export interface PipelineJson {
   targetType?: string;
   sourceFile?: string;
   cacheHit?: boolean;
+  /** Where the mapping came from: verified store beats cache beats model. */
+  resultSource?: "verified" | "cache" | "model" | "mixed";
   /** How many of the returned fields came from field-level cache */
   fieldsFromCache?: number;
   fieldsLabeled?: number;
@@ -138,6 +144,33 @@ export class StepLabeler {
     const mapperId = ast.mapperId ?? "unknown";
 
     const schemaJson = loadSchemaJson(ast.mapperId);
+
+    // 0) Verified store — permanent, content-only fingerprint, beats everything.
+    if (sourceJava) {
+      const verifiedFp = computeVerifiedFingerprint({ sourceJava, schemaJson });
+      const verified = getVerified(mapperId, verifiedFp);
+      if (verified) {
+        let mapping = verified.fields.map((f) => ({
+          targetField: f.targetField,
+          pipeline: f.pipeline as PipelineStep[],
+        })) as FieldMappingJson[];
+        if (fieldSelectors.length > 0) {
+          mapping = filterMappingByFields(mapping, fieldSelectors);
+        }
+        return {
+          mapperId,
+          mapping,
+          labeledAt: verified.updatedAt,
+          labelModel: "verified-store",
+          cacheHit: true,
+          resultSource: "verified",
+          fieldsFromCache: mapping.length,
+          fieldsLabeled: 0,
+          fingerprint: verifiedFp,
+        };
+      }
+    }
+
     const fingerprint = computePipelineFingerprint({
       sourceJava,
       schemaJson,
@@ -159,6 +192,7 @@ export class StepLabeler {
           labeledAt: hit.labeledAt,
           labelModel: hit.labelModel,
           cacheHit: true,
+          resultSource: "cache",
           fieldsFromCache: mapping.length,
           fieldsLabeled: 0,
           fingerprint,
@@ -191,6 +225,7 @@ export class StepLabeler {
             labeledAt: new Date().toISOString(),
             labelModel: this.model,
             cacheHit: true,
+            resultSource: "cache",
             fieldsFromCache: mapping.length,
             fieldsLabeled: 0,
             fingerprint,
@@ -261,6 +296,12 @@ export class StepLabeler {
       labeledAt,
       labelModel: this.model,
       cacheHit: fieldsLabeled === 0 && mapping.length > 0,
+      resultSource:
+        fieldsLabeled === 0
+          ? "cache"
+          : fieldsFromCache > 0
+            ? "mixed"
+            : "model",
       fieldsFromCache,
       fieldsLabeled,
       fingerprint,

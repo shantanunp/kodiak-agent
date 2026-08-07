@@ -11,6 +11,16 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["src/**/*", "translator/**/*", "schema/**/*", "ui/serve.ts"],
-  "exclude": ["node_modules", "dist", "ui"]
+  "include": [
+    "src/**/*",
+    "translator/**/*",
+    "schema/**/*",
+    "ui/serve.ts",
+    "analyzer/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "ui"
+  ]
 }

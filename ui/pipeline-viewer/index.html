@@ -42,6 +42,33 @@
   .ai-banner b{font-weight:600;}
   .ai-banner a{color:inherit;font-weight:600;}
 
+
+  .layout{display:grid;grid-template-columns:270px 1fr;gap:18px;align-items:start;}
+  @media (max-width:900px){.layout{grid-template-columns:1fr;}}
+  .fieldlist{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;max-height:76vh;overflow:auto;}
+  .fieldlist h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin:4px 6px 10px;}
+  .fielditem{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;cursor:pointer;font-family:var(--font-mono);font-size:12px;color:var(--ink);}
+  .fielditem:hover{background:var(--bg);}
+  .fielditem.active{background:var(--target-bg);border-color:var(--target);color:var(--target);font-weight:600;}
+  .state-b{font-size:9.5px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 6px;flex-shrink:0;}
+  .state-mapped{background:var(--source-bg);color:var(--source);}
+  .state-unmapped{background:var(--raw-bg);color:var(--raw);}
+  .state-unresolved{background:var(--cond-bg);color:var(--cond);}
+  .avail-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .avail-verified{background:var(--source);}
+  .avail-corrected{background:var(--op);}
+  .avail-cached{background:var(--target);}
+  .avail-none{background:var(--line);}
+  .fl-legend{font-size:11px;color:var(--ink-faint);margin:10px 6px 2px;line-height:1.8;}
+  .correct-box{margin-top:16px;background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:12px;}
+  .correct-box label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:6px;}
+  .correct-row{display:flex;gap:8px;}
+  .correct-row input{flex:1;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:13px;font-family:var(--font-body);}
+  .correct-row button{border:none;background:var(--op);color:#fff;font-weight:600;font-size:12.5px;padding:8px 14px;border-radius:7px;cursor:pointer;}
+  .verdict{margin-top:10px;font-size:12.5px;line-height:1.55;border-radius:8px;padding:10px 12px;}
+  .verdict.ok{background:var(--source-bg);color:var(--source);}
+  .verdict.defect{background:var(--cond-bg);color:var(--cond);}
+
   .legend{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;font-size:12.5px;color:var(--ink-soft);}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
   .canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;}
@@ -410,7 +437,133 @@ document.getElementById('aiInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') buildWithAi();
 });
 
-load();
+
+let checklist = null;
+let activeField = null;
+const fieldPipelines = {};   // field -> viewSteps (loaded on demand)
+
+function stateBadge(st){return `<span class="state-b state-${st}">${st.toUpperCase()}</span>`;}
+
+async function loadChecklist(){
+  if(!currentMapper) return;
+  try{
+    const res = await fetch(`/api/checklist?mapper=${encodeURIComponent(currentMapper)}&t=${Date.now()}`);
+    if(!res.ok) return;
+    checklist = await res.json();
+    // Seed pipelines already present in the last full view, keyed by leaf.
+    if(Array.isArray(viewData?.fields)){
+      for(const f of viewData.fields){
+        fieldPipelines[fieldLeaf(f.targetField).toLowerCase()] = f.steps || [];
+      }
+    }
+    renderFieldList();
+  }catch{ /* checklist is an enhancement; viewer still works without it */ }
+}
+
+function renderFieldList(){
+  if(!checklist?.fields?.length) return;
+  const el = document.getElementById('fieldlist');
+  el.style.display = '';
+  document.getElementById('fieldItems').innerHTML = checklist.fields.map(f => `
+    <button type="button" class="fielditem${activeField===f.field?' active':''}" data-field="${esc(f.field)}" title="${esc(f.note||'')}">
+      <span class="avail-dot avail-${f.labelAvailability}"></span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(f.field)}</span>
+      ${stateBadge(f.state)}
+    </button>`).join('');
+  document.querySelectorAll('.fielditem').forEach(btn => {
+    btn.addEventListener('click', () => openField(btn.getAttribute('data-field')));
+  });
+}
+
+function renderFieldSteps(field, steps, sourceNote){
+  activeField = field;
+  renderFieldList();
+  const canvas = document.getElementById('canvas');
+  if(!steps || !steps.length){
+    canvas.innerHTML = `<span class="target-name">${esc(field)}</span>
+      <p style="color:var(--ink-soft);font-size:13.5px">${esc(sourceNote||'No pipeline for this field.')}</p>
+      ${correctionBoxHtml(field)}`;
+  } else {
+    canvas.innerHTML = `
+      <span class="target-name">${esc(field)}</span>
+      ${sourceNote?`<div class="ai-banner"><span>&#10003;</span><span>${esc(sourceNote)}</span></div>`:''}
+      <div class="pipeline">${steps.map(s=>renderStep(s)).join('')}</div>
+      <div class="summary"><strong>Summary:</strong> ${esc(summarize(steps))}</div>
+      ${correctionBoxHtml(field)}`;
+  }
+  wireCorrectionBox(field, steps||[]);
+}
+
+async function openField(field){
+  const leaf = fieldLeaf(field).toLowerCase();
+  if(fieldPipelines[leaf]){
+    renderFieldSteps(field, fieldPipelines[leaf], null);
+    return;
+  }
+  renderFieldSteps(field, null, 'Labeling this field on demand…');
+  try{
+    const res = await fetch('/api/label-field',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mapperId:currentMapper, field})});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+    if(data.state==='unmapped'){
+      renderFieldSteps(field, null, `Explicitly unmapped — ${data.note||'no write in the source'}.`);
+      return;
+    }
+    fieldPipelines[leaf] = data.viewSteps||[];
+    renderFieldSteps(field, fieldPipelines[leaf],
+      `Labeled from ${data.resultSource}${data.unresolved?.length?` — unresolved: ${data.unresolved.join(', ')}`:''}`);
+  }catch(e){
+    renderFieldSteps(field, null, e.message);
+  }
+}
+
+function correctionBoxHtml(field){
+  return `<div class="correct-box">
+    <label>Not right? Describe the missing filter/transform — the agent re-checks the code.</label>
+    <div class="correct-row">
+      <input id="claimInput" placeholder="e.g. there should be a trim before the split">
+      <button id="claimBtn">Verify</button>
+    </div>
+    <div id="verdictBox"></div>
+  </div>`;
+}
+
+function wireCorrectionBox(field, currentSteps){
+  const btn = document.getElementById('claimBtn');
+  if(!btn) return;
+  btn.addEventListener('click', async () => {
+    const claim = document.getElementById('claimInput').value.trim();
+    const box = document.getElementById('verdictBox');
+    if(!claim){ box.innerHTML = '<div class="verdict defect">Describe the correction first.</div>'; return; }
+    box.innerHTML = '<div class="verdict">Judge is re-checking the source…</div>';
+    btn.disabled = true;
+    try{
+      const res = await fetch('/api/verify-suggestion',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({mapperId:currentMapper, field, claim, currentPipeline:currentSteps})});
+      const data = await res.json();
+      if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+      if(data.outcome==='corrected'){
+        fieldPipelines[fieldLeaf(field).toLowerCase()] = data.viewSteps||[];
+        renderFieldSteps(field, data.viewSteps||[],
+          'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');
+        const vb = document.getElementById('verdictBox');
+        if(vb) vb.innerHTML = `<div class="verdict ok">Evidence: ${esc(data.verdict.evidence)}</div>`;
+      } else if(data.outcome==='rejected'){
+        box.innerHTML = `<div class="verdict defect"><b>Defect ${esc(data.defectId)} created for this field.</b><br>
+          Judge evidence: ${esc(data.verdict.evidence||data.verdict.reason||'code does not support the claim')}</div>`;
+      } else {
+        box.innerHTML = `<div class="verdict defect">Judge agreed but cited no checkable evidence — nothing was saved. Try rephrasing.</div>`;
+      }
+    }catch(e){
+      box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
+    }finally{ btn.disabled = false; }
+  });
+}
+
+load().then(loadChecklist);
 </script>
 </body>
 </html>

@@ -35,6 +35,15 @@ import {
   PIPELINE_CACHE_VERSION,
 } from "./cache/index.js";
 import { AGENT_OFFLINE_MODEL } from "./agent/types.js";
+import {
+  computeVerifiedFingerprint,
+  getVerified,
+  promoteToVerified,
+} from "./verified/store.js";
+import { buildLabelTasks } from "./agentloop/tasks.js";
+import { runAgentLoop, toPipelineJson } from "./agentloop/loop.js";
+import { createModelProvider, loadModelConfig } from "./model/index.js";
+import { schemaContextForLabeler } from "../schema/io.js";
 import { writePipelineView } from "./writePipelineView.js";
 
 const { values } = parseArgs({
@@ -51,6 +60,10 @@ const { values } = parseArgs({
     "clear-cache": { type: "boolean", default: false },
     /** Read agent/offline field cache only — no MODEL_API_KEY required. */
     "from-cache-only": { type: "boolean", default: false },
+    /** Write the labeled result to the git-tracked verified store. */
+    promote: { type: "boolean", default: false },
+    /** Deterministic checklist + slices drive the agent; audit gate decides done. */
+    analyzer: { type: "boolean", default: false },
   },
 });
 
@@ -70,6 +83,51 @@ async function labelFromAgentCache(
   selectors: string[],
 ): Promise<void> {
   const mapperId = ast.mapperId ?? "unknown";
+
+  // Verified store beats the agent field cache too.
+  if (sourceJava) {
+    const vfp = computeVerifiedFingerprint({
+      sourceJava,
+      schemaJson: loadSchemaJson(mapperId),
+    });
+    const verified = getVerified(mapperId, vfp);
+    if (verified) {
+      let mapping = verified.fields.map((f) => ({
+        targetField: f.targetField,
+        pipeline: f.pipeline,
+      })) as FieldMappingJson[];
+      if (selectors.length > 0) {
+        mapping = mapping.filter((m) =>
+          matchesTargetField(m.targetField, selectors),
+        );
+      }
+      const { path: viewPath, view } = writePipelineView({
+        ...ast,
+        mapperId,
+        mapping,
+        labeledAt: verified.updatedAt,
+        labelModel: "verified-store",
+      });
+      console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
+      console.log(
+        JSON.stringify(
+          {
+            mapperId,
+            mapping,
+            labeledAt: verified.updatedAt,
+            labelModel: "verified-store",
+            cacheHit: true,
+            resultSource: "verified",
+            fingerprint: vfp,
+            viewPath,
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+  }
 
   // `--from-cache-only` is meant to work with zero network access, so prefer
   // whatever is already on disk. When we do have sourceJava (caller passed --worktree /
@@ -148,6 +206,28 @@ async function labelFromAgentCache(
   const { path: viewPath, view } = writePipelineView(pipeline);
   console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
 
+  let promoted: string | undefined;
+  if (values.promote && sourceJava) {
+    const vfp = computeVerifiedFingerprint({
+      sourceJava,
+      schemaJson: loadSchemaJson(mapperId),
+    });
+    const res = promoteToVerified({
+      mapperId,
+      fingerprint: vfp,
+      mapping,
+      labeledBy: AGENT_OFFLINE_MODEL,
+    });
+    promoted = res.file;
+    console.error(
+      `Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`,
+    );
+  } else if (values.promote && !sourceJava) {
+    console.error(
+      "Cannot promote without source bytes — pass --worktree/--local/--remote with --from-cache-only.",
+    );
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -156,9 +236,11 @@ async function labelFromAgentCache(
         labeledAt,
         labelModel: AGENT_OFFLINE_MODEL,
         cacheHit: true,
+        resultSource: "cache",
         fieldsFromCache: mapping.length,
         fieldsLabeled: 0,
         fingerprint,
+        promoted,
         viewPath,
       },
       null,
@@ -264,6 +346,121 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (values.analyzer && values.mapper && sourceJava) {
+    const registry = loadRegistry(values.registry!);
+    const mapperEntry = registry.mappers.find((m) => m.id === values.mapper)!;
+    let tasks;
+    try {
+      tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava, worktree: values.worktree });
+    } catch (err) {
+      console.error(
+        `Analyzer could not parse source (${(err as Error).message}); ` +
+          "falling back to legacy discovery path.",
+      );
+      tasks = null;
+    }
+
+    if (tasks) {
+      const mapperId = ast.mapperId ?? values.mapper;
+      const schemaJson = loadSchemaJson(mapperId);
+
+      // Verified store still outranks the loop.
+      const vfp = computeVerifiedFingerprint({ sourceJava, schemaJson });
+      const verified = getVerified(mapperId, vfp);
+      if (verified) {
+        let mapping = verified.fields.map((f) => ({
+          targetField: f.targetField,
+          pipeline: f.pipeline,
+        })) as FieldMappingJson[];
+        if (selectors.length > 0) {
+          mapping = filterMappingByFields(mapping, selectors);
+        }
+        const { path: viewPath, view } = writePipelineView({
+          ...ast, mapperId, mapping,
+          labeledAt: verified.updatedAt, labelModel: "verified-store",
+        });
+        console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
+        console.log(JSON.stringify({
+          mapperId, mapping, labeledAt: verified.updatedAt,
+          labelModel: "verified-store", cacheHit: true,
+          resultSource: "verified", fingerprint: vfp, viewPath,
+        }, null, 2));
+        return;
+      }
+
+      const config = loadModelConfig();
+      const provider = createModelProvider(config);
+      const fingerprint = computePipelineFingerprint({
+        sourceJava, schemaJson,
+        model: `${config.apiStyle}:${config.model}`,
+        version: PIPELINE_CACHE_VERSION,
+      });
+
+      let result;
+      try {
+        result = await runAgentLoop(ast, tasks, provider, {
+          fingerprint,
+          schemaContext: schemaContextForLabeler(mapperId),
+          sourceJava,
+          noCache: Boolean(values["no-cache"]),
+        });
+      } catch (err) {
+        await offlineAgentFallback(
+          `Model API call failed (likely blocked network/proxy at your office): ${(err as Error).message}`,
+          selectors,
+        );
+        return;
+      }
+
+      const pipeline = toPipelineJson(ast, result, {
+        model: config.model,
+        fingerprint,
+      });
+
+      if (selectors.length > 0) {
+        pipeline.mapping = filterMappingByFields(pipeline.mapping, selectors);
+      }
+
+      const { path: viewPath, view } = writePipelineView(pipeline);
+      console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
+
+      let promoted: string | undefined;
+      if (values.promote) {
+        if (!result.audit.gatePassed) {
+          console.error(
+            `Refusing to promote: audit gate NOT PASSED ` +
+              `(unresolved: ${result.audit.unresolvedFields.join(", ")}).`,
+          );
+        } else if (selectors.length > 0) {
+          console.error("Refusing to promote a --fields subset from the agent loop; run without --fields.");
+        } else {
+          const res = promoteToVerified({
+            mapperId, fingerprint: vfp,
+            mapping: pipeline.mapping, labeledBy: config.model,
+          });
+          promoted = res.file;
+          console.error(`Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`);
+        }
+      }
+
+      console.log(JSON.stringify({
+        mapperId: pipeline.mapperId,
+        mapping: pipeline.mapping,
+        labeledAt: pipeline.labeledAt,
+        labelModel: pipeline.labelModel,
+        cacheHit: pipeline.cacheHit,
+        resultSource: pipeline.resultSource,
+        fieldsFromCache: pipeline.fieldsFromCache,
+        fieldsLabeled: pipeline.fieldsLabeled,
+        fingerprint: pipeline.fingerprint,
+        audit: result.audit,
+        promoted,
+        viewPath,
+      }, null, 2));
+      return;
+    }
+  }
+
   const labeler = new StepLabeler();
   let pipeline: PipelineJson;
   try {
@@ -287,6 +484,24 @@ async function main(): Promise<void> {
   const { path: viewPath, view } = writePipelineView(pipeline);
   console.error(`Wrote pipeline view ${viewPath} (${view.steps.length} steps)`);
 
+  let promoted: string | undefined;
+  if (values.promote && sourceJava && pipeline.resultSource !== "verified") {
+    const vfp = computeVerifiedFingerprint({
+      sourceJava,
+      schemaJson: loadSchemaJson(pipeline.mapperId),
+    });
+    const res = promoteToVerified({
+      mapperId: pipeline.mapperId ?? "unknown",
+      fingerprint: vfp,
+      mapping: pipeline.mapping,
+      labeledBy: pipeline.labelModel ?? "model",
+    });
+    promoted = res.file;
+    console.error(
+      `Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`,
+    );
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -295,6 +510,8 @@ async function main(): Promise<void> {
         labeledAt: pipeline.labeledAt,
         labelModel: pipeline.labelModel,
         cacheHit: pipeline.cacheHit,
+        resultSource: pipeline.resultSource,
+        promoted,
         fieldsFromCache: pipeline.fieldsFromCache,
         fieldsLabeled: pipeline.fieldsLabeled,
         fingerprint: pipeline.fingerprint,

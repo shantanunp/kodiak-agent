@@ -20,7 +20,8 @@ export function buildOfflineFieldGroups(
 
   if (selectors.length === 0) {
     throw new Error(
-      "Offline export requires --fields (e.g. --fields Summary.displayName).",
+      "Source could not be analyzed and no --fields given. " +
+        "Pass --fields (e.g. --fields Summary.displayName) for a selector-only job.",
     );
   }
 

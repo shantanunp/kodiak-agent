@@ -14,6 +14,8 @@ import { paths } from "../../src/config/env.js";
 import { loadRegistry } from "../../src/registry/loadRegistry.js";
 import { resolveMapperAst } from "../resolvePipeline.js";
 import { buildOfflineFieldGroups } from "./offlineFields.js";
+import { buildLabelTasks } from "../agentloop/tasks.js";
+import type { LabelTasks } from "../agentloop/tasks.js";
 import {
   FIELD_MAPPING_PROMPT,
   loadSchemaJson,
@@ -93,7 +95,45 @@ export async function exportAgentJob(
     version: PIPELINE_CACHE_VERSION,
   });
 
-  const groups = buildOfflineFieldGroups({ selectors });
+  // Analyzer pre-pass: checklist + slices for the offline agent. Falls back to
+  // selector-only groups when the source cannot be parsed.
+  let tasks: LabelTasks | null = null;
+  try {
+    tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava, worktree });
+  } catch (err) {
+    console.error(
+      `Analyzer could not parse source (${(err as Error).message}); exporting selector-only job.`,
+    );
+  }
+
+  let groups: Array<{
+    targetField: string;
+    pipeline: unknown[];
+    slice?: string;
+    auditState?: "mapped" | "unresolved";
+    auditNote?: string;
+  }>;
+
+  if (tasks) {
+    const wanted = tasks.tasks.filter((t) => t.state !== "unmapped");
+    const filtered =
+      selectors.length > 0
+        ? wanted.filter((t) =>
+            selectors.some((sel) =>
+              t.field.toLowerCase().includes(sel.split(".").pop()!.toLowerCase()),
+            ),
+          )
+        : wanted;
+    groups = filtered.map((t) => ({
+      targetField: t.field,
+      pipeline: [],
+      slice: t.state === "mapped" ? t.sliceText : undefined,
+      auditState: t.state as "mapped" | "unresolved",
+      auditNote: t.note,
+    }));
+  } else {
+    groups = buildOfflineFieldGroups({ selectors });
+  }
 
   if (groups.length === 0) {
     throw new Error(
@@ -155,9 +195,12 @@ export async function exportAgentJob(
       "- fields[].businessFieldSelector: the field the user asked to label",
       "",
       "For EACH entry in fields[]:",
-      "1. Find the Java write(s) for that field in sourceJava (setters, builders, helpers).",
-      "2. Apply systemPrompt + schemaContext to produce a FieldMappingResponse.",
-      "3. Derive pipeline steps from sourceJava and schemaContext.",
+      "1. If the entry has a 'slice', it is self-contained (write statement + local",
+      "   dataflow + every helper body) — label from the slice; sourceJava is backup.",
+      "2. If auditState is 'unresolved', the analyzer could not settle it (see auditNote,",
+      "   usually an opaque call). Inspect sourceJava; if the field is genuinely never",
+      "   written, return recognized=false with the reason.",
+      "3. Apply systemPrompt + schemaContext to produce a FieldMappingResponse.",
       "",
       `Write the complete result to: ${resultFile}`,
       "Do not call external model HTTP APIs.",
@@ -175,6 +218,19 @@ export async function exportAgentJob(
       "(do not run npm yourself — the user runs them in the VS Code terminal).",
     ].join("\n"),
     vscodeSteps: vscodeStepList,
+    audit: tasks
+      ? {
+          checklistSource: tasks.checklistSource,
+          targetTypeFile: tasks.targetTypeFile,
+          declaredFields: tasks.report.declaredFields,
+          mapped: tasks.report.mapped,
+          unmapped: tasks.report.unmapped,
+          unresolved: tasks.report.unresolved,
+          unmappedFields: tasks.report.checklist
+            .filter((c) => c.state === "unmapped")
+            .map((c) => c.field),
+        }
+      : undefined,
     fields: groups.map((g) => {
       const selector =
         selectors.find((s) =>
@@ -183,6 +239,9 @@ export async function exportAgentJob(
       const field: AgentJob["fields"][number] = {
         businessFieldSelector: selector,
         javaTargetField: g.targetField,
+        slice: g.slice,
+        auditState: g.auditState,
+        auditNote: g.auditNote,
       };
       return field;
     }),

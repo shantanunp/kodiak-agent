@@ -28,6 +28,7 @@ import {
 } from "../cache/index.js";
 import { AGENT_OFFLINE_MODEL, type AgentJob, type AgentResult } from "./types.js";
 import { agentJobFile, agentJobsRoot, agentResultFile } from "./paths.js";
+import { exportAgentJob } from "./exportJob.js";
 
 const { values } = parseArgs({
   options: {
@@ -219,6 +220,45 @@ async function main(): Promise<void> {
   if (imported === 0) {
     console.error("No fields imported (check --fields filters or result.json).");
     process.exit(1);
+  }
+
+  // ── Gap detection: job checklist fields with no recognized result ─────────
+  const recognizedFields = new Set(
+    result.fields
+      .filter((f) => f.response.recognized)
+      .map((f) => f.javaTargetField.toLowerCase()),
+  );
+  const gaps = (job?.fields ?? [])
+    .map((f) => f.javaTargetField)
+    .filter((name) => !recognizedFields.has(name.toLowerCase()));
+
+  if (gaps.length > 0 && job) {
+    console.error(
+      `\nGap: ${gaps.length} checklist field(s) still unaccounted: ${gaps.join(", ")}`,
+    );
+    if (values.worktree) {
+      try {
+        const gapJob = await exportAgentJob({
+          mapper: mapperId,
+          worktree: values.worktree,
+          local: values.local,
+          remote: values.remote,
+          registry: values.registry!,
+          selectors: gaps,
+        });
+        console.error(
+          `Re-exported gap job (${gapJob.fieldCount} field(s)): ${gapJob.jobFile}\n` +
+            `Ask the agent to complete it, then re-run label:import.`,
+        );
+      } catch (err) {
+        console.error(`Could not auto-export gap job: ${(err as Error).message}`);
+      }
+    } else {
+      console.error(
+        `Re-export just the gaps with:\n` +
+          `  npm run label:export -- --mapper ${mapperId} --worktree <path> --fields ${gaps.join(",")}`,
+      );
+    }
   }
 
   const fieldsArg = selectors.length ? ` --fields ${selectors.join(",")}` : "";

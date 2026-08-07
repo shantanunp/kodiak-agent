@@ -18,7 +18,14 @@
     "view:serve": "tsx ui/serve.ts",
     "schema:validate": "tsx schema/cli-validate.ts",
     "view": "npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve",
-    "test:translator": "tsx --test translator/model/discoverMerge.test.ts translator/model/applyResponse.test.ts translator/filterByFields.test.ts translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts"
+    "test:translator": "tsx --test translator/model/discoverMerge.test.ts translator/model/applyResponse.test.ts translator/filterByFields.test.ts translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts",
+    "analyze": "tsx analyzer/cli.ts",
+    "test:analyzer": "tsx --test analyzer/analyzer.test.ts",
+    "test:verified": "tsx --test translator/verified/store.test.ts",
+    "test:agentloop": "tsx --test translator/agentloop/loop.test.ts",
+    "test:judge": "tsx --test translator/judge/judge.test.ts",
+    "test:policy": "tsx --test analyzer/noExternal.test.ts",
+    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy"
   },
   "engines": {
     "node": ">=20"
@@ -27,6 +34,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@octokit/rest": "^21.1.1",
     "dotenv": "^16.4.7",
+    "java-parser": "^3.0.1",
     "minimatch": "^10.0.1",
     "node-cron": "^3.0.3",
     "yaml": "^2.7.0"

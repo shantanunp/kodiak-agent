@@ -28,7 +28,27 @@ import {
   applyChangeToMapper,
   resolveMapperWorktree,
 } from "../translator/applyChange.js";
+import { loadRegistry } from "../src/registry/loadRegistry.js";
+import { buildLabelTasks } from "../translator/agentloop/tasks.js";
+import { runAgentLoop } from "../translator/agentloop/loop.js";
+import {
+  createModelProvider,
+  loadModelConfig,
+  loadSchemaJson,
+} from "../translator/model/index.js";
+import { schemaContextForLabeler } from "../schema/io.js";
+import {
+  computePipelineFingerprint,
+  PIPELINE_CACHE_VERSION,
+  listFieldPipelineCaches,
+} from "../translator/cache/index.js";
+import {
+  computeVerifiedFingerprint,
+  getVerified,
+} from "../translator/verified/store.js";
+import { judgeSuggestion } from "../translator/judge/judge.js";
 import type { PipelineViewModel } from "../translator/toPipelineView.js";
+import { toPipelineView } from "../translator/toPipelineView.js";
 
 const PORT = Number(process.env.VIEW_PORT ?? 4173);
 const UI_ROOT = join(paths.root, "ui");
@@ -111,6 +131,16 @@ async function labelAndWriteView(options: {
     fieldsLabeled: pipeline.fieldsLabeled,
     labelModel: pipeline.labelModel,
   };
+}
+
+
+function viewStepsFor(mapperId: string, mapping: Array<{ targetField: string; pipeline: unknown[] }>): unknown[] {
+  try {
+    const view = toPipelineView({ mapperId, mapping } as never);
+    return view.fields?.[0]?.steps ?? view.steps ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function serveStatic(urlPath: string, res: import("node:http").ServerResponse): boolean {
@@ -261,6 +291,228 @@ createServer(async (req, res) => {
         fieldsLabeled: viewResult?.fieldsLabeled,
         labelError,
         labeled: true,
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+
+  // ── Deterministic checklist: ALL declared target fields, no model calls ───
+  // The viewer renders this instantly (100 fields is fine); labeling happens
+  // per field, on demand, when the user opens one.
+  if (pathname === "/api/checklist" && req.method === "GET") {
+    try {
+      const mapperId = url.searchParams.get("mapper")?.trim();
+      if (!mapperId) { sendJson(res, 400, { error: "mapper required" }); return; }
+      let worktree: string | undefined;
+      try { worktree = resolveMapperWorktree(url.searchParams.get("worktree") ?? undefined); }
+      catch { worktree = getEnvOptional("MAPPER_WORKTREE") || undefined; }
+
+      const resolved = await resolveMapperAst(mapperId, paths.registry, {
+        worktree, remote: false,
+      });
+      const registry = loadRegistry(paths.registry);
+      const mapperEntry = registry.mappers.find((m) => m.id === mapperId);
+      if (!mapperEntry) { sendJson(res, 404, { error: `mapper not found: ${mapperId}` }); return; }
+
+      const tasks = buildLabelTasks({
+        mapper: mapperEntry, sourceJava: resolved.sourceJava, worktree,
+      });
+
+      const schemaJson = loadSchemaJson(mapperId);
+      const vfp = computeVerifiedFingerprint({ sourceJava: resolved.sourceJava, schemaJson });
+      const verified = getVerified(mapperId, vfp);
+      const verifiedByLeaf = new Map(
+        (verified?.fields ?? []).map((f) => [
+          f.targetField.split(".").pop()!.toLowerCase(), f,
+        ]),
+      );
+      let cachedLeaves = new Set<string>();
+      if (isModelConfigured()) {
+        const config = loadModelConfig();
+        const fp = computePipelineFingerprint({
+          sourceJava: resolved.sourceJava, schemaJson,
+          model: `${config.apiStyle}:${config.model}`, version: PIPELINE_CACHE_VERSION,
+        });
+        cachedLeaves = new Set(
+          listFieldPipelineCaches(mapperId, fp).map((e) =>
+            e.javaTargetField.split(".").pop()!.toLowerCase(),
+          ),
+        );
+      }
+
+      sendJson(res, 200, {
+        mapperId,
+        checklistSource: tasks.checklistSource,
+        targetTypeFile: tasks.targetTypeFile,
+        declaredFields: tasks.report.declaredFields,
+        fields: tasks.tasks.map((t) => {
+          const leaf = t.field.split(".").pop()!.toLowerCase();
+          const v = verifiedByLeaf.get(leaf);
+          return {
+            field: t.field,
+            state: t.state,
+            note: t.note,
+            labelAvailability: v
+              ? (v.status === "user-corrected" ? "corrected" : "verified")
+              : cachedLeaves.has(leaf) ? "cached" : "none",
+          };
+        }),
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  // ── Label ONE field on demand (verified -> field cache -> model) ──────────
+  if (pathname === "/api/label-field" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string; field?: string; worktree?: string; noCache?: boolean;
+      };
+      const mapperId = body.mapperId?.trim();
+      const field = body.field?.trim();
+      if (!mapperId || !field) { sendJson(res, 400, { error: "mapperId and field required" }); return; }
+
+      let worktree: string | undefined;
+      try { worktree = resolveMapperWorktree(body.worktree); }
+      catch { worktree = body.worktree?.trim() || getEnvOptional("MAPPER_WORKTREE") || undefined; }
+
+      const resolved = await resolveMapperAst(mapperId, paths.registry, { worktree, remote: false });
+      const registry = loadRegistry(paths.registry);
+      const mapperEntry = registry.mappers.find((m) => m.id === mapperId)!;
+      const tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava: resolved.sourceJava, worktree });
+
+      const leaf = field.split(".").pop()!.toLowerCase();
+      const task = tasks.tasks.find(
+        (t) => t.field.toLowerCase() === field.toLowerCase()
+          || t.field.split(".").pop()!.toLowerCase() === leaf,
+      );
+      if (!task) { sendJson(res, 404, { error: `field not on checklist: ${field}` }); return; }
+      if (task.state === "unmapped") {
+        sendJson(res, 200, { mapperId, field: task.field, state: "unmapped",
+          note: task.note, pipeline: [] });
+        return;
+      }
+
+      const schemaJson = loadSchemaJson(mapperId);
+      const vfp = computeVerifiedFingerprint({ sourceJava: resolved.sourceJava, schemaJson });
+      const verified = getVerified(mapperId, vfp);
+      const vHit = verified?.fields.find(
+        (f) => f.targetField.split(".").pop()!.toLowerCase() === leaf,
+      );
+      if (vHit) {
+        sendJson(res, 200, { mapperId, field: task.field, state: task.state,
+          resultSource: vHit.status === "user-corrected" ? "corrected" : "verified",
+          pipeline: vHit.pipeline,
+          viewSteps: viewStepsFor(mapperId, [
+            { targetField: vHit.targetField, pipeline: vHit.pipeline },
+          ]),
+          sliceText: task.sliceText, fingerprint: vfp });
+        return;
+      }
+
+      if (!isModelConfigured()) {
+        sendJson(res, 503, { error:
+          "MODEL_API_KEY not configured. Offline: npm run label:export -- --mapper " +
+          mapperId + " --worktree <path> --fields " + task.field +
+          " -> Copilot agent -> label:import, then reopen this field." });
+        return;
+      }
+
+      const config = loadModelConfig();
+      const provider = createModelProvider(config);
+      const fp = computePipelineFingerprint({
+        sourceJava: resolved.sourceJava, schemaJson,
+        model: `${config.apiStyle}:${config.model}`, version: PIPELINE_CACHE_VERSION,
+      });
+      const single = { ...tasks, tasks: [task] };
+      const result = await runAgentLoop({ mapperId }, single, provider, {
+        fingerprint: fp,
+        schemaContext: schemaContextForLabeler(mapperId),
+        sourceJava: resolved.sourceJava,
+        noCache: Boolean(body.noCache),
+      });
+
+      const labeled = result.mapping[0];
+      sendJson(res, 200, {
+        mapperId, field: task.field, state: task.state,
+        resultSource: result.fieldsFromCache > 0 ? "cache" : "model",
+        pipeline: labeled?.pipeline ?? [],
+        viewSteps: labeled
+          ? viewStepsFor(mapperId, [
+              { targetField: labeled.targetField, pipeline: labeled.pipeline },
+            ])
+          : [],
+        targetField: labeled?.targetField,
+        unresolved: result.audit.unresolvedFields,
+        sliceText: task.sliceText,
+        fingerprint: vfp,
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  // ── Steering: user challenges a field's pipeline; judge verifies ──────────
+  if (pathname === "/api/verify-suggestion" && req.method === "POST") {
+    try {
+      if (!isModelConfigured()) {
+        sendJson(res, 503, { error: "MODEL_API_KEY not configured (judge runs on the server)." });
+        return;
+      }
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string; field?: string; claim?: string;
+        currentPipeline?: unknown[]; worktree?: string;
+      };
+      const mapperId = body.mapperId?.trim();
+      const field = body.field?.trim();
+      const claim = body.claim?.trim();
+      if (!mapperId || !field || !claim) {
+        sendJson(res, 400, { error: "mapperId, field, and claim required" }); return;
+      }
+
+      let worktree: string | undefined;
+      try { worktree = resolveMapperWorktree(body.worktree); }
+      catch { worktree = body.worktree?.trim() || getEnvOptional("MAPPER_WORKTREE") || undefined; }
+
+      const resolved = await resolveMapperAst(mapperId, paths.registry, { worktree, remote: false });
+      const registry = loadRegistry(paths.registry);
+      const mapperEntry = registry.mappers.find((m) => m.id === mapperId)!;
+      const tasks = buildLabelTasks({ mapper: mapperEntry, sourceJava: resolved.sourceJava, worktree });
+      const leaf = field.split(".").pop()!.toLowerCase();
+      const task = tasks.tasks.find(
+        (t) => t.field.toLowerCase() === field.toLowerCase()
+          || t.field.split(".").pop()!.toLowerCase() === leaf,
+      );
+
+      const schemaJson = loadSchemaJson(mapperId);
+      const vfp = computeVerifiedFingerprint({ sourceJava: resolved.sourceJava, schemaJson });
+
+      const outcome = await judgeSuggestion({
+        provider: createModelProvider(),
+        mapperId,
+        fingerprint: vfp,
+        field: task?.field ?? field,
+        sliceText: task?.sliceText ?? "",
+        sourceJava: resolved.sourceJava,
+        currentPipeline: body.currentPipeline ?? [],
+        userClaim: claim,
+        schemaContext: schemaContextForLabeler(mapperId),
+      });
+
+      sendJson(res, 200, {
+        ...outcome,
+        viewSteps:
+          outcome.outcome === "corrected"
+            ? viewStepsFor(mapperId, [
+                { targetField: task?.field ?? field, pipeline: outcome.pipeline },
+              ])
+            : undefined,
       });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });

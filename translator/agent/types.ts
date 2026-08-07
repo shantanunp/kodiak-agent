@@ -24,6 +24,12 @@ export interface AgentJobField {
   javaTargetField: string;
   /** Legacy optional hints from older offline jobs. */
   indexerOps?: unknown[];
+  /** Self-contained code slice (statement + local dataflow + helper closure). */
+  slice?: string;
+  /** Analyzer verdict for this field. */
+  auditState?: "mapped" | "unresolved";
+  /** Analyzer note (e.g. the opaque call to inspect) for unresolved fields. */
+  auditNote?: string;
 }
 
 export interface AgentJob {
@@ -44,6 +50,16 @@ export interface AgentJob {
   /** Exact npm commands to run in VS Code after the agent writes result.json. */
   vscodeSteps: string[];
   fields: AgentJobField[];
+  /** Analyzer checklist summary embedded so import can detect gaps. */
+  audit?: {
+    checklistSource?: "target-type" | "write-sites";
+    targetTypeFile?: string;
+    declaredFields: number;
+    mapped: number;
+    unmapped: number;
+    unresolved: number;
+    unmappedFields: string[];
+  };
   paths: {
     jobDir: string;
     jobFile: string;
