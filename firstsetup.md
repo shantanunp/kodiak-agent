@@ -52,6 +52,7 @@ Shell tip: `npm run` does **not** load `$MAPPER_WORKTREE` from `.env` into the s
 npm run cache:clear
 rm -f registry/runs.jsonl
 rm -rf .cache/metrics
+rm -f ui/pipeline-viewer/data/*.view.json   # viewer demo export — otherwise pipelines still show
 # optional: rm -f registry/defects.jsonl
 ```
 
@@ -62,6 +63,7 @@ npm run cache:clear
 rm -f registry/runs.jsonl registry/defects.jsonl
 rm -rf .cache/metrics .cache/agent-jobs .cache/fields
 rm -rf registry/verified/order-request-mapper
+rm -f ui/pipeline-viewer/data/*.view.json
 ```
 
 Restart `ui:serve` if running; hard-refresh the browser (Ctrl+Shift+R).
@@ -142,6 +144,7 @@ export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
 npm run cache:clear
 rm -f registry/runs.jsonl
 rm -rf .cache/metrics .cache/fields
+rm -f ui/pipeline-viewer/data/*.view.json
 
 npm run label -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE" --analyzer
 npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
@@ -172,9 +175,11 @@ npm run cache:clear
 rm -f registry/runs.jsonl registry/defects.jsonl
 rm -rf .cache/metrics .cache/agent-jobs .cache/fields
 rm -rf registry/verified/order-request-mapper
+rm -f ui/pipeline-viewer/data/*.view.json
 
 ls .cache/fields 2>/dev/null || echo "no field cache"
 test ! -f registry/runs.jsonl && echo "no runs.jsonl"
+ls ui/pipeline-viewer/data/*.view.json 2>/dev/null || echo "no view.json"
 ```
 
 ### 2c. Export offline job
@@ -198,18 +203,25 @@ npm run label -- \
 
 Copy: `.cache/agent-jobs/order-request-mapper/<fingerprint>/job.json`
 
-### 2d. VS Code agent — fill `result.json`
+### 2d. VS Code custom agent (full E2E) or fill `result.json`
 
-1. Open `job.json` in VS Code (this repo).
-2. Copilot **Agent** mode — paste:
+**Terminal approvals:** workspace [`.vscode/settings.json`](.vscode/settings.json) turns on `chat.tools.terminal.autoApproveWorkspaceNpmScripts` so `npm run …` scripts from this repo’s `package.json` (e.g. `label:export`, `label:import`) can auto-approve. Requires a **trusted** workspace and `chat.tools.terminal.enableAutoApprove`. Org policy can still force prompts. Session bypass: permissions picker → Bypass Approvals, or `/autoApprove`.
+
+**Preferred — custom agent (includes export):** in Copilot chat, select agent **kodiak-label**. The input hint shows:
+
+```text
+Label order-request-mapper offline with worktree /home/shantanu/Workspace/vscode/Kmismomapper
+```
+
+Send that (or your mapper/worktree). The agent runs `label:export` → fills `result.json` → `label:import` → `from-cache-only`.
+
+**Or — job already exported:** open `job.json` and paste:
 
 ```text
 Complete the offline label job in <full-path-to-job.json>
 ```
 
-3. Agent writes `result.json` beside `job.json`.  
-   Instructions auto-attach (`.github/instructions/kodiak-agent-label.instructions.md` / `.cursor/rules/kodiak-agent-label.mdc`).  
-   Only use fields listed in `job.json`.
+Agent writes `result.json` beside `job.json`. Instructions auto-attach (`.github/instructions/kodiak-agent-label.instructions.md` / `.cursor/rules/kodiak-agent-label.mdc`). Only use fields listed in `job.json`.
 
 ### 2e. Import + load from cache
 
@@ -260,6 +272,7 @@ cd /home/shantanu/Workspace/VS_CODE_V2/kodiak-agent
 npm run cache:clear
 rm -f registry/runs.jsonl registry/defects.jsonl
 rm -rf .cache/metrics .cache/agent-jobs .cache/fields registry/verified/order-request-mapper
+rm -f ui/pipeline-viewer/data/*.view.json
 
 export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
 npm run label:export -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE"
@@ -277,9 +290,9 @@ npm run ui:serve
 | Symptom | Likely cause |
 | --- | --- |
 | Report miss signals all 0 | Never labeled/imported after wipe |
-| Field still labeled after wipe | New label after wipe, or verified store not deleted |
+| Field still labeled after wipe | New label after wipe, verified store not deleted, or leftover `ui/pipeline-viewer/data/*.view.json` |
 | “Labeled from model” while intending offline | `MODEL_API_KEY` still set |
-| UI looks unchanged | Old `ui:serve` / browser cache |
+| UI looks unchanged | Old `ui:serve` / browser cache / uncleared `.view.json` |
 
 ---
 
