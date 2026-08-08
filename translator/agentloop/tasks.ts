@@ -12,6 +12,7 @@ import { scanWriteSites, adapterFor } from "../../analyzer/scanWriteSites.js";
 import { runAuditGate } from "../../analyzer/auditGate.js";
 import { findTypeFile } from "../../analyzer/resolveType.js";
 import { missDiagnostics } from "../../analyzer/secondOpinion.js";
+import { injectionDiagnostics } from "./promptInjection.js";
 import type { AuditReport, WriteSlice } from "../../analyzer/types.js";
 import type { MapperEntry } from "../../src/registry/loadRegistry.js";
 
@@ -468,6 +469,11 @@ export function buildLabelTasks(options: {
       note: entry.note,
     };
   });
+
+  // Prompt-injection posture — suspicious imperative comments in slices.
+  diagnostics.push(
+    ...injectionDiagnostics(tasks.map((t) => ({ field: t.field, sliceText: t.sliceText }))),
+  );
 
   return { report, tasks, mapperClass, targetClass, checklistSource, targetTypeFile, diagnostics };
 }

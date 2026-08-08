@@ -196,6 +196,10 @@ export interface FieldPipelineCacheEntry {
   labeledAt: string;
   labelModel: string;
   cachedAt: string;
+  /** Confidence badge — how this label was produced. */
+  provenance?: string;
+  /** Tool-loop investigation trace (replayable evidence). */
+  toolTrace?: Array<{ tool: string; input?: unknown; output?: unknown }>;
 }
 
 function fieldsDir(mapperId: string, fingerprint?: string): string {

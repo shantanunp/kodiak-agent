@@ -149,7 +149,7 @@ if (isMain) {
     },
   });
   const worktree =
-    values.worktree ?? getEnvOptional("MAPPER_WORKTREE") || undefined;
+    values.worktree ?? (getEnvOptional("MAPPER_WORKTREE") || undefined);
   if (worktree && !existsSync(worktree)) {
     console.error(`worktree not found: ${worktree}`);
     process.exit(1);

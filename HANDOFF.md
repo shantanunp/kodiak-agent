@@ -34,6 +34,7 @@ npm run analyze -- --file <f> --mapper-class <C> --target-class <C> [--slices]
 npm run label -- --mapper <id> --worktree <path> --analyzer [--promote] [--verify] [--critic]
 npm run label:all -- --worktree <path>       # store-aware batch (verified skips are free)
 npm run registry:check -- --worktree <path>  # sourceFile + type resolve before onboarding
+npm run ci:check -- --worktree <path>        # fail merge if touched mappers' verified store is stale
 npm run label:export / label:import          # offline labeling jobs (Copilot agent mode)
 npm run judge:export / judge:import          # offline corrections
 ```
@@ -123,17 +124,17 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 Reviewed gaps beyond the core loop. Item 1 is built; the rest are specced for whoever continues.
 
 - [x] **1. Measurement / scorecard** — `npm run report [-- --json] [--strict] [--worktree <p>] [--mapper <id>]`. Runs the deterministic pipeline over every registry entry (zero model calls) and prints per mapper: declared fields, mapped %, unmapped, unresolved, checklist source, verified-store status + correction count + stale entries, recorded run signals (cross-check flip rate = scanner pattern gaps, tool-loop fire/resolve rate = slice quality), and golden-dataset accuracy where a golden file exists. `--strict` exits 2 on any concern (CI-ready). Run metrics are appended per label run to `.cache/metrics/{mapperId}.jsonl`; golden files live in `validator/golden-dataset/{mapperId}.json` comparing pipeline SHAPE (ordered step kinds), not prose.
-- [ ] **2. Prompt-injection posture.** Source code is untrusted input flowing into prompts. Mitigated so far: all three prompts (labeler, cross-check, judge) now state that code/comments/strings are data, never instructions; deterministic checks cap the blast radius (a poisoned label still can't pass the gate, enter the store without a verified citation, or write code). Still to do: flag suspicious imperative comments in slices as a diagnostic, and document the threat model in ARCHITECTURE.md.
-- [ ] **3. Change lifecycle / CI mode.** `incrementalScan` detects changed files but isn't wired to labeling. Build `npm run ci:check`: for mappers touched in a diff, recompute the verified fingerprint and fail (or auto-export a re-label job) when the store went stale — makes drift between code and documented mappings impossible to merge. Related: prune policy for `registry/verified/` (keep latest N fingerprints per mapper; `listStaleFingerprints` already enumerates them).
+- [x] **2. Prompt-injection posture.** Prompts treat source as data; `prompt-injection-risk` diagnostics on suspicious comments; threat model in ARCHITECTURE.md.
+- [x] **3. Change lifecycle / CI mode.** `npm run ci:check` — mappers touched in a git diff (or `--all`); fails on stale verified fingerprints. Prune policy for old fingerprints still open.
 - [ ] **4. Review/approval state in the store.** `--promote` trusts the runner. Add a third status beside `verified` / `user-corrected`: `pending-review`, plus a viewer diff against the previous fingerprint's entry and an approve action. Today git review of the store JSON is the only checkpoint.
-- [x] **5. Scale ergonomics (partial).** `npm run label:all` (store-aware skip on verified hit); `npm run registry:check` (sourceFile + targetType resolve). Still open: parallel field labeling with a concurrency cap.
-- [ ] **6. Confidence surfacing.** Per-field provenance badge in the viewer — labeled from slice / needed escalation / needed tool loop / cross-check flip. The data already exists in the run path; this is purely surfacing so reviewers know where to look.
+- [x] **5. Scale ergonomics.** `label:all`, `registry:check`, parallel field labeling (default concurrency 4; `--concurrency N` / viewer bulk).
+- [x] **6. Confidence surfacing.** Per-field provenance badge (slice / escalation / tool-loop / cross-check / verified / cache) in checklist API + viewer; re-label bypasses cache.
 
 Explicitly rejected: a second discovery agent (verifier, not discoverer — see PROJECT.md), a database (git + JSON is right at this scale), a workflow engine (the pipeline is a function-call chain by design).
 
 ## Pending — pick up here
 
-**Next increment (do in this order):** confidence surfacing (#6), parallel field labeling, then architecture #2/#3 (prompt-injection diagnostics, `ci:check`). See backlog sections below.
+**Next increment (do in this order):** store `pending-review` (#4), verified-store prune policy, then remaining polish (offline bulk-label parity, Python adapter).
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
 - [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
@@ -153,8 +154,9 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **AGT-5** Mutation testing on fixture golden pipelines (`translator/agentloop/mutation.ts`)
 - [x] **AGT-6** Judge agree/reject surfaced in report (corrected store vs defects.jsonl)
 - [x] **registry:check** / **label:all** scale ergonomics (store-aware batch)
-- [ ] **Cross-check trace surfacing**: flips currently land in the task note + stderr; also surface them in the viewer checklist response as diagnostics.
-- [ ] **Tool-loop trace persistence**: `runAgentLoop` currently logs the investigation trace to stderr; persist it into the field-cache entry (add optional `toolTrace` to the cache entry type) so agentic runs are replayable evidence.
+- [x] **Confidence badges** + parallel labeling + `ci:check` + prompt-injection diagnostics
+- [x] **Cross-check trace surfacing**: flips in checklist `diagnostics` + provenance tag
+- [x] **Tool-loop trace persistence**: optional `toolTrace` + `provenance` on field-cache entries
 - [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
 
 - [ ] **Python adapter**. Contract is `analyzer/types.ts::LanguageAdapter` — implement `analyzer/adapters/python.ts` with tree-sitter (`web-tree-sitter` + `tree-sitter-python` WASM; both installable from npm, satisfies network policy). Write patterns: `obj.attr = expr`, dataclass/pydantic ctor kwargs, `dict["k"] = v`, `setattr`. Register in `scanWriteSites.ADAPTERS`; add `language:` per mapper in the registry (default java). Consider migrating the Java adapter to tree-sitter-java at the same time (error-tolerant parsing; current `java-parser` throws on constructs it doesn't know — that failure is caught and surfaced in diagnostics, but tolerance is better).

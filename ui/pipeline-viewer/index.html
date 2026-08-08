@@ -67,7 +67,14 @@
   .avail-corrected{background:var(--op);}
   .avail-cached{background:var(--target);}
   .avail-none{background:var(--line);}
+  .prov-b{font-size:9px;font-weight:600;letter-spacing:.03em;border-radius:4px;padding:1px 5px;flex-shrink:0;text-transform:uppercase;background:var(--raw-bg);color:var(--raw);}
+  .prov-slice{background:var(--source-bg);color:var(--source);}
+  .prov-escalation,.prov-tool-loop,.prov-cross-check{background:var(--cond-bg);color:var(--cond);}
+  .prov-verified,.prov-corrected{background:var(--op-bg);color:var(--op);}
+  .prov-cache{background:var(--target-bg);color:var(--target);}
   .fl-legend{font-size:11px;color:var(--ink-faint);margin:10px 6px 2px;line-height:1.8;}
+  .re-label{margin-top:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;}
+  .re-label:hover{border-color:var(--ink-faint);color:var(--ink);}
   .correct-box{margin-top:16px;background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:12px;}
   .correct-box label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:6px;}
   .correct-row{display:flex;gap:8px;}
@@ -134,7 +141,7 @@
       <div id="fieldItems"><p style="font-size:12px;color:var(--ink-faint);padding:6px">Loading checklist…</p></div>
       <div id="flTriage"></div>
       <div id="flDiag"></div>
-      <div class="fl-legend">Badge: analyzer state.&nbsp; Dot: label — <span style="color:var(--source)">verified</span> · <span style="color:var(--op)">corrected</span> · <span style="color:var(--target)">cached</span> · gray = labeled on click.</div>
+      <div class="fl-legend">Badge: analyzer state.&nbsp; Dot: store/cache.&nbsp; Tag: how labeled — slice · escalation · tool-loop · cross-check · verified.</div>
     </aside>
     <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
   </div>
@@ -544,6 +551,20 @@ function ensureFieldPanel(){
 }
 
 function stateBadge(st){return `<span class="state-b state-${st}">${st.toUpperCase()}</span>`;}
+function provenanceBadge(p){
+  if(!p) return '';
+  const cls = String(p).replace(/[^a-z0-9-]/gi,'');
+  return `<span class="prov-b prov-${cls}" title="Labeled via ${esc(p)}">${esc(p)}</span>`;
+}
+const PROVENANCE_NOTE = {
+  verified: 'verified store',
+  corrected: 'user-corrected',
+  cache: 'field cache',
+  slice: 'labeled from slice',
+  escalation: 'needed escalation',
+  'tool-loop': 'needed tool loop',
+  'cross-check': 'cross-check flip',
+};
 
 async function loadChecklist(){
   if(!currentMapper) return;
@@ -630,10 +651,11 @@ function renderTreeNodes(node) {
     const isLeaf = !!child.field && child.children.size === 0;
     if (isLeaf) {
       const f = child.field;
-      return `<button type="button" class="fielditem${activeField === f.field ? ' active' : ''}" data-field="${esc(f.field)}" title="${esc(f.field)}${f.note ? ' — ' + f.note : ''}">
+      return `<button type="button" class="fielditem${activeField === f.field ? ' active' : ''}" data-field="${esc(f.field)}" title="${esc(f.field)}${f.note ? ' — ' + f.note : ''}${f.provenance ? ' · ' + f.provenance : ''}">
         <span class="tree-spacer"></span>
         <span class="avail-dot avail-${f.labelAvailability}"></span>
         <span class="tree-label">${esc(child.name)}</span>
+        ${provenanceBadge(f.provenance)}
         ${stateBadge(f.state)}
       </button>`;
     }
@@ -723,36 +745,47 @@ function renderFieldList(){
   }
 }
 
-function renderFieldSteps(field, steps, sourceNote){
+function renderFieldSteps(field, steps, sourceNote, provenance){
   activeField = field;
   renderFieldList();
   const canvas = document.getElementById('canvas');
+  const provLine = provenance
+    ? `<div class="ai-banner"><span>◇</span><span>Provenance: <b>${esc(PROVENANCE_NOTE[provenance]||provenance)}</b></span></div>`
+    : '';
   if(!steps || !steps.length){
     canvas.innerHTML = `<span class="target-name">${esc(field)}</span>
+      ${provLine}
       <p style="color:var(--ink-soft);font-size:13.5px">${esc(sourceNote||'No pipeline for this field.')}</p>
+      <button type="button" class="re-label" id="reLabelBtn">Re-label (bypass cache)</button>
       ${correctionBoxHtml(field)}`;
   } else {
     canvas.innerHTML = `
       <span class="target-name">${esc(field)}</span>
+      ${provLine}
       ${sourceNote?`<div class="ai-banner"><span>&#10003;</span><span>${esc(sourceNote)}</span></div>`:''}
       <div class="pipeline">${steps.map(s=>renderStep(s)).join('')}</div>
       <div class="summary"><strong>Summary:</strong> ${esc(summarize(steps))}</div>
+      <button type="button" class="re-label" id="reLabelBtn">Re-label (bypass cache)</button>
       ${correctionBoxHtml(field)}`;
   }
   wireCorrectionBox(field, steps||[]);
+  const re = document.getElementById('reLabelBtn');
+  if(re) re.addEventListener('click', () => openField(field, true));
 }
 
-async function openField(field){
+async function openField(field, noCache){
   const key = pipelineKey(field);
-  if(fieldPipelines[key]){
-    renderFieldSteps(field, fieldPipelines[key], null);
+  if(!noCache && fieldPipelines[key]){
+    const f = checklist?.fields?.find(x => x.field === field);
+    renderFieldSteps(field, fieldPipelines[key], null, f?.provenance);
     return;
   }
+  if(noCache) delete fieldPipelines[key];
   renderFieldSteps(field, null, 'Labeling this field on demand…');
   try{
     const res = await fetch('/api/label-field',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mapperId:currentMapper, field})});
+      body:JSON.stringify({mapperId:currentMapper, field, noCache: !!noCache})});
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
     if(data.outcome==='offline-exported'){
@@ -767,13 +800,24 @@ async function openField(field){
       return;
     }
     fieldPipelines[key] = data.viewSteps||[];
+    if(checklist?.fields){
+      const row = checklist.fields.find(x => x.field === field);
+      if(row && data.provenance){
+        row.provenance = data.provenance;
+        row.labelAvailability = data.resultSource === 'verified' || data.resultSource === 'corrected'
+          ? data.resultSource
+          : data.resultSource === 'cache' ? 'cached' : 'cached';
+      }
+    }
     renderFieldSteps(field, fieldPipelines[key],
-      `Labeled from ${data.resultSource}${data.unresolved?.length?` — unresolved: ${data.unresolved.join(', ')}`:''}`);
+      `Labeled from ${data.resultSource}${data.unresolved?.length?` — unresolved: ${data.unresolved.join(', ')}`:''}`,
+      data.provenance);
   }catch(e){
     renderFieldSteps(field, null, e.message);
   }
 }
 
+const BULK_CONCURRENCY = 4;
 let bulkStop = false;
 async function bulkLabel(fields){
   const btn = document.getElementById('bulkBtn');
@@ -781,23 +825,40 @@ async function bulkLabel(fields){
   if(btn.dataset.running){ bulkStop = true; return; }
   btn.dataset.running = '1'; bulkStop = false;
   btn.textContent = 'Stop';
-  let done = 0, failed = 0;
-  for(const field of fields){
-    if(bulkStop) break;
-    status.textContent = `${done+failed+1}/${fields.length}: ${field}…`;
-    try{
-      const res = await fetch('/api/label-field',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({mapperId:currentMapper, field})});
-      const data = await res.json();
-      if(res.ok && data.viewSteps){ fieldPipelines[pipelineKey(field)] = data.viewSteps; done++; }
-      else if(res.ok && data.outcome==='offline-exported'){ status.textContent = 'Offline mode — use the exported job flow instead.'; break; }
-      else failed++;
-    }catch{ failed++; }
+  let done = 0, failed = 0, next = 0;
+  async function worker(){
+    for(;;){
+      if(bulkStop) return;
+      const i = next++;
+      if(i >= fields.length) return;
+      const field = fields[i];
+      status.textContent = `${done+failed+1}/${fields.length}: ${field}…`;
+      try{
+        const res = await fetch('/api/label-field',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({mapperId:currentMapper, field})});
+        const data = await res.json();
+        if(res.ok && data.viewSteps){
+          fieldPipelines[pipelineKey(field)] = data.viewSteps;
+          const row = checklist?.fields?.find(x => x.field === field);
+          if(row){
+            if(data.provenance) row.provenance = data.provenance;
+            row.labelAvailability = 'cached';
+          }
+          done++;
+        } else if(res.ok && data.outcome==='offline-exported'){
+          status.textContent = 'Offline mode — use the exported job flow instead.';
+          bulkStop = true;
+          return;
+        } else failed++;
+      }catch{ failed++; }
+    }
   }
+  await Promise.all(Array.from({length: Math.min(BULK_CONCURRENCY, fields.length)}, () => worker()));
   delete btn.dataset.running;
-  status.textContent = `Done: ${done} labeled${failed?`, ${failed} failed`:''}${bulkStop?' (stopped)':''}. Reload to refresh dots.`;
+  status.textContent = `Done: ${done} labeled${failed?`, ${failed} failed`:''}${bulkStop?' (stopped)':''}.`;
   btn.textContent = 'Label all mapped';
+  renderFieldList();
 }
 
 function correctionBoxHtml(field){

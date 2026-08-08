@@ -70,6 +70,8 @@ const { values } = parseArgs({
     verify: { type: "boolean", default: false },
     /** AGT-4 — extra critic call per field for cited missing transforms/filters. */
     critic: { type: "boolean", default: false },
+    /** Max concurrent field label calls (default 4). */
+    concurrency: { type: "string" },
   },
 });
 
@@ -420,6 +422,9 @@ async function main(): Promise<void> {
           verify: Boolean(values.verify),
           verifyProvider,
           critic: Boolean(values.critic),
+          concurrency: values.concurrency
+            ? Math.max(1, Number(values.concurrency) || 4)
+            : undefined,
         });
       } catch (err) {
         await offlineAgentFallback(

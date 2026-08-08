@@ -107,6 +107,19 @@ Some environments block outbound calls to model APIs; there, the agent seat is f
 
 Online and offline are therefore the same pipeline with a different driver in the seat; guarantees (completeness, reproducibility, sticky corrections) are identical in both modes.
 
+## Threat model — source as untrusted prompt input
+
+Mapper source (and comments / string literals inside it) is **untrusted data** that flows into model prompts. An adversary who can commit to a mapper repo could try to jailbreak the labeler, cross-check, or judge via imperative comments ("ignore previous instructions…").
+
+Mitigations in place:
+
+1. **Prompt framing** — labeler, cross-check, critic, and judge prompts state that code/comments/strings are data, never instructions.
+2. **Deterministic blast-radius caps** — a poisoned label still cannot pass the audit gate, enter the verified store without a citation-checked judge path, or write production code.
+3. **Slice diagnostics** — `prompt-injection-risk` findings flag suspicious imperative comments in slices (`translator/agentloop/promptInjection.ts`) so reviewers see them in the checklist UI.
+4. **Citation checks** — cross-check / critic / judge claims must cite lines that exist in the source; unverifiable claims are dropped.
+
+Out of scope for this tool: preventing a malicious mapper author from making the *business* mapping look different — that is a code review problem. Kodiak's job is that AI-mediated *documentation* of the mapping cannot silently invent steps or skip the gate.
+
 ## What is built so far (POC status)
 
 | Piece | Status |

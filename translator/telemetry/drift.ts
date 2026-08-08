@@ -21,15 +21,6 @@ import {
   listStaleFingerprints,
 } from "../verified/store.js";
 
-const { values } = parseArgs({
-  options: {
-    mapper: { type: "string" },
-    json: { type: "boolean", default: false },
-    worktree: { type: "string" },
-    registry: { type: "string", default: paths.registry },
-  },
-});
-
 export type DriftStatus = "current" | "stale" | "never-verified" | "unresolvable";
 
 export interface DriftRow {
@@ -118,6 +109,14 @@ const isMain =
   process.argv[1]?.endsWith("drift.ts") || process.argv[1]?.endsWith("drift.js");
 
 if (isMain) {
+  const { values } = parseArgs({
+    options: {
+      mapper: { type: "string" },
+      json: { type: "boolean", default: false },
+      worktree: { type: "string" },
+      registry: { type: "string", default: paths.registry },
+    },
+  });
   const rows = await checkDrift({
     registryPath: values.registry!,
     worktree: values.worktree,

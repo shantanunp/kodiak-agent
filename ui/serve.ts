@@ -335,34 +335,61 @@ createServer(async (req, res) => {
           f.targetField.split(".").pop()!.toLowerCase(), f,
         ]),
       );
-      let cachedLeaves = new Set<string>();
-      if (isModelConfigured()) {
-        const config = loadModelConfig();
-        const fp = computePipelineFingerprint({
-          sourceJava: resolved.sourceJava, schemaJson,
-          model: `${config.apiStyle}:${config.model}`, version: PIPELINE_CACHE_VERSION,
-        });
-        cachedLeaves = new Set(
-          listFieldPipelineCaches(mapperId, fp).map((e) =>
-            e.javaTargetField.split(".").pop()!.toLowerCase(),
-          ),
-        );
-      }
+      const cachedEntries = isModelConfigured()
+        ? (() => {
+            const config = loadModelConfig();
+            const fp = computePipelineFingerprint({
+              sourceJava: resolved.sourceJava,
+              schemaJson,
+              model: `${config.apiStyle}:${config.model}`,
+              version: PIPELINE_CACHE_VERSION,
+            });
+            return listFieldPipelineCaches(mapperId, fp);
+          })()
+        : [];
+      const cachedLeaves = new Set(
+        cachedEntries.map((e) => e.javaTargetField.split(".").pop()!.toLowerCase()),
+      );
+      const cachedByLeaf = new Map(
+        cachedEntries.map((e) => [
+          e.javaTargetField.split(".").pop()!.toLowerCase(),
+          e,
+        ] as const),
+      );
+
+      // Surface cross-check flips in diagnostics (injection risks already in tasks.diagnostics).
+      const crossCheckNotes = tasks.tasks
+        .filter((t) => t.note?.startsWith("cross-check:"))
+        .map((t) => `${t.field}: ${t.note}`);
+      const diagnostics = [...(tasks.diagnostics ?? []), ...crossCheckNotes];
 
       sendJson(res, 200, {
         mapperId,
         checklistSource: tasks.checklistSource,
         targetTypeFile: tasks.targetTypeFile,
         worktreeUsed: worktree ?? null,
-        diagnostics: tasks.diagnostics,
+        diagnostics,
         declaredFields: tasks.report.declaredFields,
         fields: tasks.tasks.map((t) => {
           const leaf = t.field.split(".").pop()!.toLowerCase();
           const v = verifiedByLeaf.get(leaf);
+          const cached = cachedByLeaf.get(leaf);
+          const provenance = v
+            ? (v.status === "user-corrected" ? "corrected" : "verified")
+            : cached?.provenance
+              ? cached.provenance
+              : cached
+                ? "cache"
+                : t.note?.startsWith("cross-check:")
+                  ? "cross-check"
+                  : t.state === "unresolved"
+                    ? "escalation"
+                    : undefined;
           return {
             field: t.field,
             state: t.state,
             note: t.note,
+            provenance,
             labelAvailability: v
               ? (v.status === "user-corrected" ? "corrected" : "verified")
               : cachedLeaves.has(leaf) ? "cached" : "none",
@@ -416,6 +443,7 @@ createServer(async (req, res) => {
       if (vHit) {
         sendJson(res, 200, { mapperId, field: task.field, state: task.state,
           resultSource: vHit.status === "user-corrected" ? "corrected" : "verified",
+          provenance: vHit.status === "user-corrected" ? "corrected" : "verified",
           pipeline: vHit.pipeline,
           viewSteps: viewStepsFor(mapperId, [
             { targetField: vHit.targetField, pipeline: vHit.pipeline },
@@ -464,9 +492,13 @@ createServer(async (req, res) => {
       });
 
       const labeled = result.mapping[0];
+      const provenance =
+        result.fieldProvenance?.[task.field] ??
+        (result.fieldsFromCache > 0 ? "cache" : "slice");
       sendJson(res, 200, {
         mapperId, field: task.field, state: task.state,
         resultSource: result.fieldsFromCache > 0 ? "cache" : "model",
+        provenance,
         pipeline: labeled?.pipeline ?? [],
         viewSteps: labeled
           ? viewStepsFor(mapperId, [

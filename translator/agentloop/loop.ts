@@ -30,8 +30,16 @@ import { findStepSmells, smellDiagnostics } from "./smells.js";
 import { verifyFieldConsistency, type VerifyDivergence } from "./verify.js";
 import { criticField, type CriticFinding } from "./critic.js";
 import { scoreLabeling, scoresForJournal } from "../report/scorers.js";
+import { mapPool } from "./pool.js";
+import {
+  provenanceForTask,
+  type LabelProvenance,
+} from "./provenance.js";
 import type { ModelConfig } from "../model/config.js";
 import { p95LatencyMs, type ToolTraceEntry } from "../model/provider.js";
+
+/** Default parallel field labels (independent model calls). Override via concurrency. */
+export const DEFAULT_LABEL_CONCURRENCY = 4;
 
 export interface AgentLoopOptions {
   fingerprint: string;
@@ -51,6 +59,8 @@ export interface AgentLoopOptions {
   verifyProvider?: ModelProvider;
   /** AGT-4 — extra critic call per labeled field (cited missing transforms). */
   critic?: boolean;
+  /** Max concurrent field label calls (default 4). Set 1 for serial. */
+  concurrency?: number;
 }
 
 export interface AgentLoopAudit {
@@ -74,6 +84,8 @@ export interface AgentLoopResult {
   verifyDivergences?: VerifyDivergence[];
   /** AGT-4 — cited missing transforms/filters from the critic. */
   criticFindings?: CriticFinding[];
+  /** Per-field provenance for viewer confidence badges. */
+  fieldProvenance?: Record<string, LabelProvenance>;
 }
 
 function escalationOps(
@@ -146,23 +158,44 @@ export async function runAgentLoop(
   const unmappedFields: string[] = [];
   const verifyDivergences: VerifyDivergence[] = [];
   const criticFindings: CriticFinding[] = [];
+  const fieldProvenance: Record<string, LabelProvenance> = {};
+
+  const toLabel: FieldTask[] = [];
 
   for (const task of tasks.tasks) {
     if (task.state === "unmapped") {
       unmappedFields.push(task.field);
       continue;
     }
-
-    // Field cache (runtime layer; verified store handled upstream).
     const cached = !options.noCache
       ? getFieldPipelineCache(mapperId, options.fingerprint, task.field)
       : null;
     if (cached) {
       mapping.push(cached.mapping as FieldMappingJson);
       fieldsFromCache++;
+      fieldProvenance[task.field] =
+        (cached.provenance as LabelProvenance | undefined) ?? "cache";
       continue;
     }
+    toLabel.push(task);
+  }
 
+  const concurrency = options.concurrency ?? DEFAULT_LABEL_CONCURRENCY;
+
+  interface FieldLabelResult {
+    field: string;
+    labeled?: FieldMappingJson;
+    unresolved?: boolean;
+    provenance?: LabelProvenance;
+    toolTrace?: ToolTraceEntry[];
+    toolLoopAttempted?: boolean;
+    toolLoopOk?: boolean;
+    verifyDiv?: VerifyDivergence | null;
+    criticHits?: CriticFinding[];
+    criticDropped?: string[];
+  }
+
+  const outcomes = await mapPool(toLabel, concurrency, async (task): Promise<FieldLabelResult> => {
     const indexerOps =
       task.state === "mapped"
         ? [{ kind: "RAW", meta: { code: task.sliceText } }]
@@ -170,8 +203,7 @@ export async function runAgentLoop(
 
     let response: FieldMappingResponse | null = null;
     let opsUsed: unknown[] = indexerOps;
-    // Mapped fields get one focused call + one full-source retry if the model
-    // returns recognized=false or an empty pipeline (common on bare constants).
+    let usedEscalationRetry = false;
     const attempts =
       1 +
       (task.state === "unresolved"
@@ -186,6 +218,7 @@ export async function runAgentLoop(
                 response?.recognized === true &&
                 (response.pipeline?.length ?? 0) === 0,
             });
+      if (attempt > 0) usedEscalationRetry = true;
       opsUsed = ops;
       response = await provider.labelFieldMapping({
         javaTargetField: task.field,
@@ -195,9 +228,11 @@ export async function runAgentLoop(
       if (response?.recognized && (response.pipeline?.length ?? 0) > 0) break;
     }
 
-    // Last resort for unresolved fields: Copilot-style investigation loop.
+    let toolTrace: ToolTraceEntry[] | undefined;
+    let toolLoopAttempted = false;
+    let toolLoopOk = false;
     if (task.state === "unresolved" && !response?.recognized && options.modelConfig) {
-      toolLoopRuns++;
+      toolLoopAttempted = true;
       try {
         const investigated = await investigateField({
           config: options.modelConfig,
@@ -210,12 +245,13 @@ export async function runAgentLoop(
           investigated.text.replace(/```json|```/g, "").trim(),
         ) as FieldMappingResponse & { toolTrace?: ToolTraceEntry[] };
         if (parsed && typeof parsed === "object") {
-          if (parsed.recognized) toolLoopResolved++;
+          if (parsed.recognized) toolLoopOk = true;
           response = parsed;
-          if (investigated.trace.length > 0) {
+          toolTrace = investigated.trace.length > 0 ? investigated.trace : undefined;
+          if (toolTrace?.length) {
             console.error(
-              `[tool-loop] ${task.field}: ${investigated.trace.length} tool call(s): ` +
-                investigated.trace.map((t) => t.tool).join(" -> "),
+              `[tool-loop] ${task.field}: ${toolTrace.length} tool call(s): ` +
+                toolTrace.map((t) => t.tool).join(" -> "),
             );
           }
         }
@@ -225,8 +261,7 @@ export async function runAgentLoop(
     }
 
     if (task.state === "unresolved" && !response?.recognized) {
-      stillUnresolved.push(task.field);
-      continue;
+      return { field: task.field, unresolved: true, toolLoopAttempted, toolLoopOk };
     }
 
     const labeled = applyFieldMappingResponse(
@@ -234,22 +269,23 @@ export async function runAgentLoop(
       response ?? { recognized: false, reason: "no model response" },
       "model",
     );
-    // Never promote an empty pipeline as a successful label — the e2e gate and
-    // viewers treat that as a real failure mode (model declined / omitted steps).
-    // Mapped fields that still have no steps are unresolved from the agent's view.
     if (labeled.pipeline.length === 0) {
-      stillUnresolved.push(task.field);
       console.error(
         `[agent-loop] ${task.field}: model returned no pipeline steps; leaving unresolved`,
       );
-      continue;
+      return { field: task.field, unresolved: true, toolLoopAttempted, toolLoopOk };
     }
-    mapping.push(labeled);
-    fieldsLabeled++;
 
-    // AGT-3 — opt-in self-consistency (only for freshly labeled fields).
+    const provenance = provenanceForTask({
+      taskState: task.state,
+      note: task.note,
+      usedToolLoop: toolLoopAttempted && toolLoopOk,
+      usedEscalationRetry,
+    });
+
+    let verifyDiv: VerifyDivergence | null = null;
     if (options.verify) {
-      const div = await verifyFieldConsistency({
+      verifyDiv = await verifyFieldConsistency({
         provider,
         verifyProvider: options.verifyProvider,
         task,
@@ -257,15 +293,15 @@ export async function runAgentLoop(
         schemaContext: options.schemaContext,
         indexerOps: opsUsed,
       });
-      if (div) {
-        verifyDivergences.push(div);
+      if (verifyDiv) {
         console.error(
-          `[verify] ${div.field}: diverge first=[${div.firstKinds}] second=[${div.secondKinds}]`,
+          `[verify] ${verifyDiv.field}: diverge first=[${verifyDiv.firstKinds}] second=[${verifyDiv.secondKinds}]`,
         );
       }
     }
 
-    // AGT-4 — opt-in critic (cited missing transforms/filters).
+    let criticHits: CriticFinding[] | undefined;
+    let criticDropped: string[] | undefined;
     if (options.critic) {
       try {
         const { findings, dropped } = await criticField({
@@ -275,28 +311,59 @@ export async function runAgentLoop(
           sourceJava: options.sourceJava,
           mapping: labeled,
         });
-        for (const note of dropped) console.error(`[critic] ${note}`);
-        for (const f of findings) {
-          criticFindings.push(f);
-          console.error(
-            `[critic] ${f.field}: missing ${f.kind} — ${f.detail} (${f.evidence})`,
-          );
-        }
+        criticHits = findings;
+        criticDropped = dropped;
       } catch (err) {
-        console.error(`[critic] ${task.field}: ${(err as Error).message}`);
+        criticDropped = [`${task.field}: ${(err as Error).message}`];
       }
     }
+
+    return {
+      field: task.field,
+      labeled,
+      provenance,
+      toolTrace,
+      toolLoopAttempted,
+      toolLoopOk,
+      verifyDiv,
+      criticHits,
+      criticDropped,
+    };
+  });
+
+  for (const outcome of outcomes) {
+    if (outcome.toolLoopAttempted) toolLoopRuns++;
+    if (outcome.toolLoopOk) toolLoopResolved++;
+    for (const note of outcome.criticDropped ?? []) {
+      console.error(`[critic] ${note}`);
+    }
+    for (const f of outcome.criticHits ?? []) {
+      criticFindings.push(f);
+      console.error(
+        `[critic] ${f.field}: missing ${f.kind} — ${f.detail} (${f.evidence})`,
+      );
+    }
+    if (outcome.unresolved || !outcome.labeled || !outcome.provenance) {
+      stillUnresolved.push(outcome.field);
+      continue;
+    }
+    mapping.push(outcome.labeled);
+    fieldsLabeled++;
+    fieldProvenance[outcome.field] = outcome.provenance;
+    if (outcome.verifyDiv) verifyDivergences.push(outcome.verifyDiv);
 
     if (!options.noCache) {
       const now = new Date().toISOString();
       setFieldPipelineCache({
         fingerprint: options.fingerprint,
         mapperId,
-        javaTargetField: task.field,
-        mapping: labeled,
+        javaTargetField: outcome.field,
+        mapping: outcome.labeled,
         labeledAt: now,
         labelModel: provider.model,
         cachedAt: now,
+        provenance: outcome.provenance,
+        toolTrace: outcome.toolTrace,
       });
     }
   }
@@ -412,6 +479,7 @@ export async function runAgentLoop(
     groundingWarnings,
     verifyDivergences,
     criticFindings,
+    fieldProvenance,
   };
 }
 
