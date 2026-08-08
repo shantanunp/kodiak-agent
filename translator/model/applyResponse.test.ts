@@ -80,4 +80,24 @@ describe("applyFieldMappingResponse", () => {
       "trimValue removes leading and trailing whitespace.",
     );
   });
+
+  it("keeps model pipeline when targetField is omitted (falls back to entry)", () => {
+    const entry: FieldMapping = {
+      targetField: "priority",
+      pipeline: [],
+    };
+    const labeled = applyFieldMappingResponse(entry, {
+      recognized: true,
+      reason: "conditional constant",
+      pipeline: [
+        { kind: "read", sourceField: "shipment.status", summary: "Reads status." },
+        { kind: "constant", value: true, summary: "EXPRESS -> true." },
+      ],
+    });
+    assert.equal(labeled.targetField, "priority");
+    assert.equal(labeled.pipeline.length, 2);
+    assert.equal(labeled.pipeline[0]?.kind, "READ");
+    assert.equal(labeled.pipeline[1]?.kind, "CONSTANT");
+  });
 });
+

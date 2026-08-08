@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { paths } from "../../src/config/env.js";
 
 /** Bump when discovery/label prompts or merge rules change (invalidates pipeline cache). */
-export const PIPELINE_CACHE_VERSION = "7";
+export const PIPELINE_CACHE_VERSION = "9";
 
 const labelCacheRoot = resolve(dirname(fileURLToPath(import.meta.url)), "cache", "labels");
 

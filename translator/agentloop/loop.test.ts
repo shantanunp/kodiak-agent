@@ -444,3 +444,38 @@ public class RMapper {
     "helper-routed write (buildBackup -> setSecondary) attributed to secondary only");
   rmSync(wt, { recursive: true, force: true });
 });
+
+test("loop: empty pipelines are not accepted as labels (mapped fields stay unlabeled)", async () => {
+  const calls: string[] = [];
+  const provider: ModelProvider = {
+    model: "fake-model",
+    async labelFieldMapping(req) {
+      calls.push(req.javaTargetField);
+      // Always "recognize" priority with an empty pipeline — must not land in mapping.
+      if (req.javaTargetField === "priority") {
+        return { recognized: true, targetField: "Notice.priority", pipeline: [], reason: "confused" };
+      }
+      return {
+        recognized: true,
+        targetField: `Notice.${req.javaTargetField}`,
+        pipeline: [{ kind: "read", sourceField: "x", summary: "Reads." }],
+        reason: "ok",
+      };
+    },
+    async discoverMappings() { throw new Error("no"); },
+    async labelStep() { throw new Error("no"); },
+  };
+  const tasks = buildLabelTasks({ mapper: mapperEntry as any, sourceJava });
+  const result = await runAgentLoop({ mapperId: "loop-empty" }, tasks, provider, {
+    fingerprint: "empty-pipe-fp",
+    sourceJava,
+    noCache: true,
+    skipCrossCheck: true,
+  });
+  assert.ok(!result.mapping.some((m) => m.targetField === "priority" || m.targetField.endsWith(".priority")),
+    "empty-pipeline priority must not appear in mapping");
+  assert.ok(result.audit.unresolvedFields.includes("priority"),
+    "mapped field with empty pipeline becomes unresolved");
+  assert.ok(calls.filter((c) => c === "priority").length >= 2, "mapped empty-pipeline fields are retried with full source");
+});
+

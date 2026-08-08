@@ -109,6 +109,7 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 - [x] Judge online + offline (export/import), citation verification, mock defects + defects.jsonl
 - [x] Viewer: dynamic field panel, on-demand label, bulk-label with stop, unresolved triage by cause, correction box, offline job steps inline
 - [x] Vendor switch config-only (claude/openai/gemini alias/copilot), wire tests, `e2e:online`
+- [x] Canonical step-kind vocabulary (`CANONICAL_STEP_KINDS`) — model-invented kinds normalize to RAW, original kept in `meta.originalKind`
 - [x] Scorecard `npm run report` + run metrics + golden-dataset shape comparison
 - [x] Prompt hardening: source treated as data, not instructions (all three prompts)
 - [x] Network policy test; PROJECT.md decision log + increment log

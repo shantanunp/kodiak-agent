@@ -160,3 +160,25 @@ test("tool loop (openai style): tool_calls round trip then final text", async ()
   assert.equal(out.trace[0]!.tool, "read_lines");
   assert.ok(out.text.includes("never written"));
 });
+
+test("unknown step kinds normalize to RAW with the original preserved", async () => {
+  const { fromPipelineOp, normalizeStepKind, CANONICAL_STEP_KINDS } =
+    await import("./applyResponse.js");
+
+  assert.equal(normalizeStepKind("read").kind, "READ");
+  assert.equal(normalizeStepKind("TRANSFORM").kind, "TRANSFORM");
+
+  const invented = normalizeStepKind("cast");
+  assert.equal(invented.kind, "RAW", "model-invented kind falls back to RAW");
+  assert.equal(invented.originalKind, "CAST");
+
+  const step = fromPipelineOp(
+    { kind: "cast", op: "toLong", summary: "Casts." } as never,
+    "reason",
+    "model",
+  );
+  assert.equal(step.kind, "RAW");
+  assert.equal((step.meta as { originalKind: string }).originalKind, "CAST");
+  assert.equal((step.meta as { op: string }).op, "toLong", "detail is not lost");
+  assert.ok((CANONICAL_STEP_KINDS as readonly string[]).includes(step.kind));
+});

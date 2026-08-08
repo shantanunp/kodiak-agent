@@ -87,6 +87,13 @@ CRITICAL — business paths only:
 Rules:
 - Discovery hints (RAW snippets) are hints — correct them when wrong.
 - Literals/static finals → single constant step with "value"; never invent a read for constants.
+- Conditional constant writes (if/else / ternary setting true/false or literals from a predicate):
+  read the predicate source, then filter with the condition, then constant. Example:
+  [{"kind":"read","sourceField":"shipment.status","summary":"Reads shipment.status."},
+   {"kind":"filter","condition":"equals EXPRESS","summary":"True branch when status is EXPRESS."},
+   {"kind":"constant","value":true,"summary":"Sets priority true on the EXPRESS branch."}]
+  When the slice shows BOTH branches, emit ONE non-empty pipeline that captures the mapping
+  (read + condition + resulting value); never return recognized=true with an empty pipeline.
 - Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads customer.displayName from the source."}]
 - Arithmetic (e.g. quantity * 12) → read + transform multiply with value "12"
 - Name-split (parts[0]/parts[1] from trim+split helper):

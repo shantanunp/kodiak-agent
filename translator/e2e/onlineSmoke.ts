@@ -32,6 +32,7 @@ const {
   promoteToVerified,
   getVerified,
 } = await import("../verified/store.js");
+const { CANONICAL_STEP_KINDS } = await import("../model/applyResponse.js");
 
 if (!isModelConfigured()) {
   console.error(
@@ -80,8 +81,8 @@ for (const m of result.mapping.slice(0, 3)) {
 }
 
 let failures = 0;
-function check(name: string, ok: boolean): void {
-  console.log(`      ${ok ? "PASS" : "FAIL"} ${name}`);
+function check(name: string, ok: boolean, detail?: string): void {
+  console.log(`      ${ok ? "PASS" : "FAIL"} ${name}${!ok && detail ? ` — ${detail}` : ""}`);
   if (!ok) failures++;
 }
 
@@ -93,17 +94,24 @@ check(
     (m) => !/com\.|\$|dto\./.test(m.targetField),
   ),
 );
+const empties = result.mapping.filter((m) => m.pipeline.length === 0).map((m) => m.targetField);
+check("every pipeline is non-empty", empties.length === 0, `empty: ${empties.join(", ")}`);
+
+const offenders: string[] = [];
+for (const m of result.mapping) {
+  for (const step of m.pipeline) {
+    const s = step as { kind?: string; meta?: { originalKind?: string } };
+    if (!(CANONICAL_STEP_KINDS as readonly string[]).includes(String(s.kind))) {
+      offenders.push(`${m.targetField}: kind "${s.kind}"`);
+    } else if (s.meta?.originalKind) {
+      offenders.push(`${m.targetField}: model returned "${s.meta.originalKind}" -> normalized to RAW`);
+    }
+  }
+}
 check(
-  "pipelines non-empty with recognized kinds",
-  result.mapping.every(
-    (m) =>
-      m.pipeline.length > 0 &&
-      m.pipeline.every((s) =>
-        ["READ", "TRANSFORM", "FILTER", "SELECT", "BUILD", "WRITE", "CONSTANT", "RAW"].includes(
-          String((s as { kind: string }).kind).toUpperCase(),
-        ),
-      ),
-  ),
+  "all step kinds are canonical (no model-invented kinds)",
+  offenders.length === 0,
+  offenders.join("; "),
 );
 
 console.log("[e2e] 4/4 verified store round trip (temp dir, zero model calls)…");

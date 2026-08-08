@@ -58,7 +58,16 @@ export interface AgentLoopResult {
   fieldsFromCache: number;
 }
 
-function escalationOps(task: FieldTask, sourceJava: string): unknown[] {
+function escalationOps(
+  task: FieldTask,
+  sourceJava: string,
+  prior?: { emptyPipeline?: boolean },
+): unknown[] {
+  const emptyHint = prior?.emptyPipeline
+    ? ` Prior response had recognized=true with an empty pipeline — that is invalid. ` +
+      `Emit a NON-EMPTY pipeline (for if/else constants: read predicate + filter + constant) ` +
+      `or recognized=false.`
+    : "";
   return [
     {
       kind: "RAW",
@@ -67,7 +76,8 @@ function escalationOps(task: FieldTask, sourceJava: string): unknown[] {
         note:
           `Field "${task.field}" could not be resolved deterministically. ` +
           `${task.note ?? ""} Inspect the full source above; if this field is genuinely ` +
-          `never written, return recognized=false with the reason.`,
+          `never written, return recognized=false with the reason.` +
+          emptyHint,
       },
     },
   ];
@@ -138,14 +148,28 @@ export async function runAgentLoop(
         : escalationOps(task, options.sourceJava);
 
     let response: FieldMappingResponse | null = null;
-    const attempts = 1 + (task.state === "unresolved" ? (options.maxEscalations ?? 1) : 0);
-    for (let attempt = 0; attempt < attempts && !response?.recognized; attempt++) {
+    // Mapped fields get one focused call + one full-source retry if the model
+    // returns recognized=false or an empty pipeline (common on bare constants).
+    const attempts =
+      1 +
+      (task.state === "unresolved"
+        ? (options.maxEscalations ?? 1)
+        : 1);
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const ops =
+        attempt === 0
+          ? indexerOps
+          : escalationOps(task, options.sourceJava, {
+              emptyPipeline:
+                response?.recognized === true &&
+                (response.pipeline?.length ?? 0) === 0,
+            });
       response = await provider.labelFieldMapping({
         javaTargetField: task.field,
-        indexerOps:
-          attempt === 0 ? indexerOps : escalationOps(task, options.sourceJava),
+        indexerOps: ops,
         schemaContext: options.schemaContext,
       });
+      if (response?.recognized && (response.pipeline?.length ?? 0) > 0) break;
     }
 
     // Last resort for unresolved fields: Copilot-style investigation loop.
@@ -184,9 +208,19 @@ export async function runAgentLoop(
 
     const labeled = applyFieldMappingResponse(
       { targetField: task.field, pipeline: [] },
-      response!,
+      response ?? { recognized: false, reason: "no model response" },
       "model",
     );
+    // Never promote an empty pipeline as a successful label — the e2e gate and
+    // viewers treat that as a real failure mode (model declined / omitted steps).
+    // Mapped fields that still have no steps are unresolved from the agent's view.
+    if (labeled.pipeline.length === 0) {
+      stillUnresolved.push(task.field);
+      console.error(
+        `[agent-loop] ${task.field}: model returned no pipeline steps; leaving unresolved`,
+      );
+      continue;
+    }
     mapping.push(labeled);
     fieldsLabeled++;
 

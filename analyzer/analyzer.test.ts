@@ -65,3 +65,32 @@ test("slices carry transitive helper closure and local dataflow", () => {
     "local dataflow statement included");
   assert.ok(first?.helperClosure.some((h) => h.name === "splitName"));
 });
+
+test("conditional writes include enclosing if/else guards in the slice", () => {
+  const source = readFileSync(FIXTURE, "utf8");
+  const { slices } = analyze(source);
+  const priority = slices.filter((s) => s.targetField === "priority");
+  assert.equal(priority.length, 2);
+  for (const s of priority) {
+    assert.ok(
+      s.sliceText.includes("control flow:") && s.sliceText.includes("EXPRESS"),
+      `priority slice must carry the if-predicate, got:\n${s.sliceText}`,
+    );
+  }
+  assert.ok(
+    priority.some((s) => s.sliceText.includes("setPriority(true)") && s.sliceText.includes("if (")),
+  );
+  assert.ok(
+    priority.some((s) => s.sliceText.includes("setPriority(false)") && /\belse\b/.test(s.sliceText)),
+  );
+  const elseSlice = priority.find((s) => s.sliceText.includes("setPriority(false)"))!;
+  assert.ok(
+    elseSlice.sliceText.includes("{ … } else") || elseSlice.sliceText.includes("{ ... } else"),
+    `else branch must render if+else as one header, got:\n${elseSlice.sliceText}`,
+  );
+  assert.ok(
+    !/if \(.*\)\nelse\n/.test(elseSlice.sliceText),
+    "must not emit broken two-line if\\nelse control flow",
+  );
+});
+

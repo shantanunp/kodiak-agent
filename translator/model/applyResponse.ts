@@ -25,17 +25,45 @@ export function normalizeKeepDigitsOp(pipeline: PipelineOpLabel[]): PipelineOpLa
   });
 }
 
+/**
+ * Canonical pipeline step kinds. Anything else a model invents is normalized to
+ * RAW (shown as "Raw / unclassified" in the viewer) with the original kind kept
+ * in meta.originalKind — never silently accepted as a first-class kind.
+ */
+export const CANONICAL_STEP_KINDS = [
+  "READ", "TRANSFORM", "FILTER", "SELECT", "BUILD", "WRITE", "CONSTANT", "RAW",
+] as const;
+
+export type CanonicalStepKind = (typeof CANONICAL_STEP_KINDS)[number];
+
+export function normalizeStepKind(raw: string | undefined): {
+  kind: CanonicalStepKind;
+  originalKind?: string;
+} {
+  const upper = (raw ?? "raw").toUpperCase();
+  if ((CANONICAL_STEP_KINDS as readonly string[]).includes(upper)) {
+    return { kind: upper as CanonicalStepKind };
+  }
+  return { kind: "RAW", originalKind: upper };
+}
+
 export function fromPipelineOp(
   op: PipelineOpLabel,
   reason: string | undefined,
   labelSource: "model" = "model",
 ): PipelineStep {
-  const kind = (op.kind ?? "raw").toUpperCase();
+  const { kind, originalKind } = normalizeStepKind(op.kind);
   const step: PipelineStep = {
     kind,
     labelSource,
     labelReason: reason,
   };
+  if (originalKind) {
+    step.meta = { originalKind };
+    if (op.op) step.meta.op = op.op;
+    if (op.value != null) step.meta.value = op.value;
+    if (op.sourceField) step.sourceField = op.sourceField;
+  }
   if (typeof op.summary === "string" && op.summary.trim()) {
     step.summary = op.summary.trim();
   }
@@ -77,10 +105,10 @@ export function applyFieldMappingResponse(
     op: op.op?.toLowerCase(),
   }));
 
-  if (response.recognized && pipeline?.length && response.targetField) {
+  if (response.recognized && pipeline?.length) {
     const normalized = normalizeKeepDigitsOp(pipeline);
     return {
-      targetField: response.targetField,
+      targetField: response.targetField?.trim() || entry.targetField,
       pipeline: normalized.map((op) => fromPipelineOp(op, response.reason, labelSource)),
     };
   }

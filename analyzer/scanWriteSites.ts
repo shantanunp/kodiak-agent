@@ -59,6 +59,144 @@ function referencedIdentifiers(expression: string): string[] {
 }
 
 /**
+ * Headers of if/else/for/while/switch blocks that enclose `atOffset` in bodyText.
+ * Constant / branched writes need their predicates in the slice — local-def
+ * tracing alone cannot see them (true/false literals have no identifiers).
+ */
+export function enclosingGuards(bodyText: string, atOffset: number): string[] {
+  if (atOffset <= 0 || atOffset > bodyText.length) return [];
+
+  const guards: string[] = [];
+  let depth = 0;
+  let inStr: string | null = null;
+  /** After recording `else` / `else if`, skip the `}` that closed the then-block so the matching `if (` still surfaces. */
+  let skipNextCloseBrace = false;
+
+  for (let i = atOffset - 1; i >= 0; i--) {
+    const ch = bodyText[i]!;
+    const prev = i > 0 ? bodyText[i - 1]! : "";
+
+    if (inStr) {
+      if (ch === inStr && prev !== "\\") inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inStr = ch;
+      continue;
+    }
+    if (ch === "}") {
+      if (skipNextCloseBrace) {
+        skipNextCloseBrace = false;
+        continue;
+      }
+      depth++;
+      continue;
+    }
+    if (ch !== "{") continue;
+
+    if (depth > 0) {
+      depth--;
+      continue;
+    }
+
+    // Opening brace of a block that contains the write — grab its header.
+    let j = i - 1;
+    while (j >= 0 && /\s/.test(bodyText[j]!)) j--;
+    if (j < 0) continue;
+
+    // Walk back over a balanced (...) if present (if/for/while/switch/catch).
+    let headerEnd = j + 1;
+    if (bodyText[j] === ")") {
+      let paren = 0;
+      let s: string | null = null;
+      for (; j >= 0; j--) {
+        const c = bodyText[j]!;
+        const p = j > 0 ? bodyText[j - 1]! : "";
+        if (s) {
+          if (c === s && p !== "\\") s = null;
+          continue;
+        }
+        if (c === '"' || c === "'") {
+          s = c;
+          continue;
+        }
+        if (c === ")") paren++;
+        else if (c === "(") {
+          paren--;
+          if (paren === 0) {
+            headerEnd = i; // exclusive end at "{"
+            j--; // move before "("
+            while (j >= 0 && /\s/.test(bodyText[j]!)) j--;
+            break;
+          }
+        }
+      }
+    }
+
+    // Keyword under the caret at j (last char of if/else/for/…).
+    let k = j;
+    while (k >= 0 && /[A-Za-z]/.test(bodyText[k]!)) k--;
+    const keyword = bodyText.slice(k + 1, j + 1).trim();
+    if (!keyword) continue;
+
+    let start = k + 1;
+    // "} else if (...)" — fold the preceding else into the header.
+    if (keyword === "if") {
+      let p = start - 1;
+      while (p >= 0 && /\s/.test(bodyText[p]!)) p--;
+      if (p >= 3 && bodyText.slice(p - 3, p + 1) === "else") {
+        start = p - 3;
+      }
+    }
+
+    const header = bodyText.slice(start, headerEnd).replace(/\s+/g, " ").trim();
+    if (
+      /^(?:else\s+if|if|else|for|while|switch|do|catch)\b/.test(header) &&
+      !guards.includes(header)
+    ) {
+      guards.push(header);
+      if (/^else\b/.test(header)) skipNextCloseBrace = true;
+    }
+  }
+
+  return guards.reverse();
+}
+
+/**
+ * Turn enclosing-guard headers into slice lines. Collapses a bare `if` followed
+ * by `else` into one readable header — the raw headers alone look like broken
+ * Java (`if (pred)\nelse`) and models sometimes answer with an empty pipeline.
+ */
+export function formatControlFlow(guards: string[]): string[] {
+  if (guards.length === 0) return [];
+  const merged: string[] = [];
+  for (let i = 0; i < guards.length; i++) {
+    const g = guards[i]!;
+    const next = guards[i + 1];
+    if (
+      /^if\b/.test(g) &&
+      next &&
+      /^else\b/.test(next) &&
+      !/^else\s+if\b/.test(next)
+    ) {
+      merged.push(`${g} { … } ${next}`);
+      i++;
+    } else {
+      merged.push(g);
+    }
+  }
+  return ["// control flow:", ...merged];
+}
+
+/** Locate the write statement inside the method body for guard extraction. */
+function statementOffset(bodyText: string, statement: string): number {
+  const idx = bodyText.indexOf(statement);
+  if (idx >= 0) return idx;
+  const first = statement.split("\n")[0]?.trim() ?? "";
+  return first ? bodyText.indexOf(first) : -1;
+}
+
+/**
  * Trace the expression's local dependencies backward through the method body:
  * for every identifier it uses, pull the statements that defined it, and
  * recurse on those statements' own identifiers. Returns defining statements
@@ -218,17 +356,34 @@ export function scanWriteSites(options: {
     const enclosing = parsed.methods.find(
       (m) => m.name === site.inMethod && site.line >= m.startLine && site.line <= m.endLine,
     );
+    const bodyText = enclosing?.bodyText ?? "";
     const { statements: localDefs, combinedText } = traceLocalDefs(
       site.expression,
-      enclosing?.bodyText ?? "",
+      bodyText,
       site.receiver,
     );
 
+    const at = statementOffset(bodyText, site.statement);
+    const guards = at >= 0 ? enclosingGuards(bodyText, at) : [];
+    // Render if+else as one header so the model sees valid control flow
+    // (`if (pred) { … } else`) instead of the broken two-line `if\nelse`.
+    const controlFlow = formatControlFlow(guards);
+    const guardText = controlFlow.join("\n");
+
     const helperClosure: Array<{ name: string; text: string }> = [];
-    collectClosure(pool, adapter, options.worktree, combinedText, 0, new Set(), helperClosure);
+    collectClosure(
+      pool,
+      adapter,
+      options.worktree,
+      [combinedText, guardText].filter(Boolean).join("\n"),
+      0,
+      new Set(),
+      helperClosure,
+    );
 
     const sliceText = [
       `// write site (line ${site.line}, in ${site.inMethod}, via ${site.via})`,
+      ...controlFlow,
       ...(localDefs.length > 0 ? ["// local dataflow:", ...localDefs] : []),
       site.statement,
       ...helperClosure.map((h) => `\n// helper: ${h.name}\n${h.text}`),
