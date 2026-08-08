@@ -25,7 +25,7 @@ npm install
 ```
 
 ```env
-MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 ```
 
 Shell tip: `npm run` does **not** load `$MAPPER_WORKTREE` from `.env` into the shell — `export` it or pass the path literally. Gotcha: npm may print a banner on stdout — when parsing CLI JSON, slice from the first `{`.
@@ -78,7 +78,7 @@ npm run test:journal && npm run test:report && npm run test:drift
 **Shared Scorecard after any label path:**
 
 ```bash
-export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+export MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
 npm run ui:serve
 # http://localhost:4173/pipeline-viewer/?mapper=order-request-mapper → expand Scorecard → Refresh
@@ -93,7 +93,7 @@ HTTP model labels fields via Kodiak’s agent-loop. No VS Code job export requir
 ### 1a. `.env`
 
 ```env
-MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 MODEL_API_STYLE=claude
 MODEL_BASE_URL=https://api.anthropic.com/v1
 MODEL_NAME=claude-sonnet-4-5
@@ -103,7 +103,7 @@ MODEL_API_KEY=sk-ant-...
 ### 1b. Optional wipe, then label
 
 ```bash
-export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+export MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 # optional: shared safe wipe or zero wipe above
 
 npm run label -- \
@@ -138,7 +138,7 @@ npm run verified:approve -- --mapper order-request-mapper --worktree "$MAPPER_WO
 
 ```bash
 cd /home/shantanu/Workspace/VS_CODE_V2/kodiak-agent
-export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+export MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 # .env: MODEL_API_KEY set
 
 npm run cache:clear
@@ -160,7 +160,7 @@ No HTTP model. Export a job → VS Code (or Cursor) agent writes `result.json` �
 ### 2a. Force offline in `.env`
 
 ```env
-MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 # MODEL_API_KEY=
 ```
 
@@ -185,7 +185,7 @@ ls ui/pipeline-viewer/data/*.view.json 2>/dev/null || echo "no view.json"
 ### 2c. Export offline job
 
 ```bash
-export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+export MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 
 npm run label:export -- \
   --mapper order-request-mapper \
@@ -210,7 +210,7 @@ Copy: `.cache/agent-jobs/order-request-mapper/<fingerprint>/job.json`
 **Preferred — custom agent (includes export):** in Copilot chat, select agent **kodiak-label**. The input hint shows:
 
 ```text
-Label order-request-mapper offline with worktree /home/shantanu/Workspace/vscode/Kmismomapper
+Label order-request-mapper offline with worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform
 ```
 
 Send that (or your mapper/worktree). The agent runs `label:export` → fills `result.json` → `label:import` → `from-cache-only`.
@@ -274,7 +274,7 @@ rm -f registry/runs.jsonl registry/defects.jsonl
 rm -rf .cache/metrics .cache/agent-jobs .cache/fields registry/verified/order-request-mapper
 rm -f ui/pipeline-viewer/data/*.view.json
 
-export MAPPER_WORKTREE=/home/shantanu/Workspace/vscode/Kmismomapper
+export MAPPER_WORKTREE=/home/shantanu/Workspace/VS_CODE_V2/ktransform
 npm run label:export -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE"
 # → VS Code agent completes job.json → writes result.json
 

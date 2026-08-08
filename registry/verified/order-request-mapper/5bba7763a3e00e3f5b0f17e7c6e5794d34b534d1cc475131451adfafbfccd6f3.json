@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "mapperId": "order-request-mapper",
+  "fingerprint": "5bba7763a3e00e3f5b0f17e7c6e5794d34b534d1cc475131451adfafbfccd6f3",
+  "createdAt": "2026-08-08T18:19:23.968Z",
+  "updatedAt": "2026-08-08T18:19:23.968Z",
+  "fields": [
+    {
+      "targetField": "order.details.customer.email",
+      "pipeline": [
+        {
+          "kind": "READ",
+          "labelSource": "demo",
+          "summary": "Reads email from the input customer object.",
+          "sourceField": "customer.email"
+        }
+      ],
+      "status": "verified",
+      "labeledBy": "demo:incomplete-email",
+      "labeledAt": "2026-08-08T18:19:23.968Z"
+    }
+  ]
+}

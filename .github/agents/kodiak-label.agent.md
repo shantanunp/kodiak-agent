@@ -1,7 +1,7 @@
 ---
 name: kodiak-label
 description: "Offline field labeling end to end: label:export → fill result.json → label:import → from-cache-only. Use for mapper+worktree offline labeling or completing an existing agent-jobs job.json."
-argument-hint: "Label order-request-mapper offline with worktree /home/shantanu/Workspace/vscode/Kmismomapper"
+argument-hint: "Label order-request-mapper offline with worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform"
 tools: [read, edit, search, execute, todo]
 ---
 You are the kodiak-agent labeling workflow runner. Execute the ENTIRE offline
@@ -59,7 +59,7 @@ Do not guess a mapper id.
    ```bash
    npm run label:export -- \
      --mapper order-request-mapper \
-     --worktree /home/shantanu/Workspace/vscode/Kmismomapper
+     --worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform
    ```
    Parse the printed `job.json` path from the JSON/stdout, e.g.
    `.cache/agent-jobs/<mapper>/<fingerprint>/job.json`.

@@ -1,4 +1,4 @@
-repo: "shantanunp/Kmismomapper"
+repo: "shantanunp/ktransform"
 branch: "main"
 scope:
   - "src/main/java/com/kodiakservice/mapper/**/*.java"
