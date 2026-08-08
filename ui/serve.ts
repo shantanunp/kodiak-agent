@@ -629,6 +629,70 @@ createServer(async (req, res) => {
     }
   }
 
+  // MON-5 — local health (no model calls, no secrets).
+  if (pathname === "/api/health" && req.method === "GET") {
+    const started = Date.now();
+    let registryCount = 0;
+    try {
+      registryCount = loadRegistry(paths.registry).mappers.length;
+    } catch {
+      registryCount = 0;
+    }
+    let verifiedEntries = 0;
+    let userCorrected = 0;
+    const verifiedRoot = process.env.KODIAK_VERIFIED_DIR
+      ?? join(paths.root, "registry", "verified");
+    if (existsSync(verifiedRoot)) {
+      for (const mapperDir of readdirSync(verifiedRoot)) {
+        const dir = join(verifiedRoot, mapperDir);
+        try {
+          if (!statSync(dir).isDirectory()) continue;
+        } catch { continue; }
+        for (const f of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
+          verifiedEntries++;
+          try {
+            const entry = JSON.parse(readFileSync(join(dir, f), "utf8")) as {
+              fields?: Array<{ status?: string }>;
+            };
+            userCorrected +=
+              entry.fields?.filter((x) => x.status === "user-corrected").length ?? 0;
+          } catch { /* skip bad file */ }
+        }
+      }
+    }
+    let staleCount = 0;
+    try {
+      const { checkDrift } = await import("../translator/telemetry/drift.js");
+      const rows = await checkDrift({ registryPath: paths.registry });
+      staleCount = rows.filter((r) => r.status === "stale").length;
+    } catch {
+      staleCount = -1;
+    }
+    let modelStyle: string | null = null;
+    let modelName: string | null = null;
+    if (isModelConfigured()) {
+      try {
+        const cfg = loadModelConfig();
+        modelStyle = cfg.apiStyle;
+        modelName = cfg.model;
+      } catch { /* ignore */ }
+    }
+    sendJson(res, 200, {
+      ok: true,
+      uptimeSec: Math.floor(process.uptime()),
+      registryMappers: registryCount,
+      modelConfigured: isModelConfigured(),
+      modelStyle,
+      modelName,
+      verifiedEntries,
+      userCorrected,
+      staleMappers: staleCount,
+      analyzerLanguages: ["java"],
+      elapsedMs: Date.now() - started,
+    });
+    return;
+  }
+
   // Default mapper for /pipeline-viewer with no ?mapper= :
   //   1) most recently written .view.json
   //   2) else a registry mapper whose sourceFile exists under MAPPER_WORKTREE

@@ -132,9 +132,16 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 **Next increment (do in this order):** `MON-1` → `PAR-1` + `PAR-2` + `AGT-1` → `MON-2`/`MON-3`. See full backlog sections below.
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
+- [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
+- [x] **MON-3** Journal-backed `npm run report` (+ `--since`, judge agree/reject, miss signals)
+- [x] **MON-4** `npm run drift` (current / stale / never-verified; exit 1 on stale)
+- [x] **MON-5** `GET /api/health` (no secrets, no model calls)
 - [x] **PAR-1** Second-opinion loose write scan (possible-missed-write diagnostics)
 - [x] **PAR-2** Unmapped justification pass (unmapped-but-mentioned)
+- [x] **PAR-4** Write-pattern counts into run journal
 - [x] **AGT-1** Grounding check on labeled pipelines (ungrounded-step warnings)
+- [x] **AGT-2** Step-count vs helper-closure smell
+- [x] **AGT-6** Judge agree/reject surfaced in report (corrected store vs defects.jsonl)
 - [ ] **Cross-check trace surfacing**: flips currently land in the task note + stderr; also surface them in the viewer checklist response as diagnostics.
 - [ ] **Tool-loop trace persistence**: `runAgentLoop` currently logs the investigation trace to stderr; persist it into the field-cache entry (add optional `toolTrace` to the cache entry type) so agentic runs are replayable evidence.
 - [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
@@ -159,17 +166,17 @@ Evaluated Mastra: two useful gaps (tracing/token-cost, evals), five things a fra
 ### MON-1 — Run journal (foundation; do first) ✅
 Append one JSON line per label run to `registry/runs.jsonl` (override via `KODIAK_RUNS_FILE`). Module `translator/telemetry/journal.ts` — `appendRun` / `readRuns`. Wired via agent-loop (covers `cli --analyzer` + `/api/label-field`), `cli` legacy path, and `label:import`. Gitignore by default.
 
-### MON-2 — Provider metrics wrapper
-Decorator around `HttpModelProvider`: calls, prompt/completion tokens (both wire styles), retries, latency. Fold into MON-1 entry. **Done when:** stubbed-fetch test for both styles; `runs.jsonl` carries `tokens`.
+### MON-2 — Provider metrics wrapper ✅
+`HttpModelProvider` records calls, prompt/completion tokens (Anthropic + OpenAI usage shapes), retries, latency; folded into journal `tokens` block.
 
-### MON-3 — `npm run report` (journal-backed)
-Extend report to read `runs.jsonl` + `defects.jsonl` + verified store: coverage trend, cost/cache-hit, top unresolved, judge agree/reject, store size. Flags `--mapper`, `--since`, `--json`.
+### MON-3 — `npm run report` (journal-backed) ✅
+Report reads `runs.jsonl` + `defects.jsonl`: cost, cache/model/verified breakdown, miss signals, judge agree/reject. Flags `--mapper`, `--since`, `--json`.
 
-### MON-4 — Drift check
-`npm run drift`: recompute content fingerprint vs verified store → `current` / `stale` / `never verified`; exit non-zero on stale.
+### MON-4 — Drift check ✅
+`npm run drift`: `current` / `stale` / `never-verified`; exit 1 on stale.
 
-### MON-5 — `/api/health`
-Registry count, `modelConfigured` (bool), style/name, verified + corrected counts, stale count, adapters, uptime. No model calls; <100 ms.
+### MON-5 — `/api/health` ✅
+`GET /api/health` — registry count, modelConfigured, style/name, verified + corrected, stale count, uptime. No model calls.
 
 ### EVAL-1 — Golden dataset harness
 `validator/golden-dataset/` + `npm run test:golden` (verified-store, zero model); optional `--model` diff summary (not in `test:all`).
@@ -194,7 +201,7 @@ Already catches: unmapped, orphanWrites, opaque-escape → unresolved, flatten d
 | **PAR-1** ✅ | Second-opinion loose regex scan vs CST write sites → `possible-missed-write` diagnostics | `analyzer/secondOpinion.ts`; folded into checklist diagnostics |
 | **PAR-2** ✅ | For each `unmapped`, search setter/getter/name mentions → `unmapped-but-mentioned` | Same module |
 | **PAR-3** | Write-pattern conformance corpus (one fixture + test per pattern) | Adapter coverage stops being guesswork |
-| **PAR-4** | Adapter coverage metrics into run journal | Needs MON-1 |
+| **PAR-4** ✅ | Adapter coverage metrics into run journal | `writePatterns` + `possibleMissedWrites` on each run |
 
 ### Layer B — did the AI agent miss or mislabel?
 
@@ -203,11 +210,11 @@ Already catches: gate (can't skip), recognized=false, escalation/tool-loop, judg
 | ID | Work | Notes |
 |---|---|---|
 | **AGT-1** ✅ | Grounding check: TRANSFORM ops / READ paths / CONSTANT literals must appear in slice/schema | `translator/agentloop/grounding.ts`; warnings on stderr + journal diagnostics count |
-| **AGT-2** | Step-count sanity vs helper-closure depth | Smell detector |
+| **AGT-2** ✅ | Step-count sanity vs helper-closure depth | `translator/agentloop/smells.ts` |
 | **AGT-3** | Optional `--verify` double-run at temp 0 | Cost-aware; on demand |
 | **AGT-4** | Opt-in `--critic` model pass with cited missing transforms | Reuse verifyCitations |
 | **AGT-5** | Mutation testing on fixtures | Strongest quality gate; later |
-| **AGT-6** | Correction-rate metric (judge agree vs reject) | Needs MON-1; feeds report |
+| **AGT-6** ✅ | Correction-rate metric (judge agree vs reject) | Report: corrected store vs `defects.jsonl` |
 
 **Suggested order:** PAR-1 + PAR-2 + AGT-1 → AGT-6 + PAR-4 → AGT-2 + PAR-3 → AGT-4 + AGT-3 → AGT-5.
 

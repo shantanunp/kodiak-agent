@@ -57,12 +57,44 @@ export interface DiscoverResponse {
   mappings: DiscoverHit[];
 }
 
+/** MON-2 — per-run counters collected inside HttpModelProvider (no call-site changes). */
+export interface ProviderMetrics {
+  calls: number;
+  retries: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalLatencyMs: number;
+  /** Individual call latencies (ms) for p95. */
+  latenciesMs: number[];
+}
+
+export function emptyProviderMetrics(): ProviderMetrics {
+  return {
+    calls: 0,
+    retries: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalLatencyMs: 0,
+    latenciesMs: [],
+  };
+}
+
+export function p95LatencyMs(latenciesMs: number[]): number {
+  if (latenciesMs.length === 0) return 0;
+  const sorted = [...latenciesMs].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1);
+  return sorted[Math.max(0, idx)]!;
+}
+
 /** Provider surface used by labeler / discovery — independent of vendor. */
 export interface ModelProvider {
   readonly model: string;
   labelFieldMapping(request: FieldMappingRequest): Promise<FieldMappingResponse>;
   discoverMappings(request: DiscoverRequest): Promise<DiscoverResponse>;
   labelStep(request: LabelRequest): Promise<LabelResponse>;
+  /** Present on HttpModelProvider; optional so test fakes stay minimal. */
+  getMetrics?(): ProviderMetrics;
+  resetMetrics?(): void;
 }
 
 /** Shared with offline VS Code agent jobs — do not diverge. */
@@ -138,12 +170,29 @@ Rules:
 
 interface OpenAiChatResponse {
   choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: { message?: string };
 }
 
 interface ClaudeMessagesResponse {
   content?: Array<{ type?: string; text?: string }>;
+  usage?: { input_tokens?: number; output_tokens?: number };
   error?: { message?: string; type?: string };
+}
+
+function extractTokenUsage(payload: unknown): { prompt: number; completion: number } {
+  const u = (payload as { usage?: Record<string, number> } | null)?.usage;
+  if (!u) return { prompt: 0, completion: 0 };
+  if (typeof u.input_tokens === "number" || typeof u.output_tokens === "number") {
+    return {
+      prompt: Number(u.input_tokens ?? 0),
+      completion: Number(u.output_tokens ?? 0),
+    };
+  }
+  return {
+    prompt: Number(u.prompt_tokens ?? 0),
+    completion: Number(u.completion_tokens ?? 0),
+  };
 }
 
 /** Strip ```json fences Claude sometimes wraps around JSON-only answers. */
@@ -184,6 +233,7 @@ export class HttpModelProvider implements ModelProvider {
   private temperature: number;
   private baseUrl: string;
   private apiStyle: ModelApiStyle;
+  private metrics: ProviderMetrics = emptyProviderMetrics();
 
   constructor(config: ModelConfig = loadModelConfig()) {
     this.apiKey = config.apiKey;
@@ -191,6 +241,14 @@ export class HttpModelProvider implements ModelProvider {
     this.temperature = config.temperature;
     this.baseUrl = config.baseUrl;
     this.apiStyle = config.apiStyle;
+  }
+
+  getMetrics(): ProviderMetrics {
+    return { ...this.metrics, latenciesMs: [...this.metrics.latenciesMs] };
+  }
+
+  resetMetrics(): void {
+    this.metrics = emptyProviderMetrics();
   }
 
   /** @deprecated Prefer labelFieldMapping — kept for cache/tests of single RAW steps. */
@@ -353,6 +411,7 @@ export class HttpModelProvider implements ModelProvider {
   ): Promise<string> {
     const maxAttempts = 4;
     let lastError = "";
+    const callStarted = Date.now();
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const response = await fetch(url, {
         method: "POST",
@@ -367,12 +426,25 @@ export class HttpModelProvider implements ModelProvider {
         if (!text) {
           throw new Error(`Model API returned no text (${this.apiStyle})`);
         }
+        const elapsed = Date.now() - callStarted;
+        const usage = extractTokenUsage(payload);
+        this.metrics.calls += 1;
+        if (attempt > 1) this.metrics.retries += attempt - 1;
+        this.metrics.promptTokens += usage.prompt;
+        this.metrics.completionTokens += usage.completion;
+        this.metrics.totalLatencyMs += elapsed;
+        this.metrics.latenciesMs.push(elapsed);
         return text;
       }
 
       lastError = extractError(payload) ?? response.statusText;
       const retryable = response.status === 429 || response.status >= 500;
       if (!retryable || attempt === maxAttempts) {
+        const elapsed = Date.now() - callStarted;
+        this.metrics.calls += 1;
+        if (attempt > 1) this.metrics.retries += attempt - 1;
+        this.metrics.totalLatencyMs += elapsed;
+        this.metrics.latenciesMs.push(elapsed);
         throw new Error(`Model API ${response.status}: ${lastError}`);
       }
       const retryMatch = lastError.match(/retry in ([\d.]+)\s*s/i);

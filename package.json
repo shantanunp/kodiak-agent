@@ -22,18 +22,20 @@
     "analyze": "tsx analyzer/cli.ts",
     "test:analyzer": "tsx --test analyzer/analyzer.test.ts analyzer/secondOpinion.test.ts",
     "test:verified": "tsx --test translator/verified/store.test.ts",
-    "test:agentloop": "tsx --test translator/agentloop/loop.test.ts translator/agentloop/grounding.test.ts",
-    "test:journal": "tsx --test translator/telemetry/journal.test.ts",
+    "test:agentloop": "tsx --test translator/agentloop/loop.test.ts translator/agentloop/grounding.test.ts translator/agentloop/smells.test.ts",
+    "test:journal": "tsx --test translator/telemetry/journal.test.ts translator/telemetry/journalReport.test.ts",
+    "test:drift": "tsx --test translator/telemetry/drift.test.ts",
     "test:judge": "tsx --test translator/judge/judge.test.ts",
     "test:policy": "tsx --test analyzer/noExternal.test.ts",
-    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy && npm run test:wire && npm run test:crosscheck && npm run test:report && npm run test:journal",
     "test:wire": "tsx --test translator/model/provider.wire.test.ts",
+    "test:crosscheck": "tsx --test translator/agentloop/crossCheck.test.ts",
+    "test:report": "tsx --test translator/report/report.test.ts",
+    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy && npm run test:wire && npm run test:crosscheck && npm run test:report && npm run test:journal && npm run test:drift",
     "e2e:online": "tsx translator/e2e/onlineSmoke.ts",
     "judge:export": "tsx translator/judge/offline.ts",
     "judge:import": "tsx translator/judge/offline.ts",
-    "test:crosscheck": "tsx --test translator/agentloop/crossCheck.test.ts",
     "report": "tsx translator/report/report.ts",
-    "test:report": "tsx --test translator/report/report.test.ts"
+    "drift": "tsx translator/telemetry/drift.ts"
   },
   "engines": {
     "node": ">=20"

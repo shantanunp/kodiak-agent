@@ -65,6 +65,34 @@ test("openai style: /chat/completions, Bearer auth, response_format json, choice
   assert.equal(res.recognized, false, "fenced JSON unwrapped and parsed");
 });
 
+test("MON-2: token/latency metrics captured for claude + openai usage shapes", async () => {
+  stubFetch({
+    content: [{ type: "text", text: '{"recognized":false,"reason":"r"}' }],
+    usage: { input_tokens: 11, output_tokens: 7 },
+  });
+  const claude = new HttpModelProvider(config({
+    apiStyle: "claude", baseUrl: "https://api.anthropic.com/v1",
+  }));
+  await claude.labelFieldMapping({ javaTargetField: "a", indexerOps: [] });
+  const cm = claude.getMetrics();
+  assert.equal(cm.calls, 1);
+  assert.equal(cm.promptTokens, 11);
+  assert.equal(cm.completionTokens, 7);
+  assert.ok(cm.totalLatencyMs >= 0);
+  assert.equal(cm.latenciesMs.length, 1);
+
+  stubFetch({
+    choices: [{ message: { content: '{"recognized":false,"reason":"r"}' } }],
+    usage: { prompt_tokens: 20, completion_tokens: 5 },
+  });
+  const openai = new HttpModelProvider(config({ apiStyle: "openai" }));
+  await openai.labelFieldMapping({ javaTargetField: "a", indexerOps: [] });
+  const om = openai.getMetrics();
+  assert.equal(om.calls, 1);
+  assert.equal(om.promptTokens, 20);
+  assert.equal(om.completionTokens, 5);
+});
+
 test("gemini via config alias: openai wire style against Google's compat endpoint", async () => {
   process.env.MODEL_API_STYLE = "gemini";
   process.env.MODEL_API_KEY = "k-gem";

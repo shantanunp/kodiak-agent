@@ -31,6 +31,19 @@ export interface RunJournalEntry {
   promoted: boolean;
   checklistSource?: string;
   diagnostics?: number;
+  /** MON-2 — token/latency block from HttpModelProvider.getMetrics(). */
+  tokens?: {
+    prompt: number;
+    completion: number;
+    retries: number;
+    latencyMs: number;
+    p95LatencyMs: number;
+  };
+  /** PAR-4 — write sites found per CST pattern kind. */
+  writePatterns?: Record<string, number>;
+  possibleMissedWrites?: number;
+  groundingWarnings?: number;
+  stepSmells?: number;
   /** Best-effort: "ok" | "error" — failed runs still append. */
   outcome: "ok" | "error";
   error?: string;

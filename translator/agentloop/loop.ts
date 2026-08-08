@@ -26,8 +26,9 @@ import { crossCheckUnmapped } from "./crossCheck.js";
 import { appendRunMetrics } from "../report/metrics.js";
 import { appendRun, sourceSha } from "../telemetry/journal.js";
 import { groundingDiagnostics } from "./grounding.js";
+import { findStepSmells, smellDiagnostics } from "./smells.js";
 import type { ModelConfig } from "../model/config.js";
-import type { ToolTraceEntry } from "../model/provider.js";
+import { p95LatencyMs, type ToolTraceEntry } from "../model/provider.js";
 
 export interface AgentLoopOptions {
   fingerprint: string;
@@ -262,6 +263,23 @@ export async function runAgentLoop(
     console.error(`[grounding] ${w}`);
   }
 
+  // AGT-2 — short pipeline vs deep helper closure.
+  const smells = findStepSmells(mapping, tasks.tasks);
+  for (const d of smellDiagnostics(smells)) {
+    console.error(`[smell] ${d}`);
+  }
+
+  // PAR-4 — write-site pattern counts from the checklist slices.
+  const writePatterns: Record<string, number> = {};
+  for (const t of tasks.tasks) {
+    for (const s of t.slices) {
+      writePatterns[s.via] = (writePatterns[s.via] ?? 0) + 1;
+    }
+  }
+  const possibleMissedWrites = (tasks.diagnostics ?? []).filter((d) =>
+    d.startsWith("possible-missed-write"),
+  ).length;
+
   try {
     appendRunMetrics({
       mapperId,
@@ -278,7 +296,8 @@ export async function runAgentLoop(
     // metrics are best-effort; never fail a run over them
   }
 
-  // MON-1 — one journal line per agent-loop completion (ok or partial).
+  const pm = provider.getMetrics?.();
+  // MON-1/2 — one journal line per agent-loop completion.
   appendRun({
     at: new Date().toISOString(),
     mapperId,
@@ -293,15 +312,30 @@ export async function runAgentLoop(
       cache: fieldsFromCache,
       model: fieldsLabeled,
     },
-    modelCalls: fieldsLabeled, // lower bound; MON-2 will refine with provider metrics
+    modelCalls: pm?.calls ?? fieldsLabeled,
     toolLoopCalls: toolLoopRuns,
     durationMs: Date.now() - started,
     promoted: false,
     checklistSource: tasks.checklistSource,
-    diagnostics: (tasks.diagnostics?.length ?? 0) + groundingWarnings.length,
+    diagnostics:
+      (tasks.diagnostics?.length ?? 0) + groundingWarnings.length + smells.length,
+    tokens: pm
+      ? {
+          prompt: pm.promptTokens,
+          completion: pm.completionTokens,
+          retries: pm.retries,
+          latencyMs: pm.totalLatencyMs,
+          p95LatencyMs: p95LatencyMs(pm.latenciesMs),
+        }
+      : undefined,
+    writePatterns,
+    possibleMissedWrites,
+    groundingWarnings: groundingWarnings.length,
+    stepSmells: smells.length,
     outcome: "ok",
     path: "agent-loop",
   });
+  provider.resetMetrics?.();
 
   return { mapping, audit, fieldsLabeled, fieldsFromCache, groundingWarnings };
 }

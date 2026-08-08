@@ -28,6 +28,8 @@ import {
 } from "../verified/store.js";
 import { readRunMetrics } from "./metrics.js";
 import { compareToGolden, loadGolden } from "./golden.js";
+import { summarizeJournal } from "../telemetry/journalReport.js";
+import { checkDrift } from "../telemetry/drift.js";
 
 const { values } = parseArgs({
   options: {
@@ -36,6 +38,7 @@ const { values } = parseArgs({
     worktree: { type: "string" },
     registry: { type: "string", default: paths.registry },
     mapper: { type: "string" },
+    since: { type: "string" },
   },
 });
 
@@ -158,8 +161,41 @@ const targets = values.mapper
 const scores: MapperScore[] = [];
 for (const m of targets) scores.push(await scoreMapper(m.id));
 
+// MON-3 / AGT-6 — journal + defects + drift (zero model calls).
+const journal = summarizeJournal({
+  mapperId: values.mapper,
+  since: values.since,
+});
+const correctedTotal = scores.reduce((a, s) => a + (s.store?.corrected ?? 0), 0);
+const drift = await checkDrift({
+  registryPath: values.registry!,
+  worktree: values.worktree,
+  mapperId: values.mapper,
+});
+
 if (values.json) {
-  console.log(JSON.stringify({ generatedAt: new Date().toISOString(), scores }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        scores,
+        journal: {
+          ...journal,
+          judge: {
+            rejects: journal.judge.rejects,
+            agrees: correctedTotal,
+            agreeRate:
+              journal.judge.rejects + correctedTotal > 0
+                ? correctedTotal / (journal.judge.rejects + correctedTotal)
+                : null,
+          },
+        },
+        drift,
+      },
+      null,
+      2,
+    ),
+  );
 } else {
   console.log(`\nKodiak scorecard — ${scores.length} mapper(s)\n`);
   for (const s of scores) {
@@ -180,6 +216,43 @@ if (values.json) {
         (s.golden ? ` | golden=${s.golden.matched}/${s.golden.total}` : ""),
     );
     for (const concern of s.concerns) console.log(`       - ${concern}`);
+  }
+
+  console.log(`\nJournal (${journal.runs} run(s)${values.since ? ` since ${values.since}` : ""})`);
+  if (journal.runs === 0) {
+    console.log("  (empty — label a mapper to start recording)");
+  } else {
+    const c = journal.cost;
+    console.log(
+      `  cost: modelCalls=${c.modelCalls} tokens=${c.promptTokens}+${c.completionTokens} ` +
+        `resultSource verified=${c.verifiedHits} cache=${c.cacheHits} model=${c.modelLabels}`,
+    );
+    console.log(
+      `  miss signals: possible-missed-write=${journal.possibleMissedWrites} ` +
+        `grounding=${journal.groundingWarnings} step-smells=${journal.stepSmells}`,
+    );
+    if (Object.keys(journal.writePatterns).length) {
+      console.log(
+        `  write patterns: ${Object.entries(journal.writePatterns)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(" ")}`,
+      );
+    }
+    const denom = journal.judge.rejects + correctedTotal;
+    console.log(
+      `  judge: agrees(corrected)=${correctedTotal} rejects(defects)=${journal.judge.rejects}` +
+        (denom ? ` agreeRate=${(correctedTotal / denom).toFixed(2)}` : ""),
+    );
+  }
+
+  console.log(`\nDrift`);
+  for (const d of drift) {
+    const flag =
+      d.status === "current" ? "[OK]" : d.status === "never-verified" ? "[..]" : "[!!]";
+    console.log(
+      `  ${flag} ${d.mapperId.padEnd(28)} ${d.status}` +
+        (d.staleCorrections ? ` staleCorrections=${d.staleCorrections}` : ""),
+    );
   }
   console.log("");
 }
