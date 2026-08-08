@@ -13,8 +13,11 @@ import { runAuditGate } from "../../analyzer/auditGate.js";
 import { findTypeFile } from "../../analyzer/resolveType.js";
 import { missDiagnostics } from "../../analyzer/secondOpinion.js";
 import { injectionDiagnostics } from "./promptInjection.js";
+import { attributeMultiInstanceWrites, type NestedTypeRef } from "./multiInstance.js";
 import type { AuditReport, WriteSlice } from "../../analyzer/types.js";
 import type { MapperEntry } from "../../src/registry/loadRegistry.js";
+
+export type { NestedTypeRef };
 
 export interface FieldTask {
   /** Declared target field (leaf, from the target type). */
@@ -79,13 +82,6 @@ function collectionElementType(type?: string): string | null {
   if (generic) return generic[1]!;
   if (t.endsWith("[]")) return t.slice(0, -2).trim();
   return null;
-}
-
-export interface NestedTypeRef {
-  /** Dotted path prefix on the target, e.g. "message". */
-  pathPrefix: string;
-  /** Simple type name, e.g. "MessageType". */
-  typeName: string;
 }
 
 /**
@@ -323,11 +319,8 @@ export function buildLabelTasks(options: {
   // Nested writes: instances of nested types are usually built inside the
   // mapper (or its helpers); scan write sites against each nested type in the
   // mapper source and prefix them with the nested path.
-  // POC assumption: one instance per nested type (typical for DTO builders).
-  // Multi-instance attribution: when the same nested type feeds several parent
-  // fields, attribute each write site to the right dotted path by tracing which
-  // receiver VARIABLE (or which builder helper's local) flows into which parent
-  // field: parent.setX(var) or parent.setX(helper(...)).
+  // Multi-instance: setX(var) / setX(helper) / builder .x(var) / withX(var),
+  // plus reassignment-aware var segments and nested Type.builder() chains.
   const extraSites: WriteSite[] = [];
   const byType = new Map<string, NestedTypeRef[]>();
   for (const ref of nestedTypes) {
@@ -345,45 +338,21 @@ export function buildLabelTasks(options: {
       continue;
     }
 
-    // prefix -> {vars, methods} whose product flows into that parent field.
-    const routes = refs.map((ref) => {
-      const leaf = ref.pathPrefix.replace(/\[\]$/, "").split(".").pop()!;
-      const cap = leaf.charAt(0).toUpperCase() + leaf.slice(1);
-      const vars = new Set<string>();
-      const methods = new Set<string>();
-      for (const m of options.sourceJava.matchAll(
-        new RegExp(`\\.set${cap}\\s*\\(\\s*(\\w+)\\s*(\\()?`, "g"),
-      )) {
-        if (m[2]) methods.add(m[1]!); // setX(helper(...)) -> attribute by enclosing method
-        else vars.add(m[1]!);         // setX(var)         -> attribute by receiver variable
-      }
-      return { ref, vars, methods };
+    const { attributed, unattributed } = attributeMultiInstanceWrites({
+      source: options.sourceJava,
+      typeName,
+      refs,
+      sites,
     });
-
-    let unattributed = 0;
-    for (const site of sites) {
-      const route = routes.find(
-        (r) => r.vars.has(site.receiver) || r.methods.has(site.inMethod),
-      );
-      if (route) {
-        extraSites.push({
-          ...site,
-          targetField: `${route.ref.pathPrefix}.${site.targetField}`,
-        });
-      } else {
-        // Unattributable: taint every candidate path rather than guess one.
-        unattributed++;
-        for (const r of routes) {
-          extraSites.push({
-            ...site,
-            targetField: `${r.ref.pathPrefix}.${site.targetField}`,
-          });
-        }
-      }
+    for (const { site, pathPrefix } of attributed) {
+      extraSites.push({
+        ...site,
+        targetField: `${pathPrefix}.${site.targetField}`,
+      });
     }
-    if (unattributed > 0) {
+    if (unattributed.length > 0) {
       diagnostics.push(
-        `type "${typeName}" feeds ${refs.length} parent fields; ${unattributed} write(s) could not be ` +
+        `type "${typeName}" feeds ${refs.length} parent fields; ${unattributed.length} write(s) could not be ` +
           "attributed to a single instance and were applied to all candidates — verify those fields",
       );
     }

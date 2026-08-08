@@ -136,7 +136,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 
 ## Pending — pick up here
 
-**Next increment (do in this order):** multi-instance builder routing — or ship whatever the next real-mapper field report surfaces.
+**Next increment:** ship whatever the next real-mapper field report surfaces (checklist / diagnostics / declaredFields).
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
 - [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
@@ -160,7 +160,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **Cross-check trace surfacing**: flips in checklist `diagnostics` + provenance tag
 - [x] **Tool-loop trace persistence**: optional `toolTrace` + `provenance` on field-cache entries
 - [x] **pending-review** / **approve** / **verified:prune** / offline bulk multi-field export
-- [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
+- [x] **Multi-instance edge**: `setX` / `withX` / builder `.x(var)`, nested `Type.builder()` binding, reassignment lifetime segments (`translator/agentloop/multiInstance.ts`)
 
 - [x] **Offline parity for bulk-label**: bulk exports ONE multi-field job via `/api/export-label-job` when model is not configured.
 - [x] **Viewer polish**: re-label (`noCache`); checklistSource/worktreeUsed/pending pills; approve bar + previous diff; dots refresh after bulk.

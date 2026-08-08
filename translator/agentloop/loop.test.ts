@@ -508,6 +508,132 @@ public class RMapper {
   rmSync(wt, { recursive: true, force: true });
 });
 
+test("multi-instance: builder .x(var) parent inject + nested builder write", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-multi-b-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "Record.java"), `package com.acme.dto;
+public class Record {
+  private com.acme.dto.Contact primary;
+  private com.acme.dto.Contact secondary;
+  public static Builder builder() { return new Builder(); }
+  public static class Builder {
+    private final Record r = new Record();
+    public Builder primary(com.acme.dto.Contact v) { r.primary = v; return this; }
+    public Builder secondary(com.acme.dto.Contact v) { r.secondary = v; return this; }
+    public Record build() { return r; }
+  }
+}`);
+  writeFileSync(join(dtoDir, "Contact.java"), `package com.acme.dto;
+public class Contact {
+  private String email;
+  public void setEmail(String v) { this.email = v; }
+  public static Builder builder() { return new Builder(); }
+  public static class Builder {
+    private final Contact c = new Contact();
+    public Builder email(String v) { c.email = v; return this; }
+    public Contact build() { return c; }
+  }
+}`);
+  const mapperFile = join(mapDir, "RMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.Record;
+import com.acme.dto.Contact;
+public class RMapper {
+  public Record map(In in) {
+    Contact c1 = Contact.builder()
+      .email(in.getMainEmail().toLowerCase())
+      .build();
+    return Record.builder()
+      .primary(c1)
+      .secondary(buildBackup(in))
+      .build();
+  }
+  private Contact buildBackup(In in) {
+    Contact c2 = new Contact();
+    c2.setEmail(in.getAltEmail().trim());
+    return c2;
+  }
+}`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "multi-b", sourceFile: "src/main/java/com/acme/mapper/RMapper.java",
+      class: "com.acme.mapper.RMapper", entryMethod: "map",
+      sourceType: "In", targetType: "com.acme.dto.Record",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+  const primary = tasks.tasks.find((t) => t.field === "primary.email")!;
+  const secondary = tasks.tasks.find((t) => t.field === "secondary.email")!;
+  assert.ok(primary && secondary, `fields=${tasks.tasks.map((t) => t.field)}`);
+  assert.ok(primary.sliceText.includes("toLowerCase") && !primary.sliceText.includes("trim()"),
+    "builder-bound nested write attributed to primary");
+  assert.ok(secondary.sliceText.includes("trim()") && !secondary.sliceText.includes("toLowerCase"),
+    "helper-routed write attributed to secondary");
+  assert.ok(!(tasks.diagnostics ?? []).some((d) => d.includes("could not be attributed")),
+    "no unattributed taint diagnostic");
+  rmSync(wt, { recursive: true, force: true });
+});
+
+test("multi-instance: reassigned variable tracks lifetime segments", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-multi-r-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "Record.java"), `package com.acme.dto;
+public class Record {
+  private com.acme.dto.Contact primary;
+  private com.acme.dto.Contact secondary;
+  public void setPrimary(com.acme.dto.Contact v) { this.primary = v; }
+  public void setSecondary(com.acme.dto.Contact v) { this.secondary = v; }
+}`);
+  writeFileSync(join(dtoDir, "Contact.java"), `package com.acme.dto;
+public class Contact {
+  private String email;
+  public void setEmail(String v) { this.email = v; }
+}`);
+  const mapperFile = join(mapDir, "RMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.Record;
+import com.acme.dto.Contact;
+public class RMapper {
+  public Record map(In in) {
+    Record r = new Record();
+    Contact c = new Contact();
+    c.setEmail(in.getMainEmail().toLowerCase());
+    r.setPrimary(c);
+    c = new Contact();
+    c.setEmail(in.getAltEmail().trim());
+    r.setSecondary(c);
+    return r;
+  }
+}`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "multi-r", sourceFile: "src/main/java/com/acme/mapper/RMapper.java",
+      class: "com.acme.mapper.RMapper", entryMethod: "map",
+      sourceType: "In", targetType: "com.acme.dto.Record",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+  const primary = tasks.tasks.find((t) => t.field === "primary.email")!;
+  const secondary = tasks.tasks.find((t) => t.field === "secondary.email")!;
+  assert.ok(primary.sliceText.includes("toLowerCase") && !primary.sliceText.includes("trim()"),
+    "first lifetime of c → primary only");
+  assert.ok(secondary.sliceText.includes("trim()") && !secondary.sliceText.includes("toLowerCase"),
+    "reassigned lifetime of c → secondary only");
+  rmSync(wt, { recursive: true, force: true });
+});
+
 test("loop: empty pipelines are not accepted as labels (mapped fields stay unlabeled)", async () => {
   const calls: string[] = [];
   const provider: ModelProvider = {
