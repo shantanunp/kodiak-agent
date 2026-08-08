@@ -29,7 +29,8 @@ npm run test:all            # offline suites including test:golden (no model)
 npm run test:golden         # EVAL-1 shape harness (add -- --model for guidance only)
 npm run report / npm run drift
 npm run e2e:online          # ONLY script that calls the real model API (needs key)
-npm run ui:serve            # viewer at :4173/pipeline-viewer/?mapper=<id>
+npm run ui:serve            # viewer Scorecard + :4173/pipeline-viewer/?mapper=<id>
+                            # GET /api/report?mapper=<id> (same payload as report CLI)
 npm run analyze -- --file <f> --mapper-class <C> --target-class <C> [--slices]
 npm run label -- --mapper <id> --worktree <path> --analyzer [--promote] [--verify] [--critic]
 npm run label:all -- --worktree <path>       # store-aware batch (verified skips are free)
@@ -167,6 +168,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **Golden dataset harness**: `npm run test:golden` offline shape check (`validator/golden-dataset/`).
 - [x] **Monitoring backlog (MON-1…5, EVAL-1…2)** — all shipped; see sections below.
 - [x] **Miss-detection backlog (PAR-1…4, AGT-1…6)** — all shipped; see sections below.
+- [x] **Viewer Scorecard UI** — `GET /api/report` + Scorecard panel in pipeline-viewer (live miss + journal); shared `translator/report/scorecard.ts`.
 
 ## Field-report protocol (how issues got fixed so far — keep doing this)
 

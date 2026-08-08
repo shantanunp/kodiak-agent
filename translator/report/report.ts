@@ -3,33 +3,16 @@
  * Scorecard — `npm run report [-- --json] [--strict] [--worktree <path>]`
  *
  * Runs the DETERMINISTIC pipeline (no model calls) over every registry entry
- * and answers "is it safe to onboard / trust this mapper?" with numbers:
- *
- *   coverage    declared fields, % mapped / unmapped / unresolved, checklist source
- *   store       verified entry for current source? fields, corrections, stale entries
- *   run signals cross-check flip rate, tool-loop fire rate (from recorded runs)
- *   accuracy    verified store vs golden dataset, when a golden file exists
- *
- * --strict exits non-zero when any mapper has unresolved fields, a write-sites-only
- * checklist, or golden mismatches — CI-ready.
+ * and answers "is it safe to onboard / trust this mapper?" with numbers.
+ * Shared assembler: `./scorecard.ts` (also used by GET /api/report).
  */
 
 import { parseArgs } from "node:util";
 import { paths } from "../../src/config/env.js";
 import { loadRegistry } from "../../src/registry/loadRegistry.js";
-import { resolveMapperAst } from "../resolvePipeline.js";
-import { buildLabelTasks } from "../agentloop/tasks.js";
-import { inferWorktree } from "../../analyzer/resolveType.js";
-import { loadSchemaJson } from "../model/index.js";
-import {
-  computeVerifiedFingerprint,
-  getVerified,
-  listStaleFingerprints,
-} from "../verified/store.js";
-import { readRunMetrics } from "./metrics.js";
-import { compareToGolden, loadGolden } from "./golden.js";
 import { summarizeJournal } from "../telemetry/journalReport.js";
 import { checkDrift } from "../telemetry/drift.js";
+import { scoreMapper, type MapperScore } from "./scorecard.js";
 
 const { values } = parseArgs({
   options: {
@@ -42,137 +25,22 @@ const { values } = parseArgs({
   },
 });
 
-interface MapperScore {
-  mapperId: string;
-  ok: boolean;
-  error?: string;
-  coverage?: {
-    declaredFields: number;
-    mapped: number;
-    unmapped: number;
-    unresolved: number;
-    mappedPct: number;
-    checklistSource: string;
-    diagnostics: number;
-  };
-  store?: {
-    hasCurrentEntry: boolean;
-    fields: number;
-    verified: number;
-    pendingReview: number;
-    corrected: number;
-    staleEntries: number;
-  };
-  runs?: {
-    recorded: number;
-    crossCheckFlips: number;
-    toolLoopRuns: number;
-    toolLoopResolved: number;
-  };
-  golden?: {
-    total: number;
-    matched: number;
-    mismatched: number;
-    missing: number;
-  };
-  concerns: string[];
-}
-
-async function scoreMapper(mapperId: string): Promise<MapperScore> {
-  const registry = loadRegistry(values.registry!);
-  const mapper = registry.mappers.find((m) => m.id === mapperId)!;
-  const concerns: string[] = [];
-
-  try {
-    const resolved = await resolveMapperAst(mapperId, values.registry!, {
-      worktree: values.worktree,
-      remote: false,
-    });
-    if (!resolved.sourceJava.trim()) {
-      return { mapperId, ok: false, error: "source not resolvable (pass --worktree)", concerns: [] };
-    }
-    const worktree =
-      values.worktree ?? inferWorktree(resolved.sourcePath, mapper.sourceFile) ?? undefined;
-
-    const tasks = buildLabelTasks({ mapper, sourceJava: resolved.sourceJava, worktree });
-    const r = tasks.report;
-    const coverage = {
-      declaredFields: r.declaredFields,
-      mapped: r.mapped,
-      unmapped: r.unmapped,
-      unresolved: r.unresolved,
-      mappedPct: r.declaredFields ? Math.round((r.mapped / r.declaredFields) * 100) : 0,
-      checklistSource: tasks.checklistSource,
-      diagnostics: tasks.diagnostics.length,
-    };
-    if (r.unresolved > 0) concerns.push(`${r.unresolved} unresolved field(s)`);
-    if (tasks.checklistSource === "write-sites") {
-      concerns.push("checklist from write sites only — unmapped fields undetectable");
-    }
-
-    const fingerprint = computeVerifiedFingerprint({
-      sourceJava: resolved.sourceJava,
-      schemaJson: loadSchemaJson(mapperId),
-    });
-    const entry = getVerified(mapperId, fingerprint);
-    const pendingReview =
-      entry?.fields.filter((f) => f.status === "pending-review").length ?? 0;
-    const verifiedFields =
-      entry?.fields.filter((f) => f.status === "verified").length ?? 0;
-    const store = {
-      hasCurrentEntry: Boolean(entry),
-      fields: entry?.fields.length ?? 0,
-      verified: verifiedFields,
-      pendingReview,
-      corrected: entry?.fields.filter((f) => f.status === "user-corrected").length ?? 0,
-      staleEntries: listStaleFingerprints(mapperId, fingerprint).length,
-    };
-    if (!entry) concerns.push("no verified entry for current source (labels not promoted)");
-    else if (pendingReview > 0) {
-      concerns.push(`${pendingReview} field(s) pending review (npm run verified:approve)`);
-    }
-
-    const runList = readRunMetrics(mapperId);
-    const runs = {
-      recorded: runList.length,
-      crossCheckFlips: runList.reduce((a, m) => a + m.crossCheckFlips, 0),
-      toolLoopRuns: runList.reduce((a, m) => a + m.toolLoopRuns, 0),
-      toolLoopResolved: runList.reduce((a, m) => a + m.toolLoopResolved, 0),
-    };
-    if (runs.crossCheckFlips > 0) {
-      concerns.push(`cross-check flipped ${runs.crossCheckFlips} field(s) — scanner pattern gap`);
-    }
-
-    let golden: MapperScore["golden"];
-    const goldenFile = loadGolden(mapperId);
-    if (goldenFile && entry) {
-      const g = compareToGolden(entry, goldenFile);
-      golden = {
-        total: g.total,
-        matched: g.matched,
-        mismatched: g.mismatched.length,
-        missing: g.missing.length,
-      };
-      if (g.mismatched.length + g.missing.length > 0) {
-        concerns.push(`golden dataset: ${g.mismatched.length} mismatch, ${g.missing.length} missing`);
-      }
-    }
-
-    return { mapperId, ok: true, coverage, store, runs, golden, concerns };
-  } catch (err) {
-    return { mapperId, ok: false, error: (err as Error).message, concerns };
-  }
-}
-
 const registry = loadRegistry(values.registry!);
 const targets = values.mapper
   ? registry.mappers.filter((m) => m.id === values.mapper)
   : registry.mappers;
 
 const scores: MapperScore[] = [];
-for (const m of targets) scores.push(await scoreMapper(m.id));
+for (const m of targets) {
+  const s = await scoreMapper(m.id, {
+    registryPath: values.registry!,
+    worktree: values.worktree,
+  });
+  // Strip internal task payload from CLI output.
+  const { _tasks: _, ...pub } = s;
+  scores.push(pub);
+}
 
-// MON-3 / AGT-6 — journal + defects + drift (zero model calls).
 const journal = summarizeJournal({
   mapperId: values.mapper,
   since: values.since,

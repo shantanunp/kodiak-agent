@@ -55,6 +55,7 @@ import { exportJudgeJob } from "../translator/judge/offline.js";
 import { exportAgentJob } from "../translator/agent/exportJob.js";
 import type { PipelineViewModel } from "../translator/toPipelineView.js";
 import { toPipelineView } from "../translator/toPipelineView.js";
+import { buildMapperReport } from "../translator/report/scorecard.js";
 
 const PORT = Number(process.env.VIEW_PORT ?? 4173);
 const UI_ROOT = join(paths.root, "ui");
@@ -756,6 +757,32 @@ createServer(async (req, res) => {
       res.end(readFileSync(file));
       return;
     }
+  }
+
+  // Scorecard — journal + live miss + coverage (zero model calls).
+  if (pathname === "/api/report" && req.method === "GET") {
+    try {
+      const mapperId = url.searchParams.get("mapper")?.trim();
+      if (!mapperId) {
+        sendJson(res, 400, { error: "mapper query required" });
+        return;
+      }
+      const since = url.searchParams.get("since")?.trim() || undefined;
+      const worktree =
+        url.searchParams.get("worktree")?.trim() ||
+        getEnvOptional("MAPPER_WORKTREE") ||
+        undefined;
+      const report = await buildMapperReport({
+        mapperId,
+        worktree,
+        since,
+        registryPath: paths.registry,
+      });
+      sendJson(res, 200, report);
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
   }
 
   // MON-5 — local health (no model calls, no secrets).

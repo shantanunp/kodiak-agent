@@ -113,6 +113,25 @@
   .summary{margin-top:20px;border-top:1px solid var(--line);padding-top:14px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;}
   .error{color:var(--cond);padding:20px;background:var(--cond-bg);border-radius:8px;}
   .nested{margin-top:8px;padding-left:12px;border-left:2px solid var(--line);}
+  .score-wrap{margin:0 0 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;}
+  .score-wrap summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .score-wrap summary::-webkit-details-marker{display:none;}
+  .score-wrap summary::before{content:'▸';color:var(--ink-faint);font-size:11px;}
+  .score-wrap[open] summary::before{content:'▾';}
+  .score-body{margin-top:12px;font-size:12.5px;color:var(--ink-soft);line-height:1.55;}
+  .score-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:8px 0 12px;}
+  .score-cell{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
+  .score-cell b{display:block;font-family:var(--font-mono);font-size:16px;color:var(--ink);font-weight:600;}
+  .score-cell span{font-size:11px;color:var(--ink-faint);}
+  .score-miss{max-height:180px;overflow:auto;margin:6px 0 10px;}
+  .score-miss button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:5px 4px;font-family:var(--font-mono);font-size:11.5px;color:var(--cond);cursor:pointer;border-radius:4px;}
+  .score-miss button:hover{background:var(--cond-bg);}
+  .score-miss .nomiss{color:var(--ink-faint);padding:4px;}
+  .score-runs{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;}
+  .score-runs th,.score-runs td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);}
+  .score-runs th{color:var(--ink-faint);font-weight:600;}
+  .score-refresh{margin-left:auto;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;}
+  .score-refresh:hover{color:var(--ink);border-color:var(--ink-faint);}
 </style>
 </head>
 <body>
@@ -129,6 +148,17 @@
     <button type="button" id="aiBtn">Build with AI</button>
   </div>
   <div class="ai-status" id="aiStatus">Edits only the currently selected field’s mapping functions in MAPPER_WORKTREE, then re-labels that field.</div>
+
+  <details class="score-wrap" id="scoreWrap">
+    <summary>
+      <span>Scorecard</span>
+      <span id="scoreSummary" style="font-weight:500;color:var(--ink-soft);font-size:12px"></span>
+      <button type="button" class="score-refresh" id="scoreRefresh">Refresh</button>
+    </summary>
+    <div class="score-body" id="scoreBody">
+      <p style="color:var(--ink-faint);margin:0">Loading monitoring & miss signals…</p>
+    </div>
+  </details>
 
   <div class="legend">
     <span><span class="dot" style="background:var(--source)"></span>Read</span>
@@ -163,6 +193,7 @@ let aiGenerated = false;
 let lastChangeSummary = '';
 let lastChangedFiles = [];
 let checklist = null;
+let scorecard = null;
 let activeField = null;
 /** Full dotted target path → viewSteps. Shown only after a LHS click. */
 const fieldPipelines = {};
@@ -571,6 +602,138 @@ const PROVENANCE_NOTE = {
   'cross-check': 'cross-check flip',
 };
 
+function applyScorePills(){
+  const meta = document.getElementById('metaBar');
+  if(!meta) return;
+  meta.querySelectorAll('[data-score]').forEach((n) => n.remove());
+  if(!scorecard) return;
+  const c = scorecard.coverage;
+  const store = scorecard.store;
+  const j = scorecard.journal;
+  const storeLabel = !scorecard.ok && scorecard.error
+    ? 'store:?'
+    : !store?.hasCurrentEntry
+      ? 'store:MISSING'
+      : (store.pendingReview ? `store:pending ${store.pendingReview}` : 'store:current');
+  const extras = [
+    c ? `<span class="pill" data-score>mapped ${c.mappedPct}%</span>` : '',
+    c && c.unmapped ? `<span class="pill" data-score style="color:var(--cond)">unmapped ${c.unmapped}</span>` : '',
+    `<span class="pill" data-score>${esc(storeLabel)}</span>`,
+    j ? `<span class="pill" data-score title="Journal miss-signal total">miss ${j.missTotal ?? 0}</span>` : '',
+    scorecard.drift ? `<span class="pill" data-score>drift: ${esc(scorecard.drift.status)}</span>` : '',
+  ].filter(Boolean).join('');
+  if(extras) meta.insertAdjacentHTML('beforeend', extras);
+}
+
+function renderScorecard(){
+  const body = document.getElementById('scoreBody');
+  const sum = document.getElementById('scoreSummary');
+  if(!body) return;
+  if(!scorecard){
+    body.innerHTML = `<p style="color:var(--ink-faint);margin:0">No scorecard yet.</p>`;
+    if(sum) sum.textContent = '';
+    return;
+  }
+  const c = scorecard.coverage;
+  const j = scorecard.journal || {};
+  const store = scorecard.store;
+  if(sum){
+    sum.textContent = scorecard.ok && c
+      ? `${c.mappedPct}% mapped · miss ${j.missTotal ?? 0} · ${j.runs ?? 0} run(s)`
+      : (scorecard.error || 'history only');
+  }
+  const missCells = [
+    ['possible-missed-write', j.possibleMissedWrites],
+    ['unmapped-but-mentioned', j.unmappedButMentioned],
+    ['multi-instance', j.multiInstanceUnattributed],
+    ['prompt-injection', j.promptInjectionRisks],
+    ['cross-check-flips', j.crossCheckFlips],
+    ['grounding', j.groundingWarnings],
+    ['step-smells', j.stepSmells],
+    ['verify-diverge', j.verifyDivergences],
+    ['critic', j.criticFindings],
+  ].map(([k,v]) => `<div class="score-cell"><b>${v ?? 0}</b><span>${esc(k)}</span></div>`).join('');
+
+  const live = scorecard.missLive || [];
+  const liveHtml = live.length
+    ? live.slice(0, 80).map((m) => {
+        const label = `${m.kind}${m.field ? ' · ' + m.field : ''}${m.line != null ? ' L' + m.line : ''}`;
+        if(m.field){
+          return `<button type="button" data-miss-field="${esc(m.field)}" title="${esc(m.text)}">${esc(label)}</button>`;
+        }
+        return `<div class="nomiss" title="${esc(m.text)}">${esc(label)} — ${esc(m.text.slice(0,120))}</div>`;
+      }).join('')
+    : `<div class="nomiss">No live miss rows (resolve worktree if coverage is missing).</div>`;
+
+  const runs = scorecard.recentRuns || [];
+  const runsHtml = runs.length
+    ? `<table class="score-runs"><thead><tr><th>at</th><th>map</th><th>unmap</th><th>unres</th><th>calls</th><th>gate</th></tr></thead><tbody>` +
+      runs.map((r) => `<tr>
+        <td>${esc((r.at||'').replace('T',' ').slice(0,19))}</td>
+        <td>${r.mapped ?? '—'}</td><td>${r.unmapped ?? '—'}</td><td>${r.unresolved ?? '—'}</td>
+        <td>${r.modelCalls ?? 0}</td><td>${r.gatePassed ? 'ok' : 'fail'}</td>
+      </tr>`).join('') + `</tbody></table>`
+    : `<p style="margin:0;color:var(--ink-faint)">No journal runs yet — label with --analyzer to record.</p>`;
+
+  const concerns = (scorecard.concerns || []).map((x) => `<div style="color:var(--cond)">· ${esc(x)}</div>`).join('');
+  const cost = j.cost
+    ? `modelCalls=${j.cost.modelCalls} tokens=${j.cost.promptTokens}+${j.cost.completionTokens} ` +
+      `verified=${j.cost.verifiedHits} cache=${j.cost.cacheHits} model=${j.cost.modelLabels}`
+    : '';
+  const scoresLine = j.scores
+    ? `coverage=${j.scores.coverage} grounding=${j.scores.grounding} specificity=${j.scores.specificity} provenance=${j.scores.provenance}`
+    : '';
+  const provLine = j.provenance && Object.keys(j.provenance).length
+    ? Object.entries(j.provenance).map(([k,v]) => `${k}=${v}`).join(' ')
+    : '';
+
+  body.innerHTML = `
+    ${scorecard.error ? `<p style="color:var(--cond);margin:0 0 8px">${esc(scorecard.error)} — journal/history still shown below.</p>` : ''}
+    ${c ? `<div class="score-grid">
+      <div class="score-cell"><b>${c.declaredFields}</b><span>declared</span></div>
+      <div class="score-cell"><b>${c.mappedPct}%</b><span>mapped</span></div>
+      <div class="score-cell"><b>${c.unmapped}</b><span>unmapped</span></div>
+      <div class="score-cell"><b>${c.unresolved}</b><span>unresolved</span></div>
+      <div class="score-cell"><b>${store?.hasCurrentEntry ? (store.pendingReview || 0) : '—'}</b><span>pending review</span></div>
+      <div class="score-cell"><b>${esc(scorecard.drift?.status || '?')}</b><span>drift</span></div>
+    </div>` : ''}
+    ${concerns ? `<div style="margin-bottom:10px">${concerns}</div>` : ''}
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:600">Journal miss signals</div>
+    <div class="score-grid">${missCells}</div>
+    ${cost ? `<div style="font-family:var(--font-mono);font-size:11px;margin-bottom:6px">${esc(cost)}</div>` : ''}
+    ${scoresLine ? `<div style="font-family:var(--font-mono);font-size:11px;margin-bottom:6px">scores: ${esc(scoresLine)}</div>` : ''}
+    ${provLine ? `<div style="font-family:var(--font-mono);font-size:11px;margin-bottom:10px">provenance: ${esc(provLine)}</div>` : ''}
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:600">Live miss (${live.length})</div>
+    <div class="score-miss">${liveHtml}</div>
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:600;margin-top:8px">Recent runs</div>
+    ${runsHtml}`;
+
+  body.querySelectorAll('[data-miss-field]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const field = btn.getAttribute('data-miss-field');
+      if(!field || !checklist?.fields) return;
+      const match = checklist.fields.find((f) => f.field === field)
+        || checklist.fields.find((f) => f.field.endsWith('.' + field) || fieldLeaf(f.field) === fieldLeaf(field));
+      if(match) openField(match.field);
+    });
+  });
+  applyScorePills();
+}
+
+async function loadScorecard(){
+  if(!currentMapper) return;
+  try{
+    const res = await fetch(`/api/report?mapper=${encodeURIComponent(currentMapper)}&t=${Date.now()}`);
+    const body = await res.json();
+    if(!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    scorecard = body;
+    renderScorecard();
+  }catch(e){
+    const el = document.getElementById('scoreBody');
+    if(el) el.innerHTML = `<p style="color:var(--cond);margin:0">${esc(e.message || String(e))}</p>`;
+  }
+}
+
 async function loadChecklist(){
   if(!currentMapper) return;
   try{
@@ -593,6 +756,7 @@ async function loadChecklist(){
         : '',
     ].filter(Boolean).join('');
     if(extras) meta.insertAdjacentHTML('beforeend', extras);
+    applyScorePills();
     renderFieldList();
     // Deep-link: ?fields=message.dataVersionIdentifier opens that field only.
     const want = new URLSearchParams(location.search).get('fields')?.split(',')[0]?.trim();
@@ -836,6 +1000,7 @@ async function openField(field, noCache){
     renderFieldSteps(field, fieldPipelines[key],
       `Labeled from ${data.resultSource}${data.unresolved?.length?` — unresolved: ${data.unresolved.join(', ')}`:''}`,
       data.provenance);
+    loadScorecard();
   }catch(e){
     renderFieldSteps(field, null, e.message);
   }
@@ -855,6 +1020,7 @@ async function approveStore(){
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     await loadChecklist();
+    await loadScorecard();
   }catch(e){
     alert(e.message || String(e));
     if(btn) btn.disabled = false;
@@ -938,6 +1104,7 @@ async function bulkLabel(fields){
   status.textContent = `Done: ${done} labeled${failed?`, ${failed} failed`:''}${bulkStop?' (stopped)':''}.`;
   btn.textContent = 'Label all mapped';
   renderFieldList();
+  loadScorecard();
 }
 
 function correctionBoxHtml(field){
@@ -987,7 +1154,13 @@ function wireCorrectionBox(field, currentSteps){
   });
 }
 
-load().then(loadChecklist);
+document.getElementById('scoreRefresh')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  loadScorecard();
+});
+
+load().then(() => Promise.all([loadChecklist(), loadScorecard()]));
 </script>
 </body>
 </html>

@@ -31,7 +31,7 @@
     "test:policy": "tsx --test analyzer/noExternal.test.ts",
     "test:wire": "tsx --test translator/model/provider.wire.test.ts",
     "test:crosscheck": "tsx --test translator/agentloop/crossCheck.test.ts",
-    "test:report": "tsx --test translator/report/report.test.ts translator/report/scorers.test.ts",
+    "test:report": "tsx --test translator/report/report.test.ts translator/report/scorers.test.ts translator/report/missLive.test.ts",
     "test:registry": "tsx --test src/registry/checkRegistry.test.ts",
     "test:ci": "tsx --test translator/ciCheck.test.ts",
     "test:golden": "tsx translator/report/goldenHarness.ts",

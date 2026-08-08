@@ -22,15 +22,17 @@ Registry mapper used below: `order-request-mapper` (edit `registry/mapping-regis
 
 ---
 
-## What changed (UI vs report)
+## Where to see monitoring & miss
 
 | Surface | What it shows |
 | --- | --- |
-| `npm run report` | Miss signals + provenance + store `pending=` |
-| `/api/health` | Includes `pendingReview` (viewer mainly uses health for `modelConfigured`) |
-| Viewer checklist | Provenance badges, pending pill, approve bar, diagnostics — restart `ui:serve` after code changes |
+| **Viewer Scorecard** | Expand “Scorecard” on `/pipeline-viewer/?mapper=…` — coverage, journal miss signals, live miss list (click → field), recent runs. Refresh after label/bulk/approve. |
+| `GET /api/report?mapper=…` | Same payload (uses `MAPPER_WORKTREE` when set) |
+| `npm run report` | CLI scorecard (same assembler as the API) |
+| `/api/health` | Ops snapshot (`pendingReview`, stale, modelConfigured) |
+| Viewer field list | Provenance badges, pending pill, approve bar, expansion diagnostics |
 
-The scorecard journal line is CLI-focused. The UI does **not** render the full miss-signal summary; it shows per-field diagnostics / provenance from `/api/checklist` and `/api/label-field`.
+Scorecard in the viewer; still use `npm run report` for CLI/CI.
 
 ---
 
@@ -169,21 +171,19 @@ miss signals: possible-missed-write=… unmapped-but-mentioned=… multi-instanc
 npm run ui:serve
 ```
 
-Health (includes `pendingReview`):
+Scorecard API + health:
 
 ```bash
+curl -s "http://localhost:4173/api/report?mapper=order-request-mapper" | python -m json.tool
 curl -s http://localhost:4173/api/health | python -m json.tool
 ```
 
-Check `pendingReview`, `userCorrected`, `verifiedEntries`, `staleMappers`, `modelConfigured`.
+Open `http://localhost:4173/pipeline-viewer/?mapper=order-request-mapper`:
 
-Viewer:
-
-1. Field list loads instantly (checklist, no model).
-2. Pills: `checklist: …`, `pending N` if store has pending-review.
-3. Per-field provenance badge after label (slice / cache / tool-loop / pending-review / …).
-4. Expansion / diagnostics in the panel (or browser console for checklist diagnostics).
-5. If you `--promote`’d without `--approve`, the Approve bar should appear.
+1. Expand **Scorecard** — miss grid, live miss rows, recent runs (Refresh button).
+2. Meta pills: mapped %, unmapped, store, miss total, drift.
+3. Field list: provenance badges, pending pill, approve bar.
+4. Click a live miss row with a field → opens that field.
 
 Hard-refresh the browser (Ctrl+Shift+R) so old JS isn’t cached.
 
