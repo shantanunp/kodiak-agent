@@ -81,6 +81,7 @@ test("loop: slices feed mapped fields, escalation settles or honestly fails unre
     fingerprint: "test-fp-1",
     sourceJava,
     noCache: false,
+    skipCrossCheck: true,
   });
 
   // 8 mapped-from-slice + stampedBy settled on escalation = 9 in mapping.
@@ -110,6 +111,7 @@ test("loop: second run reuses the field cache — zero model calls for mapped fi
     fingerprint: "test-fp-1",
     sourceJava,
     noCache: false,
+    skipCrossCheck: true,
   });
 
   assert.equal(result.fieldsFromCache, 9, "all previously labeled fields come from cache");

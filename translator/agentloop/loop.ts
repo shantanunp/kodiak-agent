@@ -22,6 +22,7 @@ import {
 } from "../cache/index.js";
 import type { FieldTask, LabelTasks } from "./tasks.js";
 import { investigateField } from "./toolLoop.js";
+import { crossCheckUnmapped } from "./crossCheck.js";
 import type { ModelConfig } from "../model/config.js";
 import type { ToolTraceEntry } from "../model/provider.js";
 
@@ -35,6 +36,8 @@ export interface AgentLoopOptions {
   /** Enables the investigation tool loop for still-unresolved fields. */
   modelConfig?: ModelConfig;
   schemaContextText?: string;
+  /** Disable the cross-check pass (tests / cost control). */
+  skipCrossCheck?: boolean;
 }
 
 export interface AgentLoopAudit {
@@ -76,6 +79,32 @@ export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
   const mapperId = ast.mapperId ?? "unknown";
+
+  // Cross-check pass: one call, only when the scan produced UNMAPPED fields.
+  // Verified claims demote unmapped -> unresolved (never mapped directly), so
+  // the normal escalation / tool-loop path settles them with full rigor.
+  const unmappedTasks = tasks.tasks.filter((t) => t.state === "unmapped");
+  if (unmappedTasks.length > 0 && !options.skipCrossCheck) {
+    try {
+      const { flips, dropped } = await crossCheckUnmapped({
+        provider,
+        sourceJava: options.sourceJava,
+        unmappedFields: unmappedTasks.map((t) => t.field),
+      });
+      for (const note of dropped) console.error(`[cross-check] ${note}`);
+      for (const flip of flips) {
+        const task = tasks.tasks.find((t) => t.field === flip.field);
+        if (task) {
+          task.state = "unresolved";
+          task.note = `cross-check: possible missed write at line ${flip.line} — ${flip.evidence}`;
+          console.error(`[cross-check] ${flip.field}: unmapped -> unresolved (${flip.evidence})`);
+        }
+      }
+    } catch (err) {
+      console.error(`[cross-check] skipped: ${(err as Error).message}`);
+    }
+  }
+
   const mapping: FieldMappingJson[] = [];
   let fieldsLabeled = 0;
   let fieldsFromCache = 0;

@@ -10,6 +10,36 @@ One AI agent does the work. Three deterministic components keep it honest: a too
 
 The agent is free to investigate the code however it wants — that is where model intelligence adds value. But whether the result is *complete* is decided by a dumb count, whether the result is *stable* is decided by a content-addressed store, and whether a user *correction* is kept is decided by evidence checked against the actual source. None of those three verdicts is ever an AI opinion.
 
+
+## Flow (one label run)
+
+```mermaid
+flowchart TD
+    A[Verified store lookup] -->|hit| Z[Output: byte-identical, zero AI calls]
+    A -->|miss| B[CST scan: checklist + per-field slices]
+    B --> C{Field state?}
+    C -->|mapped| D[AI agent labels from slice]
+    C -->|unmapped| E[Cross-check verifier: one AI call,\ncitations mechanically verified]
+    E -->|verified missed write| F[unmapped -> unresolved]
+    E -->|no verifiable claim| G[explicit UNMAPPED row]
+    C -->|unresolved| H[Escalation: full source retry]
+    F --> H
+    H -->|still unresolved| I[Investigation tool loop:\nsearch_source / read_lines]
+    D --> J[Audit gate: every field accounted for]
+    I --> J
+    G --> J
+    J -->|gaps| C
+    J -->|pass| K[Promote to verified store]
+    K --> Z
+    L[User correction] --> M[Judge: cited evidence checked]
+    M -->|agree| K
+    M -->|disagree| N[Mock defect + defects log]
+```
+
+Deterministic boxes: store lookup, CST scan, audit gate, citation checks.
+AI boxes: labeler, cross-check verifier, escalation, tool loop, judge — every
+AI claim passes a deterministic check before it affects state.
+
 ## The four building blocks
 
 ### 1. The toolbox (deterministic, read-only)

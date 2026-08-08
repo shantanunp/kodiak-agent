@@ -70,6 +70,7 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 | 1.11 | Investigation tool loop (search/read tools via raw HTTP tool-calling) for fields escalation can't settle — claude + openai wire styles, trace logged | ✅ |
 | 1.12 | Multi-instance nested types: same type under multiple parent fields expanded per-path; writes attributed by receiver variable or builder helper; unattributable writes applied to all candidates + diagnostic | ✅ |
 | 1.13 | Validate checklist coverage on a real production mapper (field count + expansion notes) | ⬜ project owner only |
+| 1.14 | Cross-check verifier: parallel AI pass over UNMAPPED fields; verified citations demote to unresolved (never assert mapped); unverifiable claims dropped with diagnostics | ✅ |
 
 ### Req 2 — reproducibility
 | # | Work item | Status |
@@ -95,6 +96,7 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 
 - [x] Deterministic write-site scanner (setter/builder/assignment/map-put, `var` receivers) + local dataflow tracing
 - [x] Helper closure in slices: same-class, **superclass chain (cross-file)**, **static utils (`Utils.method`, cross-file)**
+- [x] Cross-check verifier (1.14): one call only when UNMAPPED fields exist; demote-only, citation-gated, `skipCrossCheck` opt-out
 - [x] Investigation tool loop (1.11): search_source/read_lines over resolved source, raw HTTP tool-calling both wire styles, capped rounds, trace returned
 - [x] Multi-instance attribution (1.12): per-path expansion of repeated types, receiver-variable + helper routing, taint-all + diagnostic when unattributable
 - [x] Audit gate: mapped/unmapped/unresolved, opaque-escape tainting, dotted/leaf matching, orphan detection
@@ -111,6 +113,7 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 
 ## Pending — pick up here
 
+- [ ] **Cross-check trace surfacing**: flips currently land in the task note + stderr; also surface them in the viewer checklist response as diagnostics.
 - [ ] **Tool-loop trace persistence**: `runAgentLoop` currently logs the investigation trace to stderr; persist it into the field-cache entry (add optional `toolTrace` to the cache entry type) so agentic runs are replayable evidence.
 - [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
 
