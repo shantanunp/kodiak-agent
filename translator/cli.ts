@@ -46,6 +46,7 @@ import { runAgentLoop, toPipelineJson } from "./agentloop/loop.js";
 import { createModelProvider, loadModelConfig } from "./model/index.js";
 import { schemaContextForLabeler } from "../schema/io.js";
 import { writePipelineView } from "./writePipelineView.js";
+import { appendRun, sourceSha } from "./telemetry/journal.js";
 
 const { values } = parseArgs({
   options: {
@@ -531,6 +532,27 @@ async function main(): Promise<void> {
       `Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`,
     );
   }
+
+  appendRun({
+    at: new Date().toISOString(),
+    mapperId: pipeline.mapperId ?? String(values.mapper),
+    sourceSha: sourceSha(sourceJava ?? ""),
+    language: "java",
+    declared: pipeline.mapping.length,
+    mapped: pipeline.mapping.length,
+    unmapped: 0,
+    unresolved: 0,
+    gatePassed: true,
+    resultSource: {
+      cache: pipeline.fieldsFromCache ?? 0,
+      model: pipeline.fieldsLabeled ?? 0,
+      verified: pipeline.resultSource === "verified" ? pipeline.mapping.length : 0,
+    },
+    durationMs: 0,
+    promoted: Boolean(promoted),
+    outcome: "ok",
+    path: "cli-legacy",
+  });
 
   console.log(
     JSON.stringify(

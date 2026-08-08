@@ -29,6 +29,7 @@ import {
 import { AGENT_OFFLINE_MODEL, type AgentJob, type AgentResult } from "./types.js";
 import { agentJobFile, agentJobsRoot, agentResultFile } from "./paths.js";
 import { exportAgentJob } from "./exportJob.js";
+import { appendRun, sourceSha } from "../telemetry/journal.js";
 
 const { values } = parseArgs({
   options: {
@@ -263,6 +264,25 @@ async function main(): Promise<void> {
 
   const fieldsArg = selectors.length ? ` --fields ${selectors.join(",")}` : "";
   const fromCacheCmd = `npm run label -- --mapper ${mapperId} --from-cache-only${fieldsArg}`;
+
+  appendRun({
+    at: new Date().toISOString(),
+    mapperId,
+    sourceSha: sourceSha(job?.sourceJava ?? fingerprint),
+    language: "java",
+    declared: job?.fields?.length ?? imported,
+    mapped: imported,
+    unmapped: 0,
+    unresolved: gaps.length,
+    gatePassed: gaps.length === 0,
+    resultSource: { model: imported },
+    durationMs: 0,
+    promoted: false,
+    checklistSource: job?.audit?.checklistSource,
+    diagnostics: gaps.length,
+    outcome: "ok",
+    path: "import-job",
+  });
 
   console.log(
     JSON.stringify(

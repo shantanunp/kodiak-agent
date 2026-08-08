@@ -24,6 +24,8 @@ import type { FieldTask, LabelTasks } from "./tasks.js";
 import { investigateField } from "./toolLoop.js";
 import { crossCheckUnmapped } from "./crossCheck.js";
 import { appendRunMetrics } from "../report/metrics.js";
+import { appendRun, sourceSha } from "../telemetry/journal.js";
+import { groundingDiagnostics } from "./grounding.js";
 import type { ModelConfig } from "../model/config.js";
 import type { ToolTraceEntry } from "../model/provider.js";
 
@@ -56,6 +58,8 @@ export interface AgentLoopResult {
   audit: AgentLoopAudit;
   fieldsLabeled: number;
   fieldsFromCache: number;
+  /** AGT-1 grounding warnings (also logged to stderr). */
+  groundingWarnings: string[];
 }
 
 function escalationOps(
@@ -90,6 +94,7 @@ export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
   const mapperId = ast.mapperId ?? "unknown";
+  const started = Date.now();
 
   // Cross-check pass: one call, only when the scan produced UNMAPPED fields.
   // Verified claims demote unmapped -> unresolved (never mapped directly), so
@@ -248,6 +253,15 @@ export async function runAgentLoop(
     unmappedFields,
   };
 
+  // AGT-1 — invented steps that don't appear in the slice.
+  const sliceByField = new Map(
+    tasks.tasks.map((t) => [t.field, t.sliceText] as const),
+  );
+  const groundingWarnings = groundingDiagnostics(mapping, sliceByField);
+  for (const w of groundingWarnings) {
+    console.error(`[grounding] ${w}`);
+  }
+
   try {
     appendRunMetrics({
       mapperId,
@@ -264,7 +278,32 @@ export async function runAgentLoop(
     // metrics are best-effort; never fail a run over them
   }
 
-  return { mapping, audit, fieldsLabeled, fieldsFromCache };
+  // MON-1 — one journal line per agent-loop completion (ok or partial).
+  appendRun({
+    at: new Date().toISOString(),
+    mapperId,
+    sourceSha: sourceSha(options.sourceJava),
+    language: "java",
+    declared: tasks.report.declaredFields,
+    mapped: mapping.length,
+    unmapped: unmappedFields.length,
+    unresolved: stillUnresolved.length,
+    gatePassed: stillUnresolved.length === 0,
+    resultSource: {
+      cache: fieldsFromCache,
+      model: fieldsLabeled,
+    },
+    modelCalls: fieldsLabeled, // lower bound; MON-2 will refine with provider metrics
+    toolLoopCalls: toolLoopRuns,
+    durationMs: Date.now() - started,
+    promoted: false,
+    checklistSource: tasks.checklistSource,
+    diagnostics: (tasks.diagnostics?.length ?? 0) + groundingWarnings.length,
+    outcome: "ok",
+    path: "agent-loop",
+  });
+
+  return { mapping, audit, fieldsLabeled, fieldsFromCache, groundingWarnings };
 }
 
 /** Assemble the labeler-compatible PipelineJson from a loop result. */

@@ -11,6 +11,7 @@ import type { SourceField, WriteSite } from "../../analyzer/types.js";
 import { scanWriteSites, adapterFor } from "../../analyzer/scanWriteSites.js";
 import { runAuditGate } from "../../analyzer/auditGate.js";
 import { findTypeFile } from "../../analyzer/resolveType.js";
+import { missDiagnostics } from "../../analyzer/secondOpinion.js";
 import type { AuditReport, WriteSlice } from "../../analyzer/types.js";
 import type { MapperEntry } from "../../src/registry/loadRegistry.js";
 
@@ -440,6 +441,15 @@ export function buildLabelTasks(options: {
     declaredFields: declared,
     writeSites: slices,
   });
+
+  // PAR-1 / PAR-2 — convert the "unmapped looks like a miss" blind spot into diagnostics.
+  diagnostics.push(
+    ...missDiagnostics(
+      options.sourceJava,
+      slices,
+      report.checklist.filter((c) => c.state === "unmapped").map((c) => c.field),
+    ),
+  );
 
   const byField = new Map<string, WriteSlice[]>();
   for (const s of slices) {
