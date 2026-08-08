@@ -30,6 +30,15 @@ export interface JournalSummary {
   possibleMissedWrites: number;
   groundingWarnings: number;
   stepSmells: number;
+  /** EVAL-2 — mean of per-run scores (undefined dims omitted from average). */
+  scores?: {
+    coverage: number;
+    grounding: number;
+    specificity: number;
+    provenance: number;
+  };
+  verifyDivergences: number;
+  criticFindings: number;
   judge: {
     rejects: number; // defects.jsonl — user claim rejected (agent stood)
     /** Agree rate needs corrected-store counts from the caller (AGT-6). */
@@ -72,6 +81,10 @@ export function summarizeJournal(filter?: {
   let possibleMissedWrites = 0;
   let groundingWarnings = 0;
   let stepSmells = 0;
+  let verifyDivergences = 0;
+  let criticFindings = 0;
+  const scoreSums = { coverage: 0, grounding: 0, specificity: 0, provenance: 0 };
+  let scoreRuns = 0;
 
   for (const r of runs) {
     modelCalls += r.modelCalls ?? 0;
@@ -83,6 +96,15 @@ export function summarizeJournal(filter?: {
     possibleMissedWrites += r.possibleMissedWrites ?? 0;
     groundingWarnings += r.groundingWarnings ?? 0;
     stepSmells += r.stepSmells ?? 0;
+    verifyDivergences += r.verifyDivergences ?? 0;
+    criticFindings += r.criticFindings ?? 0;
+    if (r.scores) {
+      scoreRuns++;
+      scoreSums.coverage += r.scores.coverage;
+      scoreSums.grounding += r.scores.grounding;
+      scoreSums.specificity += r.scores.specificity;
+      scoreSums.provenance += r.scores.provenance;
+    }
     if (r.writePatterns) {
       for (const [k, v] of Object.entries(r.writePatterns)) {
         writePatterns[k] = (writePatterns[k] ?? 0) + v;
@@ -125,6 +147,21 @@ export function summarizeJournal(filter?: {
     possibleMissedWrites,
     groundingWarnings,
     stepSmells,
+    scores:
+      scoreRuns > 0
+        ? {
+            coverage: round4(scoreSums.coverage / scoreRuns),
+            grounding: round4(scoreSums.grounding / scoreRuns),
+            specificity: round4(scoreSums.specificity / scoreRuns),
+            provenance: round4(scoreSums.provenance / scoreRuns),
+          }
+        : undefined,
+    verifyDivergences,
+    criticFindings,
     judge: { rejects: defects.length },
   };
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
 }

@@ -166,43 +166,96 @@ export const javaAdapter: LanguageAdapter = {
     const newRe = new RegExp(`\\b(\\w+)\\s*=\\s*new\\s+${targetClass}\\b`, "g");
     for (const m of source.matchAll(newRe)) receivers.add(m[1]!);
 
-    if (receivers.size === 0) return sites;
+    // Receiver-based patterns need typed locals; builder chains do not.
+    // Never early-return before the builder walk — `return Out.builder()…`
+    // has no `Out o = …` receiver.
+    if (receivers.size > 0) {
+      const recvAlt = [...receivers].join("|");
 
-    const recvAlt = [...receivers].join("|");
+      // 2) Setter calls: recv.setX( ... )
+      const setterRe = new RegExp(`\\b(${recvAlt})\\.set([A-Z]\\w*)\\s*\\(`, "g");
+      for (const m of source.matchAll(setterRe)) {
+        const openIdx = m.index! + m[0].length - 1;
+        const { text, endIdx } = extractBalanced(source, openIdx);
+        const line = lineOfOffset(source, m.index!);
+        sites.push({
+          targetField: decap(m[2]!),
+          via: "setter",
+          receiver: m[1]!,
+          expression: text.trim(),
+          inMethod: methodAt(parsed, line),
+          line,
+          statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
+        });
+      }
 
-    // 2) Setter calls: recv.setX( ... )
-    const setterRe = new RegExp(`\\b(${recvAlt})\\.set([A-Z]\\w*)\\s*\\(`, "g");
-    for (const m of source.matchAll(setterRe)) {
-      const openIdx = m.index! + m[0].length - 1;
-      const { text, endIdx } = extractBalanced(source, openIdx);
-      const line = lineOfOffset(source, m.index!);
-      sites.push({
-        targetField: decap(m[2]!),
-        via: "setter",
-        receiver: m[1]!,
-        expression: text.trim(),
-        inMethod: methodAt(parsed, line),
-        line,
-        statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
-      });
-    }
+      // 2b) Fluent with* calls: recv.withX( ... ) — same leaf as setX
+      const withRe = new RegExp(`\\b(${recvAlt})\\.with([A-Z]\\w*)\\s*\\(`, "g");
+      for (const m of source.matchAll(withRe)) {
+        const openIdx = m.index! + m[0].length - 1;
+        const { text, endIdx } = extractBalanced(source, openIdx);
+        const line = lineOfOffset(source, m.index!);
+        sites.push({
+          targetField: decap(m[2]!),
+          via: "setter",
+          receiver: m[1]!,
+          expression: text.trim(),
+          inMethod: methodAt(parsed, line),
+          line,
+          statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
+        });
+      }
 
-    // 3) Direct field assignment: recv.field = expr;
-    const assignRe = new RegExp(`\\b(${recvAlt})\\.(\\w+)\\s*=(?!=)\\s*([^;]+);`, "g");
-    for (const m of source.matchAll(assignRe)) {
-      const line = lineOfOffset(source, m.index!);
-      sites.push({
-        targetField: m[2]!,
-        via: "assignment",
-        receiver: m[1]!,
-        expression: m[3]!.trim(),
-        inMethod: methodAt(parsed, line),
-        line,
-        statement: m[0].trim(),
-      });
+      // 2c) Method-reference setters: recv::setX (e.g. list.forEach(t::setFoo))
+      const methodRefRe = new RegExp(`\\b(${recvAlt})::set([A-Z]\\w*)\\b`, "g");
+      for (const m of source.matchAll(methodRefRe)) {
+        const line = lineOfOffset(source, m.index!);
+        sites.push({
+          targetField: decap(m[2]!),
+          via: "setter",
+          receiver: m[1]!,
+          expression: `/* method-ref */`,
+          inMethod: methodAt(parsed, line),
+          line,
+          statement: m[0],
+        });
+      }
+
+      // 3) Direct field assignment: recv.field = expr;
+      const assignRe = new RegExp(`\\b(${recvAlt})\\.(\\w+)\\s*=(?!=)\\s*([^;]+);`, "g");
+      for (const m of source.matchAll(assignRe)) {
+        const line = lineOfOffset(source, m.index!);
+        sites.push({
+          targetField: m[2]!,
+          via: "assignment",
+          receiver: m[1]!,
+          expression: m[3]!.trim(),
+          inMethod: methodAt(parsed, line),
+          line,
+          statement: m[0].trim(),
+        });
+      }
+
+      // 5) Map-style put: recv.put("key", expr)
+      const putRe = new RegExp(`\\b(${recvAlt})\\.put\\s*\\(\\s*"(\\w+)"\\s*,`, "g");
+      for (const m of source.matchAll(putRe)) {
+        const openIdx = source.indexOf("(", m.index!);
+        const { text, endIdx } = extractBalanced(source, openIdx);
+        const line = lineOfOffset(source, m.index!);
+        sites.push({
+          targetField: m[2]!,
+          via: "map-put",
+          receiver: m[1]!,
+          expression: text.slice(text.indexOf(",") + 1).trim(),
+          inMethod: methodAt(parsed, line),
+          line,
+          statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
+        });
+      }
     }
 
     // 4) Builder chains: TargetClass.builder() ... .x(expr) ... .build()
+    //    Runs even with no typed receiver (pure return Out.builder()… patterns).
     const builderStartRe = new RegExp(`\\b${targetClass}\\s*\\.\\s*builder\\s*\\(\\)`, "g");
     for (const m of source.matchAll(builderStartRe)) {
       let i = m.index! + m[0].length;
@@ -227,23 +280,6 @@ export const javaAdapter: LanguageAdapter = {
           statement: `.${link[1]}(${text.trim()})`,
         });
       }
-    }
-
-    // 5) Map-style put: recv.put("key", expr)
-    const putRe = new RegExp(`\\b(${recvAlt})\\.put\\s*\\(\\s*"(\\w+)"\\s*,`, "g");
-    for (const m of source.matchAll(putRe)) {
-      const openIdx = source.indexOf("(", m.index!);
-      const { text, endIdx } = extractBalanced(source, openIdx);
-      const line = lineOfOffset(source, m.index!);
-      sites.push({
-        targetField: m[2]!,
-        via: "map-put",
-        receiver: m[1]!,
-        expression: text.slice(text.indexOf(",") + 1).trim(),
-        inMethod: methodAt(parsed, line),
-        line,
-        statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
-      });
     }
 
     return sites.sort((a, b) => a.line - b.line);

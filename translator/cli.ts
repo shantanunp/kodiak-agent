@@ -66,6 +66,10 @@ const { values } = parseArgs({
     promote: { type: "boolean", default: false },
     /** Deterministic checklist + slices drive the agent; audit gate decides done. */
     analyzer: { type: "boolean", default: false },
+    /** AGT-3 — double-run each labeled field at temperature 0; report divergences. */
+    verify: { type: "boolean", default: false },
+    /** AGT-4 — extra critic call per field for cited missing transforms/filters. */
+    critic: { type: "boolean", default: false },
   },
 });
 
@@ -395,6 +399,9 @@ async function main(): Promise<void> {
 
       const config = loadModelConfig();
       const provider = createModelProvider(config);
+      const verifyProvider = values.verify
+        ? createModelProvider({ ...config, temperature: 0 })
+        : undefined;
       const fingerprint = computePipelineFingerprint({
         sourceJava, schemaJson,
         model: `${config.apiStyle}:${config.model}`,
@@ -410,6 +417,9 @@ async function main(): Promise<void> {
           noCache: Boolean(values["no-cache"]),
           modelConfig: config,
           schemaContextText: schemaContextForLabeler(mapperId),
+          verify: Boolean(values.verify),
+          verifyProvider,
+          critic: Boolean(values.critic),
         });
       } catch (err) {
         await offlineAgentFallback(

@@ -44,6 +44,17 @@ export interface RunJournalEntry {
   possibleMissedWrites?: number;
   groundingWarnings?: number;
   stepSmells?: number;
+  /** EVAL-2 — rule-based labeling scorers (0..1). */
+  scores?: {
+    coverage: number;
+    grounding: number;
+    specificity: number;
+    provenance: number;
+  };
+  /** AGT-3 — count of fields where double-run disagreed. */
+  verifyDivergences?: number;
+  /** AGT-4 — count of cited critic findings. */
+  criticFindings?: number;
   /** Best-effort: "ok" | "error" — failed runs still append. */
   outcome: "ok" | "error";
   error?: string;

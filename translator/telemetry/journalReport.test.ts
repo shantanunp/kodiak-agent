@@ -31,6 +31,9 @@ test("summarizeJournal aggregates cost and miss signals", async () => {
     possibleMissedWrites: 2,
     groundingWarnings: 1,
     stepSmells: 1,
+    scores: { coverage: 0.8, grounding: 1, specificity: 0.9, provenance: 1 },
+    verifyDivergences: 1,
+    criticFindings: 2,
     outcome: "ok",
     path: "agent-loop",
   });
@@ -58,4 +61,9 @@ test("summarizeJournal aggregates cost and miss signals", async () => {
   assert.equal(s.stepSmells, 1);
   assert.equal(s.writePatterns.setter, 5);
   assert.equal(s.judge.rejects, 1);
+  assert.equal(s.verifyDivergences, 1);
+  assert.equal(s.criticFindings, 2);
+  assert.ok(s.scores);
+  assert.equal(s.scores!.coverage, 0.8);
+  assert.equal(s.scores!.specificity, 0.9);
 });

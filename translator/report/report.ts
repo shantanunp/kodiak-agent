@@ -229,8 +229,16 @@ if (values.json) {
     );
     console.log(
       `  miss signals: possible-missed-write=${journal.possibleMissedWrites} ` +
-        `grounding=${journal.groundingWarnings} step-smells=${journal.stepSmells}`,
+        `grounding=${journal.groundingWarnings} step-smells=${journal.stepSmells}` +
+        ` verify-diverge=${journal.verifyDivergences} critic=${journal.criticFindings}`,
     );
+    if (journal.scores) {
+      const s = journal.scores;
+      console.log(
+        `  scores: coverage=${s.coverage} grounding=${s.grounding} ` +
+          `specificity=${s.specificity} provenance=${s.provenance}`,
+      );
+    }
     if (Object.keys(journal.writePatterns).length) {
       console.log(
         `  write patterns: ${Object.entries(journal.writePatterns)

@@ -27,6 +27,9 @@ import { appendRunMetrics } from "../report/metrics.js";
 import { appendRun, sourceSha } from "../telemetry/journal.js";
 import { groundingDiagnostics } from "./grounding.js";
 import { findStepSmells, smellDiagnostics } from "./smells.js";
+import { verifyFieldConsistency, type VerifyDivergence } from "./verify.js";
+import { criticField, type CriticFinding } from "./critic.js";
+import { scoreLabeling, scoresForJournal } from "../report/scorers.js";
 import type { ModelConfig } from "../model/config.js";
 import { p95LatencyMs, type ToolTraceEntry } from "../model/provider.js";
 
@@ -42,6 +45,12 @@ export interface AgentLoopOptions {
   schemaContextText?: string;
   /** Disable the cross-check pass (tests / cost control). */
   skipCrossCheck?: boolean;
+  /** AGT-3 — second label at temp 0; report divergences (cost-aware). */
+  verify?: boolean;
+  /** Provider forced to temperature 0 for the verify second pass. */
+  verifyProvider?: ModelProvider;
+  /** AGT-4 — extra critic call per labeled field (cited missing transforms). */
+  critic?: boolean;
 }
 
 export interface AgentLoopAudit {
@@ -61,6 +70,10 @@ export interface AgentLoopResult {
   fieldsFromCache: number;
   /** AGT-1 grounding warnings (also logged to stderr). */
   groundingWarnings: string[];
+  /** AGT-3 — fields where two temp-0 runs disagreed. */
+  verifyDivergences?: VerifyDivergence[];
+  /** AGT-4 — cited missing transforms/filters from the critic. */
+  criticFindings?: CriticFinding[];
 }
 
 function escalationOps(
@@ -131,6 +144,8 @@ export async function runAgentLoop(
   let fieldsFromCache = 0;
   const stillUnresolved: string[] = [];
   const unmappedFields: string[] = [];
+  const verifyDivergences: VerifyDivergence[] = [];
+  const criticFindings: CriticFinding[] = [];
 
   for (const task of tasks.tasks) {
     if (task.state === "unmapped") {
@@ -154,6 +169,7 @@ export async function runAgentLoop(
         : escalationOps(task, options.sourceJava);
 
     let response: FieldMappingResponse | null = null;
+    let opsUsed: unknown[] = indexerOps;
     // Mapped fields get one focused call + one full-source retry if the model
     // returns recognized=false or an empty pipeline (common on bare constants).
     const attempts =
@@ -170,6 +186,7 @@ export async function runAgentLoop(
                 response?.recognized === true &&
                 (response.pipeline?.length ?? 0) === 0,
             });
+      opsUsed = ops;
       response = await provider.labelFieldMapping({
         javaTargetField: task.field,
         indexerOps: ops,
@@ -229,6 +246,46 @@ export async function runAgentLoop(
     }
     mapping.push(labeled);
     fieldsLabeled++;
+
+    // AGT-3 — opt-in self-consistency (only for freshly labeled fields).
+    if (options.verify) {
+      const div = await verifyFieldConsistency({
+        provider,
+        verifyProvider: options.verifyProvider,
+        task,
+        first: labeled,
+        schemaContext: options.schemaContext,
+        indexerOps: opsUsed,
+      });
+      if (div) {
+        verifyDivergences.push(div);
+        console.error(
+          `[verify] ${div.field}: diverge first=[${div.firstKinds}] second=[${div.secondKinds}]`,
+        );
+      }
+    }
+
+    // AGT-4 — opt-in critic (cited missing transforms/filters).
+    if (options.critic) {
+      try {
+        const { findings, dropped } = await criticField({
+          provider,
+          field: task.field,
+          sliceText: task.sliceText || options.sourceJava,
+          sourceJava: options.sourceJava,
+          mapping: labeled,
+        });
+        for (const note of dropped) console.error(`[critic] ${note}`);
+        for (const f of findings) {
+          criticFindings.push(f);
+          console.error(
+            `[critic] ${f.field}: missing ${f.kind} — ${f.detail} (${f.evidence})`,
+          );
+        }
+      } catch (err) {
+        console.error(`[critic] ${task.field}: ${(err as Error).message}`);
+      }
+    }
 
     if (!options.noCache) {
       const now = new Date().toISOString();
@@ -296,6 +353,9 @@ export async function runAgentLoop(
     // metrics are best-effort; never fail a run over them
   }
 
+  // EVAL-2 — rule-based labeling scorers (no model).
+  const scores = scoreLabeling({ tasks, mapping });
+
   const pm = provider.getMetrics?.();
   // MON-1/2 — one journal line per agent-loop completion.
   appendRun({
@@ -318,7 +378,11 @@ export async function runAgentLoop(
     promoted: false,
     checklistSource: tasks.checklistSource,
     diagnostics:
-      (tasks.diagnostics?.length ?? 0) + groundingWarnings.length + smells.length,
+      (tasks.diagnostics?.length ?? 0) +
+      groundingWarnings.length +
+      smells.length +
+      verifyDivergences.length +
+      criticFindings.length,
     tokens: pm
       ? {
           prompt: pm.promptTokens,
@@ -332,12 +396,23 @@ export async function runAgentLoop(
     possibleMissedWrites,
     groundingWarnings: groundingWarnings.length,
     stepSmells: smells.length,
+    scores: scoresForJournal(scores),
+    verifyDivergences: verifyDivergences.length,
+    criticFindings: criticFindings.length,
     outcome: "ok",
     path: "agent-loop",
   });
   provider.resetMetrics?.();
 
-  return { mapping, audit, fieldsLabeled, fieldsFromCache, groundingWarnings };
+  return {
+    mapping,
+    audit,
+    fieldsLabeled,
+    fieldsFromCache,
+    groundingWarnings,
+    verifyDivergences,
+    criticFindings,
+  };
 }
 
 /** Assemble the labeler-compatible PipelineJson from a loop result. */

@@ -1,0 +1,40 @@
+{
+  "mapperId": "shipment-notice-fixture",
+  "sourceFixture": "fixtures/ShipmentNoticeMapper.java",
+  "mapperClass": "ShipmentNoticeMapper",
+  "targetClass": "DeliveryNotice",
+  "entryMethod": "map",
+  "fields": [
+    {
+      "targetField": "channel",
+      "pipelineKinds": ["CONSTANT"],
+      "pipeline": [
+        { "kind": "CONSTANT", "meta": { "value": "PORTAL" }, "labelSource": "model", "summary": "DEFAULT_CHANNEL." }
+      ]
+    },
+    {
+      "targetField": "internalFlag",
+      "pipelineKinds": ["CONSTANT"],
+      "pipeline": [
+        { "kind": "CONSTANT", "meta": { "value": true }, "labelSource": "model", "summary": "Hard-coded true." }
+      ]
+    },
+    {
+      "targetField": "weightGrams",
+      "pipelineKinds": ["READ", "TRANSFORM"],
+      "pipeline": [
+        { "kind": "READ", "sourceField": "shipment.weightKg", "labelSource": "model", "summary": "Reads weightKg." },
+        { "kind": "TRANSFORM", "meta": { "op": "multiply", "value": "1000" }, "labelSource": "model", "summary": "kg to grams." }
+      ]
+    },
+    {
+      "targetField": "priority",
+      "pipelineKinds": ["READ", "FILTER", "CONSTANT"],
+      "pipeline": [
+        { "kind": "READ", "sourceField": "shipment.status", "labelSource": "model", "summary": "Reads status." },
+        { "kind": "FILTER", "condition": "equals EXPRESS", "labelSource": "model", "summary": "EXPRESS branch." },
+        { "kind": "CONSTANT", "meta": { "value": true }, "labelSource": "model", "summary": "Priority true." }
+      ]
+    }
+  ]
+}

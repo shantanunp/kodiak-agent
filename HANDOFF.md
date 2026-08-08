@@ -25,11 +25,13 @@ Read this file first, then [ARCHITECTURE.md](./ARCHITECTURE.md) (design) and [PR
 
 ```bash
 npm install                 # only network call needed
-npm run test:all            # 7 suites, all must pass
+npm run test:all            # offline suites including test:golden (no model)
+npm run test:golden         # EVAL-1 shape harness (add -- --model for guidance only)
+npm run report / npm run drift
 npm run e2e:online          # ONLY script that calls the real model API (needs key)
 npm run ui:serve            # viewer at :4173/pipeline-viewer/?mapper=<id>
 npm run analyze -- --file <f> --mapper-class <C> --target-class <C> [--slices]
-npm run label -- --mapper <id> --worktree <path> --analyzer [--promote]
+npm run label -- --mapper <id> --worktree <path> --analyzer [--promote] [--verify] [--critic]
 npm run label:export / label:import          # offline labeling jobs (Copilot agent mode)
 npm run judge:export / judge:import          # offline corrections
 ```
@@ -129,7 +131,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 
 ## Pending — pick up here
 
-**Next increment (do in this order):** `MON-1` → `PAR-1` + `PAR-2` + `AGT-1` → `MON-2`/`MON-3`. See full backlog sections below.
+**Next increment (do in this order):** `AGT-5` mutation testing, then scale ergonomics / confidence surfacing. See backlog sections below.
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
 - [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
@@ -138,9 +140,14 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **MON-5** `GET /api/health` (no secrets, no model calls)
 - [x] **PAR-1** Second-opinion loose write scan (possible-missed-write diagnostics)
 - [x] **PAR-2** Unmapped justification pass (unmapped-but-mentioned)
+- [x] **PAR-3** Write-pattern conformance corpus (`fixtures/write-patterns/`, `analyzer/writePatterns.test.ts`)
 - [x] **PAR-4** Write-pattern counts into run journal
+- [x] **EVAL-1** `npm run test:golden` (offline verified-store shape; `--model` guidance only)
+- [x] **EVAL-2** Rule-based scorers → journal + report
 - [x] **AGT-1** Grounding check on labeled pipelines (ungrounded-step warnings)
 - [x] **AGT-2** Step-count vs helper-closure smell
+- [x] **AGT-3** Opt-in `--verify` double-run at temp 0
+- [x] **AGT-4** Opt-in `--critic` cited missing transforms
 - [x] **AGT-6** Judge agree/reject surfaced in report (corrected store vs defects.jsonl)
 - [ ] **Cross-check trace surfacing**: flips currently land in the task note + stderr; also surface them in the viewer checklist response as diagnostics.
 - [ ] **Tool-loop trace persistence**: `runAgentLoop` currently logs the investigation trace to stderr; persist it into the field-cache entry (add optional `toolTrace` to the cache entry type) so agentic runs are replayable evidence.
@@ -151,7 +158,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [ ] **Offline parity for bulk-label**: current bulk button stops in offline mode; make it export ONE multi-field job (exportAgentJob already accepts selectors) instead.
 - [ ] **Viewer polish**: refresh availability dots after bulk without reload; "re-label" button per field (`noCache: true`); show `checklistSource`/`worktreeUsed` in the meta bar.
 - [ ] **Registry `language` field** + per-mapper `subMappers` hint (closure walker seed) when multi-file mapper families arrive.
-- [ ] **Golden dataset harness**: assert verified-store outputs stay stable in CI (`validator/golden-dataset/` was the Phase 0 placeholder).
+- [x] **Golden dataset harness**: `npm run test:golden` offline shape check (`validator/golden-dataset/`).
 
 ## Field-report protocol (how issues got fixed so far — keep doing this)
 
@@ -178,11 +185,11 @@ Report reads `runs.jsonl` + `defects.jsonl`: cost, cache/model/verified breakdow
 ### MON-5 — `/api/health` ✅
 `GET /api/health` — registry count, modelConfigured, style/name, verified + corrected, stale count, uptime. No model calls.
 
-### EVAL-1 — Golden dataset harness
-`validator/golden-dataset/` + `npm run test:golden` (verified-store, zero model); optional `--model` diff summary (not in `test:all`).
+### EVAL-1 — Golden dataset harness ✅
+`validator/golden-dataset/` + `npm run test:golden` (verified-store seed + shape compare, zero model). Optional `--model` prints guidance only (not a CI fail path). Included in `test:all` offline.
 
-### EVAL-2 — Labeling scorers (rule-based)
-Coverage, grounding, specificity (RAW share), provenance. Emit into MON-1; trend in report.
+### EVAL-2 — Labeling scorers (rule-based) ✅
+Coverage, grounding, specificity (RAW share), provenance via `translator/report/scorers.ts`. Emitted on each agent-loop journal line; mean scores in `npm run report`.
 
 **Suggested order:** MON-1 → MON-2 → MON-3 → MON-4 + MON-5 → EVAL-1 → EVAL-2. Stopping after MON-3 is a valid resting point.
 
@@ -200,7 +207,7 @@ Already catches: unmapped, orphanWrites, opaque-escape → unresolved, flatten d
 |---|---|---|
 | **PAR-1** ✅ | Second-opinion loose regex scan vs CST write sites → `possible-missed-write` diagnostics | `analyzer/secondOpinion.ts`; folded into checklist diagnostics |
 | **PAR-2** ✅ | For each `unmapped`, search setter/getter/name mentions → `unmapped-but-mentioned` | Same module |
-| **PAR-3** | Write-pattern conformance corpus (one fixture + test per pattern) | Adapter coverage stops being guesswork |
+| **PAR-3** ✅ | Write-pattern conformance corpus (one fixture + test per pattern) | `fixtures/write-patterns/` + `writePatterns.test.ts`; builder-only returns no longer early-exit |
 | **PAR-4** ✅ | Adapter coverage metrics into run journal | `writePatterns` + `possibleMissedWrites` on each run |
 
 ### Layer B — did the AI agent miss or mislabel?
@@ -211,8 +218,8 @@ Already catches: gate (can't skip), recognized=false, escalation/tool-loop, judg
 |---|---|---|
 | **AGT-1** ✅ | Grounding check: TRANSFORM ops / READ paths / CONSTANT literals must appear in slice/schema | `translator/agentloop/grounding.ts`; warnings on stderr + journal diagnostics count |
 | **AGT-2** ✅ | Step-count sanity vs helper-closure depth | `translator/agentloop/smells.ts` |
-| **AGT-3** | Optional `--verify` double-run at temp 0 | Cost-aware; on demand |
-| **AGT-4** | Opt-in `--critic` model pass with cited missing transforms | Reuse verifyCitations |
+| **AGT-3** ✅ | Optional `--verify` double-run at temp 0 | `label --analyzer --verify`; divergences on stderr + journal |
+| **AGT-4** ✅ | Opt-in `--critic` model pass with cited missing transforms | `label --analyzer --critic`; reuse verifyCitations |
 | **AGT-5** | Mutation testing on fixtures | Strongest quality gate; later |
 | **AGT-6** ✅ | Correction-rate metric (judge agree vs reject) | Report: corrected store vs `defects.jsonl` |
 
