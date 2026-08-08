@@ -43,13 +43,21 @@
   .ai-banner a{color:inherit;font-weight:600;}
 
 
-  .layout{display:grid;grid-template-columns:270px 1fr;gap:18px;align-items:start;}
-  @media (max-width:900px){.layout{grid-template-columns:1fr;}}
+  .layout{display:grid;grid-template-columns:minmax(280px,340px) 1fr;gap:18px;align-items:start;}
+  @media (max-width:720px){.layout{grid-template-columns:1fr;}}
   .fieldlist{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;max-height:76vh;overflow:auto;}
   .fieldlist h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin:4px 6px 10px;}
-  .fielditem{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;cursor:pointer;font-family:var(--font-mono);font-size:12px;color:var(--ink);}
+  .fielditem{display:flex;align-items:center;gap:6px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:5px 8px;cursor:pointer;font-family:var(--font-mono);font-size:12px;color:var(--ink);}
   .fielditem:hover{background:var(--bg);}
   .fielditem.active{background:var(--target-bg);border-color:var(--target);color:var(--target);font-weight:600;}
+  .fielditem.group{cursor:default;color:var(--ink-soft);font-weight:600;font-size:11.5px;}
+  .fielditem.group:hover{background:transparent;}
+  .tree-kids{margin-left:12px;padding-left:8px;border-left:1px solid var(--line);}
+  .tree-toggle{width:16px;height:16px;border:none;background:transparent;color:var(--ink-faint);cursor:pointer;padding:0;font-size:10px;line-height:1;flex-shrink:0;}
+  .tree-toggle:hover{color:var(--ink);}
+  .tree-spacer{width:16px;flex-shrink:0;}
+  .tree-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tree-count{font-size:10px;color:var(--ink-faint);font-weight:500;flex-shrink:0;}
   .state-b{font-size:9.5px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 6px;flex-shrink:0;}
   .state-mapped{background:var(--source-bg);color:var(--source);}
   .state-unmapped{background:var(--raw-bg);color:var(--raw);}
@@ -572,19 +580,107 @@ function showChecklistError(msg){
      Point the UI at a mapper checkout (worktree is inferred from the registry source path when possible) and restart <span style="font-family:var(--font-mono)">npm run ui:serve</span>.</div>`;
 }
 
+/** Collapsed group paths — empty Set means "all expanded" (default). */
+const collapsedGroups = new Set();
+
+/**
+ * Build a tree from dotted leaf paths:
+ *   message.deal.loan.noteAmount → message → deal → loan → noteAmount (leaf)
+ */
+function buildFieldTree(fields) {
+  const root = { name: '', path: '', children: new Map(), field: null };
+  for (const f of fields) {
+    const parts = String(f.field).split('.').filter(Boolean);
+    let node = root;
+    let path = '';
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      path = path ? `${path}.${part}` : part;
+      if (!node.children.has(part)) {
+        node.children.set(part, { name: part, path, children: new Map(), field: null });
+      }
+      node = node.children.get(part);
+      if (i === parts.length - 1) node.field = f;
+    }
+  }
+  return root;
+}
+
+function countLeaves(node) {
+  if (node.field) return 1;
+  let n = 0;
+  for (const child of node.children.values()) n += countLeaves(child);
+  return n;
+}
+
+function worstState(node) {
+  if (node.field) return node.field.state;
+  const rank = { unresolved: 3, unmapped: 2, mapped: 1 };
+  let worst = 'mapped';
+  for (const child of node.children.values()) {
+    const s = worstState(child);
+    if ((rank[s] || 0) > (rank[worst] || 0)) worst = s;
+  }
+  return worst;
+}
+
+function renderTreeNodes(node) {
+  const entries = [...node.children.values()];
+  return entries.map((child) => {
+    const isLeaf = !!child.field && child.children.size === 0;
+    if (isLeaf) {
+      const f = child.field;
+      return `<button type="button" class="fielditem${activeField === f.field ? ' active' : ''}" data-field="${esc(f.field)}" title="${esc(f.field)}${f.note ? ' — ' + f.note : ''}">
+        <span class="tree-spacer"></span>
+        <span class="avail-dot avail-${f.labelAvailability}"></span>
+        <span class="tree-label">${esc(child.name)}</span>
+        ${stateBadge(f.state)}
+      </button>`;
+    }
+    const open = !collapsedGroups.has(child.path);
+    const leaves = countLeaves(child);
+    const st = worstState(child);
+    return `<div class="tree-group" data-group="${esc(child.path)}">
+      <div class="fielditem group">
+        <button type="button" class="tree-toggle" data-toggle="${esc(child.path)}" aria-expanded="${open}" title="${open ? 'Collapse' : 'Expand'}">${open ? '▼' : '▶'}</button>
+        <span class="tree-label" title="${esc(child.path)}">${esc(child.name)}</span>
+        <span class="tree-count">${leaves}</span>
+        ${stateBadge(st)}
+      </div>
+      <div class="tree-kids" style="display:${open ? 'block' : 'none'}">${renderTreeNodes(child)}</div>
+    </div>`;
+  }).join('');
+}
+
 function renderFieldList(){
   if(!checklist?.fields?.length) return;
   const el = ensureFieldPanel();
   el.style.display = '';
-  document.getElementById('fieldItems').innerHTML = checklist.fields.map(f => `
-    <button type="button" class="fielditem${activeField===f.field?' active':''}" data-field="${esc(f.field)}" title="${esc(f.note||'')}">
-      <span class="avail-dot avail-${f.labelAvailability}"></span>
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(f.field)}</span>
-      ${stateBadge(f.state)}
-    </button>`).join('');
-  document.querySelectorAll('.fielditem').forEach(btn => {
+  // Keep the path to the active field expanded.
+  if (activeField) {
+    const parts = activeField.split('.');
+    let path = '';
+    for (let i = 0; i < parts.length - 1; i++) {
+      path = path ? `${path}.${parts[i]}` : parts[i];
+      collapsedGroups.delete(path);
+    }
+  }
+  const tree = buildFieldTree(checklist.fields);
+  document.getElementById('fieldItems').innerHTML = renderTreeNodes(tree);
+
+  document.querySelectorAll('.fielditem[data-field]').forEach(btn => {
     btn.addEventListener('click', () => openField(btn.getAttribute('data-field')));
   });
+  document.querySelectorAll('.tree-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const path = btn.getAttribute('data-toggle');
+      if (collapsedGroups.has(path)) collapsedGroups.delete(path);
+      else collapsedGroups.add(path);
+      renderFieldList();
+    });
+  });
+
   // Bulk-label: sequential, cache-aware, resumable (stop button).
   const bulkEl = document.getElementById('flBulk');
   const mappedFields = checklist.fields.filter(f=>f.state==='mapped');
