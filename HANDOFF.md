@@ -35,6 +35,9 @@ npm run label -- --mapper <id> --worktree <path> --analyzer [--promote] [--verif
 npm run label:all -- --worktree <path>       # store-aware batch (verified skips are free)
 npm run registry:check -- --worktree <path>  # sourceFile + type resolve before onboarding
 npm run ci:check -- --worktree <path>        # fail merge if touched mappers' verified store is stale
+npm run verified:approve -- --mapper <id> --worktree <path>
+npm run verified:prune -- --worktree <path> [--keep 3] [--dry-run]
+npm run label -- … --promote                 # writes pending-review (add --approve to skip)
 npm run label:export / label:import          # offline labeling jobs (Copilot agent mode)
 npm run judge:export / judge:import          # offline corrections
 ```
@@ -125,8 +128,8 @@ Reviewed gaps beyond the core loop. Item 1 is built; the rest are specced for wh
 
 - [x] **1. Measurement / scorecard** — `npm run report [-- --json] [--strict] [--worktree <p>] [--mapper <id>]`. Runs the deterministic pipeline over every registry entry (zero model calls) and prints per mapper: declared fields, mapped %, unmapped, unresolved, checklist source, verified-store status + correction count + stale entries, recorded run signals (cross-check flip rate = scanner pattern gaps, tool-loop fire/resolve rate = slice quality), and golden-dataset accuracy where a golden file exists. `--strict` exits 2 on any concern (CI-ready). Run metrics are appended per label run to `.cache/metrics/{mapperId}.jsonl`; golden files live in `validator/golden-dataset/{mapperId}.json` comparing pipeline SHAPE (ordered step kinds), not prose.
 - [x] **2. Prompt-injection posture.** Prompts treat source as data; `prompt-injection-risk` diagnostics on suspicious comments; threat model in ARCHITECTURE.md.
-- [x] **3. Change lifecycle / CI mode.** `npm run ci:check` — mappers touched in a git diff (or `--all`); fails on stale verified fingerprints. Prune policy for old fingerprints still open.
-- [ ] **4. Review/approval state in the store.** `--promote` trusts the runner. Add a third status beside `verified` / `user-corrected`: `pending-review`, plus a viewer diff against the previous fingerprint's entry and an approve action. Today git review of the store JSON is the only checkpoint.
+- [x] **3. Change lifecycle / CI mode.** `npm run ci:check` + `npm run verified:prune -- --keep 3` (latest N fingerprints per mapper).
+- [x] **4. Review/approval state in the store.** `--promote` → `pending-review` by default; `--promote --approve` or `verified:approve` / viewer Approve flips to `verified`; checklist includes previous-fingerprint diff.
 - [x] **5. Scale ergonomics.** `label:all`, `registry:check`, parallel field labeling (default concurrency 4; `--concurrency N` / viewer bulk).
 - [x] **6. Confidence surfacing.** Per-field provenance badge (slice / escalation / tool-loop / cross-check / verified / cache) in checklist API + viewer; re-label bypasses cache.
 
@@ -134,7 +137,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 
 ## Pending — pick up here
 
-**Next increment (do in this order):** store `pending-review` (#4), verified-store prune policy, then remaining polish (offline bulk-label parity, Python adapter).
+**Next increment (do in this order):** Python adapter, real defect tracker, multi-instance builder routing — or ship whatever the next real-mapper field report surfaces.
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
 - [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
@@ -157,12 +160,13 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **Confidence badges** + parallel labeling + `ci:check` + prompt-injection diagnostics
 - [x] **Cross-check trace surfacing**: flips in checklist `diagnostics` + provenance tag
 - [x] **Tool-loop trace persistence**: optional `toolTrace` + `provenance` on field-cache entries
+- [x] **pending-review** / **approve** / **verified:prune** / offline bulk multi-field export
 - [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
 
 - [ ] **Python adapter**. Contract is `analyzer/types.ts::LanguageAdapter` — implement `analyzer/adapters/python.ts` with tree-sitter (`web-tree-sitter` + `tree-sitter-python` WASM; both installable from npm, satisfies network policy). Write patterns: `obj.attr = expr`, dataclass/pydantic ctor kwargs, `dict["k"] = v`, `setattr`. Register in `scanWriteSites.ADAPTERS`; add `language:` per mapper in the registry (default java). Consider migrating the Java adapter to tree-sitter-java at the same time (error-tolerant parsing; current `java-parser` throws on constructs it doesn't know — that failure is caught and surfaced in diagnostics, but tolerance is better).
 - [ ] **Real defect tracker**. Integration point is exactly `translator/judge/judge.ts::logDefect` + `mockDefectId`. Replace with a provider interface (Jira/ADO webhook via env). NOTE: this adds a network call — extend the policy test allowlist deliberately and document it.
-- [ ] **Offline parity for bulk-label**: current bulk button stops in offline mode; make it export ONE multi-field job (exportAgentJob already accepts selectors) instead.
-- [ ] **Viewer polish**: refresh availability dots after bulk without reload; "re-label" button per field (`noCache: true`); show `checklistSource`/`worktreeUsed` in the meta bar.
+- [x] **Offline parity for bulk-label**: bulk exports ONE multi-field job via `/api/export-label-job` when model is not configured.
+- [x] **Viewer polish**: re-label (`noCache`); checklistSource/worktreeUsed/pending pills; approve bar + previous diff; dots refresh after bulk.
 - [ ] **Registry `language` field** + per-mapper `subMappers` hint (closure walker seed) when multi-file mapper families arrive.
 - [x] **Golden dataset harness**: `npm run test:golden` offline shape check (`validator/golden-dataset/`).
 

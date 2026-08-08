@@ -43,7 +43,10 @@ import {
   listFieldPipelineCaches,
 } from "../translator/cache/index.js";
 import {
+  approveVerified,
   computeVerifiedFingerprint,
+  countByStatus,
+  diffAgainstPrevious,
   getVerified,
 } from "../translator/verified/store.js";
 import { judgeSuggestion } from "../translator/judge/judge.js";
@@ -375,7 +378,11 @@ createServer(async (req, res) => {
           const v = verifiedByLeaf.get(leaf);
           const cached = cachedByLeaf.get(leaf);
           const provenance = v
-            ? (v.status === "user-corrected" ? "corrected" : "verified")
+            ? (v.status === "user-corrected"
+              ? "corrected"
+              : v.status === "pending-review"
+                ? "pending-review"
+                : "verified")
             : cached?.provenance
               ? cached.provenance
               : cached
@@ -391,10 +398,21 @@ createServer(async (req, res) => {
             note: t.note,
             provenance,
             labelAvailability: v
-              ? (v.status === "user-corrected" ? "corrected" : "verified")
+              ? (v.status === "user-corrected"
+                ? "corrected"
+                : v.status === "pending-review"
+                  ? "pending"
+                  : "verified")
               : cachedLeaves.has(leaf) ? "cached" : "none",
           };
         }),
+        store: verified
+          ? {
+              fingerprint: vfp,
+              counts: countByStatus(verified),
+              previousDiff: diffAgainstPrevious(mapperId, vfp),
+            }
+          : null,
       });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
@@ -441,9 +459,15 @@ createServer(async (req, res) => {
         (f) => f.targetField.split(".").pop()!.toLowerCase() === leaf,
       );
       if (vHit) {
+        const src =
+          vHit.status === "user-corrected"
+            ? "corrected"
+            : vHit.status === "pending-review"
+              ? "pending-review"
+              : "verified";
         sendJson(res, 200, { mapperId, field: task.field, state: task.state,
-          resultSource: vHit.status === "user-corrected" ? "corrected" : "verified",
-          provenance: vHit.status === "user-corrected" ? "corrected" : "verified",
+          resultSource: src,
+          provenance: src,
           pipeline: vHit.pipeline,
           viewSteps: viewStepsFor(mapperId, [
             { targetField: vHit.targetField, pipeline: vHit.pipeline },
@@ -509,6 +533,79 @@ createServer(async (req, res) => {
         unresolved: result.audit.unresolvedFields,
         sliceText: task.sliceText,
         fingerprint: vfp,
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  // ── Offline bulk: one multi-field agent job ───────────────────────────────
+  if (pathname === "/api/export-label-job" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string; fields?: string[]; worktree?: string;
+      };
+      const mapperId = body.mapperId?.trim();
+      if (!mapperId) { sendJson(res, 400, { error: "mapperId required" }); return; }
+      let worktree: string | undefined;
+      try { worktree = resolveMapperWorktree(body.worktree); }
+      catch { worktree = body.worktree?.trim() || getEnvOptional("MAPPER_WORKTREE") || undefined; }
+      const selectors = Array.isArray(body.fields)
+        ? body.fields.map((f) => String(f).trim()).filter(Boolean)
+        : [];
+      const exported = await exportAgentJob({
+        mapper: mapperId,
+        worktree,
+        registry: paths.registry,
+        selectors,
+      });
+      sendJson(res, 200, {
+        outcome: "offline-exported",
+        mapperId,
+        fieldCount: exported.fieldCount,
+        jobFile: exported.jobFile,
+        steps: exported.vscodeSteps,
+        vscodePrompt: exported.vscodePrompt,
+      });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  // ── Approve pending-review store entry ────────────────────────────────────
+  if (pathname === "/api/approve-store" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string; worktree?: string; fingerprint?: string;
+      };
+      const mapperId = body.mapperId?.trim();
+      if (!mapperId) { sendJson(res, 400, { error: "mapperId required" }); return; }
+      let fingerprint = body.fingerprint?.trim();
+      if (!fingerprint) {
+        let worktree: string | undefined;
+        try { worktree = resolveMapperWorktree(body.worktree); }
+        catch { worktree = body.worktree?.trim() || getEnvOptional("MAPPER_WORKTREE") || undefined; }
+        const resolved = await resolveMapperAst(mapperId, paths.registry, { worktree, remote: false });
+        fingerprint = computeVerifiedFingerprint({
+          sourceJava: resolved.sourceJava,
+          schemaJson: loadSchemaJson(mapperId),
+        });
+      }
+      const resApprove = approveVerified({ mapperId, fingerprint });
+      if (!resApprove) {
+        sendJson(res, 404, { error: `no store entry for ${mapperId}` });
+        return;
+      }
+      const entry = getVerified(mapperId, fingerprint);
+      sendJson(res, 200, {
+        mapperId,
+        fingerprint,
+        approved: resApprove.approved,
+        file: resApprove.file,
+        counts: entry ? countByStatus(entry) : null,
+        previousDiff: diffAgainstPrevious(mapperId, fingerprint),
       });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });

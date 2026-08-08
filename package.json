@@ -41,7 +41,9 @@
     "judge:import": "tsx translator/judge/offline.ts",
     "report": "tsx translator/report/report.ts",
     "drift": "tsx translator/telemetry/drift.ts",
-    "ci:check": "tsx translator/ciCheck.ts"
+    "ci:check": "tsx translator/ciCheck.ts",
+    "verified:approve": "tsx translator/verified/approve.ts",
+    "verified:prune": "tsx translator/verified/prune.ts"
   },
   "engines": {
     "node": ">=20"

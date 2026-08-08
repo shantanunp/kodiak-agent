@@ -10,8 +10,9 @@
  *
  * Precedence everywhere: verified store > runtime caches > model/agent.
  * Deleting .cache/ never affects this store. Entries land here in two ways:
- *   - promotion of a labeling result (label --promote / gate pass later)
+ *   - promotion of a labeling result (label --promote → pending-review by default)
  *   - a user correction confirmed by the judge (field-level upsert)
+ * Approve flips pending-review → verified (review checkpoint before "done").
  */
 
 import { createHash } from "node:crypto";
@@ -21,6 +22,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -28,7 +30,7 @@ import { paths } from "../../src/config/env.js";
 
 export const VERIFIED_STORE_FORMAT = 1;
 
-export type VerifiedFieldStatus = "verified" | "user-corrected";
+export type VerifiedFieldStatus = "verified" | "user-corrected" | "pending-review";
 
 export interface VerifiedFieldEntry {
   targetField: string;
@@ -93,14 +95,20 @@ function writeEntry(entry: VerifiedEntry): string {
  * Promote a full labeled mapping into the store. Existing user-corrected
  * fields for the same fingerprint always win over the incoming version —
  * a re-label must never overwrite a confirmed correction.
+ *
+ * Default status is `pending-review` (human checkpoint). Pass
+ * `status: "verified"` or call `approveVerified` after review.
  */
 export function promoteToVerified(options: {
   mapperId: string;
   fingerprint: string;
   mapping: Array<{ targetField: string; pipeline: unknown[] }>;
   labeledBy: string;
-}): { file: string; fields: number; keptCorrections: number } {
+  /** Default pending-review. */
+  status?: "pending-review" | "verified";
+}): { file: string; fields: number; keptCorrections: number; status: VerifiedFieldStatus } {
   const now = new Date().toISOString();
+  const status: VerifiedFieldStatus = options.status ?? "pending-review";
   const existing = getVerified(options.mapperId, options.fingerprint);
   const corrected = new Map(
     (existing?.fields ?? [])
@@ -114,7 +122,7 @@ export function promoteToVerified(options: {
     return {
       targetField: m.targetField,
       pipeline: m.pipeline,
-      status: "verified",
+      status,
       labeledBy: options.labeledBy,
       labeledAt: now,
     };
@@ -140,7 +148,144 @@ export function promoteToVerified(options: {
     file: writeEntry(entry),
     fields: fields.length,
     keptCorrections: corrected.size,
+    status,
   };
+}
+
+/** Flip pending-review → verified for an entry (user-corrected unchanged). */
+export function approveVerified(options: {
+  mapperId: string;
+  fingerprint: string;
+}): { file: string; approved: number } | null {
+  const entry = getVerified(options.mapperId, options.fingerprint);
+  if (!entry) return null;
+  let approved = 0;
+  const fields = entry.fields.map((f) => {
+    if (f.status !== "pending-review") return f;
+    approved++;
+    return { ...f, status: "verified" as const };
+  });
+  if (approved === 0) {
+    return { file: entryFile(entry.mapperId, entry.fingerprint), approved: 0 };
+  }
+  const file = writeEntry({
+    ...entry,
+    updatedAt: new Date().toISOString(),
+    fields,
+  });
+  return { file, approved };
+}
+
+export function countByStatus(entry: VerifiedEntry): Record<VerifiedFieldStatus, number> {
+  const out: Record<VerifiedFieldStatus, number> = {
+    verified: 0,
+    "user-corrected": 0,
+    "pending-review": 0,
+  };
+  for (const f of entry.fields) out[f.status] = (out[f.status] ?? 0) + 1;
+  return out;
+}
+
+export interface FieldDiffRow {
+  targetField: string;
+  change: "added" | "removed" | "kinds-changed" | "unchanged";
+  previousKinds?: string[];
+  currentKinds?: string[];
+}
+
+function kindsOf(pipeline: unknown[]): string[] {
+  return pipeline.map((s) => String((s as { kind?: string }).kind ?? "?").toUpperCase());
+}
+
+/** Diff current entry vs previous fingerprint (for review UI). */
+export function diffAgainstPrevious(
+  mapperId: string,
+  fingerprint: string,
+): { previousFingerprint: string | null; rows: FieldDiffRow[] } {
+  const current = getVerified(mapperId, fingerprint);
+  if (!current) return { previousFingerprint: null, rows: [] };
+  const prev = findPreviousVerified(mapperId, fingerprint);
+  if (!prev) {
+    return {
+      previousFingerprint: null,
+      rows: current.fields.map((f) => ({
+        targetField: f.targetField,
+        change: "added" as const,
+        currentKinds: kindsOf(f.pipeline),
+      })),
+    };
+  }
+  const prevByLeaf = new Map(
+    prev.fields.map((f) => [f.targetField.split(".").pop()!.toLowerCase(), f]),
+  );
+  const seen = new Set<string>();
+  const rows: FieldDiffRow[] = [];
+  for (const f of current.fields) {
+    const leaf = f.targetField.split(".").pop()!.toLowerCase();
+    seen.add(leaf);
+    const p = prevByLeaf.get(leaf);
+    if (!p) {
+      rows.push({
+        targetField: f.targetField,
+        change: "added",
+        currentKinds: kindsOf(f.pipeline),
+      });
+      continue;
+    }
+    const a = kindsOf(f.pipeline);
+    const b = kindsOf(p.pipeline);
+    rows.push({
+      targetField: f.targetField,
+      change: JSON.stringify(a) === JSON.stringify(b) ? "unchanged" : "kinds-changed",
+      previousKinds: b,
+      currentKinds: a,
+    });
+  }
+  for (const f of prev.fields) {
+    const leaf = f.targetField.split(".").pop()!.toLowerCase();
+    if (seen.has(leaf)) continue;
+    rows.push({
+      targetField: f.targetField,
+      change: "removed",
+      previousKinds: kindsOf(f.pipeline),
+    });
+  }
+  return { previousFingerprint: prev.fingerprint, rows };
+}
+
+/**
+ * Keep the current fingerprint plus the newest (keepTotal - 1) stale entries;
+ * delete older fingerprints. Default keepTotal = 3.
+ */
+export function pruneStaleFingerprints(
+  mapperId: string,
+  currentFingerprint: string,
+  keepTotal = 3,
+  options?: { dryRun?: boolean },
+): { kept: string[]; removed: string[] } {
+  const dir = join(verifiedRoot(), mapperId);
+  if (!existsSync(dir)) return { kept: [], removed: [] };
+  const keep = Math.max(1, keepTotal);
+  const stale = listStaleFingerprints(mapperId, currentFingerprint)
+    .map((fp) => {
+      const e = getVerified(mapperId, fp);
+      return { fp, updatedAt: e?.updatedAt ?? "" };
+    })
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+
+  const keepStale = stale.slice(0, Math.max(0, keep - 1)).map((s) => s.fp);
+  const remove = stale.slice(Math.max(0, keep - 1)).map((s) => s.fp);
+  if (!options?.dryRun) {
+    for (const fp of remove) {
+      const file = entryFile(mapperId, fp);
+      if (existsSync(file)) unlinkSync(file);
+    }
+  }
+  const kept = [
+    ...(existsSync(entryFile(mapperId, currentFingerprint)) ? [currentFingerprint] : []),
+    ...keepStale,
+  ];
+  return { kept, removed: remove };
 }
 
 /** Field-level upsert — the judge's path for confirmed user corrections. */

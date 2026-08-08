@@ -13,6 +13,10 @@ const {
   promoteToVerified,
   upsertCorrectedField,
   findPreviousVerified,
+  approveVerified,
+  pruneStaleFingerprints,
+  countByStatus,
+  diffAgainstPrevious,
 } = await import("./store.js");
 const { StepLabeler } = await import("../model/labeler.js");
 import type { ModelProvider } from "../model/provider.js";
@@ -57,6 +61,7 @@ test("labeler returns verified entry with zero model calls (reproducibility)", a
       },
     ],
     labeledBy: "test",
+    status: "verified",
   });
 
   const labeler = new StepLabeler(neverCallProvider());
@@ -127,4 +132,77 @@ test("changed source: entry goes stale, previous entry available as convergence 
   const previous = findPreviousVerified("demo-mapper", fpV2);
   assert.ok(previous, "prior version's mapping offered as context, not as truth");
   assert.ok(previous!.fields.length >= 3);
+});
+
+test("promote defaults to pending-review; approve flips to verified", () => {
+  const src = "class M { void map() { /* pending */ } }";
+  const fp = computeVerifiedFingerprint({ sourceJava: src, schemaJson: "" });
+  promoteToVerified({
+    mapperId: "pending-mapper",
+    fingerprint: fp,
+    mapping: [{ targetField: "Out.a", pipeline: [{ kind: "CONSTANT" }] }],
+    labeledBy: "test",
+  });
+  let entry = getVerified("pending-mapper", fp)!;
+  assert.equal(countByStatus(entry)["pending-review"], 1);
+  const res = approveVerified({ mapperId: "pending-mapper", fingerprint: fp });
+  assert.equal(res?.approved, 1);
+  entry = getVerified("pending-mapper", fp)!;
+  assert.equal(countByStatus(entry).verified, 1);
+  assert.equal(countByStatus(entry)["pending-review"], 0);
+});
+
+test("prune keeps current + newest stale, removes older", () => {
+  const mapperId = "prune-mapper";
+  const sources = ["/*a*/", "/*b*/", "/*c*/", "/*d*/"];
+  const fps = sources.map((s) =>
+    computeVerifiedFingerprint({ sourceJava: s, schemaJson: "" }),
+  );
+  for (let i = 0; i < fps.length; i++) {
+    promoteToVerified({
+      mapperId,
+      fingerprint: fps[i]!,
+      mapping: [{ targetField: "x", pipeline: [{ kind: "READ" }] }],
+      labeledBy: "test",
+      status: "verified",
+    });
+    // Ensure distinct updatedAt ordering for prune sort.
+  }
+  const current = fps[3]!;
+  const { kept, removed } = pruneStaleFingerprints(mapperId, current, 2);
+  assert.ok(kept.includes(current));
+  assert.equal(kept.length, 2);
+  assert.equal(removed.length, 2);
+  assert.equal(getVerified(mapperId, current)?.fingerprint, current);
+  for (const fp of removed) {
+    assert.equal(getVerified(mapperId, fp), null);
+  }
+});
+
+test("diffAgainstPrevious reports kind changes", () => {
+  const fpOld = computeVerifiedFingerprint({ sourceJava: "old", schemaJson: "" });
+  const fpNew = computeVerifiedFingerprint({ sourceJava: "new", schemaJson: "" });
+  promoteToVerified({
+    mapperId: "diff-mapper",
+    fingerprint: fpOld,
+    mapping: [{ targetField: "Out.a", pipeline: [{ kind: "READ" }] }],
+    labeledBy: "test",
+    status: "verified",
+  });
+  promoteToVerified({
+    mapperId: "diff-mapper",
+    fingerprint: fpNew,
+    mapping: [
+      { targetField: "Out.a", pipeline: [{ kind: "READ" }, { kind: "TRANSFORM" }] },
+      { targetField: "Out.b", pipeline: [{ kind: "CONSTANT" }] },
+    ],
+    labeledBy: "test",
+    status: "pending-review",
+  });
+  const d = diffAgainstPrevious("diff-mapper", fpNew);
+  assert.equal(d.previousFingerprint, fpOld);
+  const a = d.rows.find((r) => r.targetField === "Out.a");
+  assert.equal(a?.change, "kinds-changed");
+  const b = d.rows.find((r) => r.targetField === "Out.b");
+  assert.equal(b?.change, "added");
 });

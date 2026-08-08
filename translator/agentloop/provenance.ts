@@ -6,6 +6,7 @@
 export type LabelProvenance =
   | "verified"
   | "corrected"
+  | "pending-review"
   | "cache"
   | "slice"
   | "escalation"
@@ -15,6 +16,7 @@ export type LabelProvenance =
 export const PROVENANCE_LABELS: Record<LabelProvenance, string> = {
   verified: "verified store",
   corrected: "user-corrected",
+  "pending-review": "pending review",
   cache: "field cache",
   slice: "labeled from slice",
   escalation: "needed escalation",

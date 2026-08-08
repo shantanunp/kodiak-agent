@@ -62,8 +62,10 @@ const { values } = parseArgs({
     "clear-cache": { type: "boolean", default: false },
     /** Read agent/offline field cache only — no MODEL_API_KEY required. */
     "from-cache-only": { type: "boolean", default: false },
-    /** Write the labeled result to the git-tracked verified store. */
+    /** Write the labeled result to the git-tracked verified store (pending-review). */
     promote: { type: "boolean", default: false },
+    /** With --promote: write as verified (skip pending-review). Alone: approve current entry. */
+    approve: { type: "boolean", default: false },
     /** Deterministic checklist + slices drive the agent; audit gate decides done. */
     analyzer: { type: "boolean", default: false },
     /** AGT-3 — double-run each labeled field at temperature 0; report divergences. */
@@ -225,10 +227,14 @@ async function labelFromAgentCache(
       fingerprint: vfp,
       mapping,
       labeledBy: AGENT_OFFLINE_MODEL,
+      status: values.approve ? "verified" : "pending-review",
     });
     promoted = res.file;
     console.error(
-      `Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`,
+      `Promoted ${res.fields} field(s) as ${res.status}: ${res.file}` +
+        (res.status === "pending-review"
+          ? " — review then npm run verified:approve"
+          : " — commit this file."),
     );
   } else if (values.promote && !sourceJava) {
     console.error(
@@ -459,9 +465,15 @@ async function main(): Promise<void> {
           const res = promoteToVerified({
             mapperId, fingerprint: vfp,
             mapping: pipeline.mapping, labeledBy: config.model,
+            status: values.approve ? "verified" : "pending-review",
           });
           promoted = res.file;
-          console.error(`Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`);
+          console.error(
+            `Promoted ${res.fields} field(s) as ${res.status}: ${res.file}` +
+              (res.status === "pending-review"
+                ? " — review then npm run verified:approve"
+                : " — commit this file."),
+          );
         }
       }
 
@@ -541,10 +553,14 @@ async function main(): Promise<void> {
       fingerprint: vfp,
       mapping: pipeline.mapping,
       labeledBy: pipeline.labelModel ?? "model",
+      status: values.approve ? "verified" : "pending-review",
     });
     promoted = res.file;
     console.error(
-      `Promoted ${res.fields} field(s) to verified store: ${res.file} — commit this file.`,
+      `Promoted ${res.fields} field(s) as ${res.status}: ${res.file}` +
+        (res.status === "pending-review"
+          ? " — review then npm run verified:approve"
+          : " — commit this file."),
     );
   }
 

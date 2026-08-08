@@ -65,13 +65,16 @@
   .avail-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
   .avail-verified{background:var(--source);}
   .avail-corrected{background:var(--op);}
+  .avail-pending{background:var(--cond);}
   .avail-cached{background:var(--target);}
   .avail-none{background:var(--line);}
   .prov-b{font-size:9px;font-weight:600;letter-spacing:.03em;border-radius:4px;padding:1px 5px;flex-shrink:0;text-transform:uppercase;background:var(--raw-bg);color:var(--raw);}
   .prov-slice{background:var(--source-bg);color:var(--source);}
-  .prov-escalation,.prov-tool-loop,.prov-cross-check{background:var(--cond-bg);color:var(--cond);}
+  .prov-escalation,.prov-tool-loop,.prov-cross-check,.prov-pending-review{background:var(--cond-bg);color:var(--cond);}
   .prov-verified,.prov-corrected{background:var(--op-bg);color:var(--op);}
   .prov-cache{background:var(--target-bg);color:var(--target);}
+  .approve-bar{margin:8px 4px 0;padding:8px 10px;border:1px dashed var(--cond);border-radius:8px;font-size:11.5px;color:var(--cond);line-height:1.45;}
+  .approve-bar button{margin-top:6px;border:none;background:var(--cond);color:#fff;font-weight:600;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;}
   .fl-legend{font-size:11px;color:var(--ink-faint);margin:10px 6px 2px;line-height:1.8;}
   .re-label{margin-top:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;}
   .re-label:hover{border-color:var(--ink-faint);color:var(--ink);}
@@ -137,6 +140,7 @@
   <div class="layout" id="layout">
     <aside class="fieldlist" id="fieldlist">
       <h2>Target fields</h2>
+      <div id="flReview"></div>
       <div id="flBulk" style="margin:0 4px 8px"></div>
       <div id="fieldItems"><p style="font-size:12px;color:var(--ink-faint);padding:6px">Loading checklist…</p></div>
       <div id="flTriage"></div>
@@ -559,6 +563,7 @@ function provenanceBadge(p){
 const PROVENANCE_NOTE = {
   verified: 'verified store',
   corrected: 'user-corrected',
+  'pending-review': 'pending review',
   cache: 'field cache',
   slice: 'labeled from slice',
   escalation: 'needed escalation',
@@ -576,14 +581,18 @@ async function loadChecklist(){
     if(Array.isArray(body.diagnostics) && body.diagnostics.length){
       console.warn('checklist diagnostics:', body.diagnostics);
     }
-    if(body.checklistSource || body.worktreeUsed){
-      const meta = document.getElementById('metaBar');
-      const extras = [
-        body.checklistSource ? `<span class="pill">checklist: ${esc(body.checklistSource)}</span>` : '',
-        typeof body.declaredFields === 'number' ? `<span class="pill">${body.declaredFields} fields</span>` : '',
-      ].filter(Boolean).join('');
-      if(extras) meta.insertAdjacentHTML('beforeend', extras);
-    }
+    const meta = document.getElementById('metaBar');
+    // Replace dynamic pills (keep mapper picker pills already rendered elsewhere).
+    meta.querySelectorAll('[data-dyn]').forEach((n) => n.remove());
+    const extras = [
+      body.checklistSource ? `<span class="pill" data-dyn>checklist: ${esc(body.checklistSource)}</span>` : '',
+      body.worktreeUsed ? `<span class="pill" data-dyn title="${esc(body.worktreeUsed)}">worktree</span>` : '',
+      typeof body.declaredFields === 'number' ? `<span class="pill" data-dyn>${body.declaredFields} fields</span>` : '',
+      body.store?.counts?.['pending-review']
+        ? `<span class="pill" data-dyn style="color:var(--cond)">pending ${body.store.counts['pending-review']}</span>`
+        : '',
+    ].filter(Boolean).join('');
+    if(extras) meta.insertAdjacentHTML('beforeend', extras);
     renderFieldList();
     // Deep-link: ?fields=message.dataVersionIdentifier opens that field only.
     const want = new URLSearchParams(location.search).get('fields')?.split(',')[0]?.trim();
@@ -703,7 +712,22 @@ function renderFieldList(){
     });
   });
 
-  // Bulk-label: sequential, cache-aware, resumable (stop button).
+  // Approve pending-review store entry.
+  const reviewEl = document.getElementById('flReview');
+  const pendingCount = checklist.store?.counts?.['pending-review'] ?? 0;
+  if(reviewEl){
+    if(pendingCount > 0){
+      const changed = (checklist.store?.previousDiff?.rows || []).filter(r => r.change !== 'unchanged');
+      reviewEl.innerHTML = `<div class="approve-bar">
+        <div><b>${pendingCount}</b> field(s) pending review${changed.length ? ` · ${changed.length} diff vs previous fingerprint` : ''}.</div>
+        ${changed.slice(0,6).map(r => `<div style="font-family:var(--font-mono);font-size:10.5px;margin-top:2px">${esc(r.targetField)}: ${esc(r.change)}</div>`).join('')}
+        <button type="button" id="approveBtn">Approve → verified</button>
+      </div>`;
+      document.getElementById('approveBtn')?.addEventListener('click', approveStore);
+    } else reviewEl.innerHTML = '';
+  }
+
+  // Bulk-label: parallel online, or one multi-field offline job.
   const bulkEl = document.getElementById('flBulk');
   const mappedFields = checklist.fields.filter(f=>f.state==='mapped');
   const unlabeled = mappedFields.filter(f=>f.labelAvailability==='none');
@@ -819,12 +843,58 @@ async function openField(field, noCache){
 
 const BULK_CONCURRENCY = 4;
 let bulkStop = false;
+
+async function approveStore(){
+  const btn = document.getElementById('approveBtn');
+  if(btn) btn.disabled = true;
+  try{
+    const res = await fetch('/api/approve-store',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ mapperId: currentMapper }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    await loadChecklist();
+  }catch(e){
+    alert(e.message || String(e));
+    if(btn) btn.disabled = false;
+  }
+}
+
 async function bulkLabel(fields){
   const btn = document.getElementById('bulkBtn');
   const status = document.getElementById('bulkStatus');
   if(btn.dataset.running){ bulkStop = true; return; }
   btn.dataset.running = '1'; bulkStop = false;
   btn.textContent = 'Stop';
+
+  // Offline parity: one multi-field job instead of N single-field exports.
+  try{
+    const health = await fetch('/api/health').then((r) => r.json());
+    if(!health.modelConfigured){
+      status.textContent = `Offline — exporting one job for ${fields.length} field(s)…`;
+      const res = await fetch('/api/export-label-job',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ mapperId: currentMapper, fields }),
+      });
+      const data = await res.json();
+      if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      status.textContent = `Exported ${data.fieldCount} field(s) → ${data.jobFile}`;
+      const canvas = document.getElementById('canvas');
+      canvas.innerHTML = `<span class="target-name">Offline bulk job</span>
+        <p style="color:var(--ink-soft);font-size:13.5px">Complete this job in your editor agent, then import.</p>
+        <div class="code-block" style="margin-top:10px;white-space:pre-wrap">${esc((data.steps||[]).join('\n'))}</div>`;
+      delete btn.dataset.running;
+      btn.textContent = 'Label all mapped';
+      return;
+    }
+  }catch(e){
+    status.textContent = e.message || String(e);
+    delete btn.dataset.running;
+    btn.textContent = 'Label all mapped';
+    return;
+  }
+
   let done = 0, failed = 0, next = 0;
   async function worker(){
     for(;;){
@@ -847,8 +917,17 @@ async function bulkLabel(fields){
           }
           done++;
         } else if(res.ok && data.outcome==='offline-exported'){
-          status.textContent = 'Offline mode — use the exported job flow instead.';
+          // Race: model became unavailable — fall back to multi-field export.
           bulkStop = true;
+          status.textContent = 'Switched to offline multi-field export…';
+          const exp = await fetch('/api/export-label-job',{
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ mapperId: currentMapper, fields }),
+          });
+          const ed = await exp.json();
+          if(exp.ok){
+            status.textContent = `Exported ${ed.fieldCount} field(s) → ${ed.jobFile}`;
+          }
           return;
         } else failed++;
       }catch{ failed++; }
