@@ -25,12 +25,14 @@
     "test:agentloop": "tsx --test translator/agentloop/loop.test.ts",
     "test:judge": "tsx --test translator/judge/judge.test.ts",
     "test:policy": "tsx --test analyzer/noExternal.test.ts",
-    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy && npm run test:wire && npm run test:crosscheck",
+    "test:all": "npm run test:translator && npm run test:analyzer && npm run test:verified && npm run test:agentloop && npm run test:judge && npm run test:policy && npm run test:wire && npm run test:crosscheck && npm run test:report",
     "test:wire": "tsx --test translator/model/provider.wire.test.ts",
     "e2e:online": "tsx translator/e2e/onlineSmoke.ts",
     "judge:export": "tsx translator/judge/offline.ts",
     "judge:import": "tsx translator/judge/offline.ts",
-    "test:crosscheck": "tsx --test translator/agentloop/crossCheck.test.ts"
+    "test:crosscheck": "tsx --test translator/agentloop/crossCheck.test.ts",
+    "report": "tsx translator/report/report.ts",
+    "test:report": "tsx --test translator/report/report.test.ts"
   },
   "engines": {
     "node": ">=20"

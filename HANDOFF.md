@@ -79,7 +79,7 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 | 2.2 | Precedence verified > cache > model, all paths | ✅ |
 | 2.3 | `--promote` gated on audit (both label paths) | ✅ |
 | 2.4 | Stale-on-change + previous entry as convergence context | ✅ |
-| 2.5 | Golden-dataset CI harness | ⬜ |
+| 2.5 | Golden-dataset CI harness — `validator/golden-dataset/*.json` compared by pipeline shape, surfaced in `npm run report`, `--strict` for CI | ✅ |
 
 ### Req 3 — steering
 | # | Work item | Status |
@@ -109,7 +109,22 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 - [x] Judge online + offline (export/import), citation verification, mock defects + defects.jsonl
 - [x] Viewer: dynamic field panel, on-demand label, bulk-label with stop, unresolved triage by cause, correction box, offline job steps inline
 - [x] Vendor switch config-only (claude/openai/gemini alias/copilot), wire tests, `e2e:online`
+- [x] Scorecard `npm run report` + run metrics + golden-dataset shape comparison
+- [x] Prompt hardening: source treated as data, not instructions (all three prompts)
 - [x] Network policy test; PROJECT.md decision log + increment log
+
+## Architecture hardening roadmap
+
+Reviewed gaps beyond the core loop. Item 1 is built; the rest are specced for whoever continues.
+
+- [x] **1. Measurement / scorecard** — `npm run report [-- --json] [--strict] [--worktree <p>] [--mapper <id>]`. Runs the deterministic pipeline over every registry entry (zero model calls) and prints per mapper: declared fields, mapped %, unmapped, unresolved, checklist source, verified-store status + correction count + stale entries, recorded run signals (cross-check flip rate = scanner pattern gaps, tool-loop fire/resolve rate = slice quality), and golden-dataset accuracy where a golden file exists. `--strict` exits 2 on any concern (CI-ready). Run metrics are appended per label run to `.cache/metrics/{mapperId}.jsonl`; golden files live in `validator/golden-dataset/{mapperId}.json` comparing pipeline SHAPE (ordered step kinds), not prose.
+- [ ] **2. Prompt-injection posture.** Source code is untrusted input flowing into prompts. Mitigated so far: all three prompts (labeler, cross-check, judge) now state that code/comments/strings are data, never instructions; deterministic checks cap the blast radius (a poisoned label still can't pass the gate, enter the store without a verified citation, or write code). Still to do: flag suspicious imperative comments in slices as a diagnostic, and document the threat model in ARCHITECTURE.md.
+- [ ] **3. Change lifecycle / CI mode.** `incrementalScan` detects changed files but isn't wired to labeling. Build `npm run ci:check`: for mappers touched in a diff, recompute the verified fingerprint and fail (or auto-export a re-label job) when the store went stale — makes drift between code and documented mappings impossible to merge. Related: prune policy for `registry/verified/` (keep latest N fingerprints per mapper; `listStaleFingerprints` already enumerates them).
+- [ ] **4. Review/approval state in the store.** `--promote` trusts the runner. Add a third status beside `verified` / `user-corrected`: `pending-review`, plus a viewer diff against the previous fingerprint's entry and an approve action. Today git review of the store JSON is the only checkpoint.
+- [ ] **5. Scale ergonomics.** `label:all` batch mode (store-aware, so warm runs are free); parallel field labeling with a concurrency cap (fields are independent); `registry:check` validating every `sourceFile` exists and every `targetType` resolves before onboarding.
+- [ ] **6. Confidence surfacing.** Per-field provenance badge in the viewer — labeled from slice / needed escalation / needed tool loop / cross-check flip. The data already exists in the run path; this is purely surfacing so reviewers know where to look.
+
+Explicitly rejected: a second discovery agent (verifier, not discoverer — see PROJECT.md), a database (git + JSON is right at this scale), a workflow engine (the pipeline is a function-call chain by design).
 
 ## Pending — pick up here
 

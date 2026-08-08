@@ -23,6 +23,7 @@ import {
 import type { FieldTask, LabelTasks } from "./tasks.js";
 import { investigateField } from "./toolLoop.js";
 import { crossCheckUnmapped } from "./crossCheck.js";
+import { appendRunMetrics } from "../report/metrics.js";
 import type { ModelConfig } from "../model/config.js";
 import type { ToolTraceEntry } from "../model/provider.js";
 
@@ -83,6 +84,9 @@ export async function runAgentLoop(
   // Cross-check pass: one call, only when the scan produced UNMAPPED fields.
   // Verified claims demote unmapped -> unresolved (never mapped directly), so
   // the normal escalation / tool-loop path settles them with full rigor.
+  let crossCheckFlips = 0;
+  let toolLoopRuns = 0;
+  let toolLoopResolved = 0;
   const unmappedTasks = tasks.tasks.filter((t) => t.state === "unmapped");
   if (unmappedTasks.length > 0 && !options.skipCrossCheck) {
     try {
@@ -95,6 +99,7 @@ export async function runAgentLoop(
       for (const flip of flips) {
         const task = tasks.tasks.find((t) => t.field === flip.field);
         if (task) {
+          crossCheckFlips++;
           task.state = "unresolved";
           task.note = `cross-check: possible missed write at line ${flip.line} — ${flip.evidence}`;
           console.error(`[cross-check] ${flip.field}: unmapped -> unresolved (${flip.evidence})`);
@@ -145,6 +150,7 @@ export async function runAgentLoop(
 
     // Last resort for unresolved fields: Copilot-style investigation loop.
     if (task.state === "unresolved" && !response?.recognized && options.modelConfig) {
+      toolLoopRuns++;
       try {
         const investigated = await investigateField({
           config: options.modelConfig,
@@ -157,6 +163,7 @@ export async function runAgentLoop(
           investigated.text.replace(/```json|```/g, "").trim(),
         ) as FieldMappingResponse & { toolTrace?: ToolTraceEntry[] };
         if (parsed && typeof parsed === "object") {
+          if (parsed.recognized) toolLoopResolved++;
           response = parsed;
           if (investigated.trace.length > 0) {
             console.error(
@@ -206,6 +213,22 @@ export async function runAgentLoop(
     unresolvedFields: stillUnresolved,
     unmappedFields,
   };
+
+  try {
+    appendRunMetrics({
+      mapperId,
+      at: new Date().toISOString(),
+      declaredFields: tasks.report.declaredFields,
+      labeled: fieldsLabeled,
+      fromCache: fieldsFromCache,
+      unresolved: stillUnresolved.length,
+      crossCheckFlips,
+      toolLoopRuns,
+      toolLoopResolved,
+    });
+  } catch {
+    // metrics are best-effort; never fail a run over them
+  }
 
   return { mapping, audit, fieldsLabeled, fieldsFromCache };
 }
