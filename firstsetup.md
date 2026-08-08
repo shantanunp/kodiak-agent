@@ -1,198 +1,238 @@
-# First setup (Windows)
+# First setup — monitoring & miss detection
 
-Get labeling working on a Windows laptop in a few steps. Use **PowerShell**.
+Get from a clean slate to a verified scorecard + viewer. Bash from the `kodiak-agent` repo root.
 
 ---
 
 ## You need
 
-| Tool                 | Version               |
-| -------------------- | --------------------- |
-| Node.js              | 20+                   |
-| Mapper repo checkout | your Java mapper repo (`--worktree`) |
+| Tool | Notes |
+| --- | --- |
+| Node.js 20+ | `node -v` |
+| Mapper checkout | path in `.env` as `MAPPER_WORKTREE`, or pass `--worktree` |
+| Optional model key | live `label`; offline path works without it |
 
-
-```powershell
-node -v
-```
-
-Also clone your mapper repo so you can use `--worktree` and skip GitHub for daily work.
-
----
-
-## Setup once
-
-```powershell
-cd C:\Users\<you>\Workspace\kodiak-agent
-Copy-Item .env.example .env
-notepad .env
-```
-
-Minimum in `.env`:
-
-```env
-MODEL_API_KEY=your-key
-```
-
-Defaults use OpenAI-compatible chat completions. Examples:
-
-```env
-# OpenAI / office gateway
-MODEL_API_STYLE=openai
-MODEL_BASE_URL=https://your-gateway/v1
-MODEL_NAME=gpt-4o-mini
-MODEL_API_KEY=your-key
-
-# Anthropic Claude (also accepts ANTHROPIC_API_KEY)
-# MODEL_API_STYLE=claude
-# MODEL_BASE_URL=https://api.anthropic.com/v1
-# MODEL_NAME=claude-sonnet-4-5
-# MODEL_API_KEY=sk-ant-...
-
-# GitHub Copilot (https://api.githubcopilot.com/chat/completions)
-# MODEL_API_STYLE=copilot
-# MODEL_BASE_URL=https://api.githubcopilot.com
-# MODEL_NAME=gpt-4o
-# MODEL_API_KEY=...   # or COPILOT_TOKEN / GITHUB_TOKEN
-```
-
-Then:
-
-```powershell
+```bash
+cp .env.example .env   # if needed
+# set MAPPER_WORKTREE, and MODEL_* if you want online labeling
 npm install
 ```
 
-Office Artifactory / npm mirrors should already be configured on your laptop (same as other projects).
-
-Edit `registry/mapping-registry.yaml` to point at your mapper repo and class files. Optionally add `registry/schemas/{mapperId}.schema.json`.
+Registry mapper used below: `order-request-mapper` (edit `registry/mapping-registry.yaml` for yours).
 
 ---
 
-## Label a field (local worktree)
+## What changed (UI vs report)
 
-```powershell
-npm run label -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
-  --fields Summary.displayName
-```
+| Surface | What it shows |
+| --- | --- |
+| `npm run report` | Miss signals + provenance + store `pending=` |
+| `/api/health` | Includes `pendingReview` (viewer mainly uses health for `modelConfigured`) |
+| Viewer checklist | Provenance badges, pending pill, approve bar, diagnostics — restart `ui:serve` after code changes |
 
-Warm cache (same fingerprint):
-
-```powershell
-npm run label -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
-  --fields Summary.displayName
-```
-
-Clear caches:
-
-```powershell
-npm run cache:clear -- --mapper demo-ai-recognition-mapper
-```
+The scorecard journal line is CLI-focused. The UI does **not** render the full miss-signal summary; it shows per-field diagnostics / provenance from `/api/checklist` and `/api/label-field`.
 
 ---
 
-## UI
+## 1. Start fresh (wipe old monitoring noise)
 
-```powershell
-npm run ui:serve
-# http://localhost:4173/pipeline-viewer/          # opens the most recently labeled mapper
-# http://localhost:4173/pipeline-viewer/?mapper=<mapper-id>   # or pick one explicitly
+**Safe wipe (keeps verified store / corrections):**
+
+```bash
+# Runtime label/pipeline caches
+npm run cache:clear
+# or one mapper:
+# npm run cache:clear -- --mapper order-request-mapper
+
+# Run journal (gitignored)
+rm -f registry/runs.jsonl
+
+# Per-run metrics that feed scorecard "flips/toolloop"
+rm -rf .cache/metrics
+
+# Optional: mock judge rejects only
+# rm -f registry/defects.jsonl
 ```
 
-**Build with AI (POC):**
+**Do not delete** `registry/verified/` unless you intentionally want to forget promoted/corrected labels.
 
-1. Label one field first:
-   ```powershell
-   npm run label -- --mapper demo-ai-recognition-mapper `
-     --worktree C:\Users\<you>\Workspace\your-mapper-repo `
-     --fields Summary.displayName --no-cache
-   ```
-2. Open the viewer with that mapper/field.
-3. Set `MAPPER_WORKTREE` in `.env` to the same checkout.
-4. Describe a change and click **Build with AI**.
+**Hard reset of labels for one mapper** (only if you want a clean store too):
 
----
-
-## Switch model provider
-
-| Variable | Values |
-| -------- | ------ |
-| `MODEL_API_STYLE` | `openai`, `claude`, or `copilot` |
-| `MODEL_BASE_URL` | API host (no trailing slash; copilot: `https://api.githubcopilot.com`) |
-
-`STYLE` must match the endpoint shape (don’t point `claude` style at an OpenAI URL).
-
----
-
-## Offline agent jobs (no model API / blocked office network)
-
-Offline mode needs only Node.js and a mapper checkout (`--worktree`). Pass `--fields` so export knows which fields to label.
-
-`npm run label` now auto-detects when it can't reach the model API — no key set, **or**
-the live call fails (blocked network/proxy) — and exports an offline job instead of just
-erroring. It prints the job path and exact next steps, so you can usually just run your
-normal `label` command and follow the printed instructions:
-
-```powershell
-npm run label -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
-  --fields Summary.displayName --no-cache
+```bash
+rm -rf registry/verified/order-request-mapper
 ```
 
-That prints a **VS Code step-by-step** block, including:
+Restart the UI if it’s already running:
 
-```
-── VS Code offline labeling ──────────────────────────
-
-1. Open the job file in VS Code:
-   .cache\agent-jobs\demo-ai-recognition-mapper\<fingerprint>\job.json
-
-2. Copilot Chat (agent mode) — paste:
-   Complete the offline label job in <jobFile>
-
-3. After the agent writes result.json, run in the VS Code terminal:
-
-   npm run label:import -- --result <resultFile> --fields Summary.displayName
-
-   npm run label -- --mapper demo-ai-recognition-mapper --from-cache-only --fields Summary.displayName
-
-4. Optional — pipeline viewer:
-
-   npm run ui:serve
-```
-
-`job.json` contains the **full mapper Java** (`sourceJava`), schema, and registry metadata — the agent does not need external files.
-
-Opening `job.json` (under `.cache/agent-jobs/**`) auto-attaches
-`.github/instructions/kodiak-agent-label.instructions.md`, which tells Copilot Chat's agent
-mode exactly how to fill in `result.json` and which npm commands to print for you.
-In Cursor, the equivalent rule lives at `.cursor/rules/kodiak-agent-label.mdc`.
-
-You can also run each stage manually instead of relying on auto-fallback:
-
-```powershell
-npm run label:export -- --mapper demo-ai-recognition-mapper `
-  --worktree C:\Users\<you>\Workspace\your-mapper-repo `
-  --fields Summary.displayName
-
-# Copilot Chat completes result.json (see README.md in the job folder), then in VS Code terminal:
-
-npm run label:import -- --result .cache\agent-jobs\demo-ai-recognition-mapper\<fingerprint>\result.json `
-  --fields Summary.displayName
-
-npm run label -- --mapper demo-ai-recognition-mapper `
-  --from-cache-only --fields Summary.displayName
-
+```bash
 npm run ui:serve
 ```
 
+Open: `http://localhost:4173/pipeline-viewer/?mapper=order-request-mapper`
+
 ---
 
-## Checklist
+## 2. Automated offline tests (no model key)
 
-- [ ] `npm install`
-- [ ] Registry points at your mapper repo
-- [ ] `MODEL_API_KEY` (or style-specific key) in `.env` for live labeling; offline needs `--fields` + `--worktree` only
-- [ ] `npm run label -- --mapper … --worktree … --fields …`
-- [ ] `npm run ui:serve` and open the pipeline viewer
+```bash
+# Monitoring aggregation
+npm run test:journal
+npm run test:report
+npm run test:drift
+
+# Miss-detection pieces
+npm run test:agentloop          # grounding, smells, verify, critic, multi-instance, injection
+npx tsx --test analyzer/secondOpinion.test.ts analyzer/writePatterns.test.ts
+
+# Or everything offline
+npm run test:all
+```
+
+Expect all green. That proves journal/report math and miss detectors, not your real mapper.
+
+---
+
+## 3. Manual smoke on a real mapper
+
+Use `$MAPPER_WORKTREE` from `.env`, or export it:
+
+```bash
+export MAPPER_WORKTREE=/path/to/your-mapper-repo
+```
+
+### A. Deterministic checklist / miss diagnostics (no model)
+
+```bash
+npm run analyze -- \
+  --file "$MAPPER_WORKTREE/src/main/java/com/kodiakservice/mapper/OrderRequestMapper.java" \
+  --mapper-class OrderRequestMapper \
+  --target-class OrderMappedResponse \
+  --slices
+```
+
+Or via report (zero model calls):
+
+```bash
+npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
+npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper --json | less
+npm run drift -- --worktree "$MAPPER_WORKTREE"
+```
+
+On a **fresh** journal, report’s Journal section says empty until you label once.
+
+### B. Label once so journal fills
+
+```bash
+npm run label -- \
+  --mapper order-request-mapper \
+  --worktree "$MAPPER_WORKTREE" \
+  --analyzer
+# optional miss/agent checks:
+#   --verify --critic
+# optional store:
+#   --promote          # → pending-review
+#   --promote --approve
+```
+
+### C. Confirm journal wrote new fields
+
+```bash
+tail -n 1 registry/runs.jsonl | python -m json.tool
+```
+
+Look for:
+
+- `possibleMissedWrites`, `unmappedButMentioned`
+- `multiInstanceUnattributed`, `promptInjectionRisks`
+- `crossCheckFlips`, `writePatterns`
+- `groundingWarnings`, `stepSmells`, `provenance`
+- `scores`, `tokens` (tokens only if the model ran)
+
+### D. Re-run report — miss line should be non-empty
+
+```bash
+npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
+```
+
+Expect something like:
+
+```text
+miss signals: possible-missed-write=… unmapped-but-mentioned=… multi-instance=…
+  prompt-injection=… cross-check-flips=… grounding=… …
+```
+
+---
+
+## 4. UI checks (after restart)
+
+```bash
+npm run ui:serve
+```
+
+Health (includes `pendingReview`):
+
+```bash
+curl -s http://localhost:4173/api/health | python -m json.tool
+```
+
+Check `pendingReview`, `userCorrected`, `verifiedEntries`, `staleMappers`, `modelConfigured`.
+
+Viewer:
+
+1. Field list loads instantly (checklist, no model).
+2. Pills: `checklist: …`, `pending N` if store has pending-review.
+3. Per-field provenance badge after label (slice / cache / tool-loop / pending-review / …).
+4. Expansion / diagnostics in the panel (or browser console for checklist diagnostics).
+5. If you `--promote`’d without `--approve`, the Approve bar should appear.
+
+Hard-refresh the browser (Ctrl+Shift+R) so old JS isn’t cached.
+
+---
+
+## 5. Optional: pending-review / approve path
+
+```bash
+npm run label -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE" --analyzer --promote
+npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
+# expect concern: "N field(s) pending review"
+
+npm run verified:approve -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE"
+# report pending should clear; /api/health pendingReview drops
+```
+
+---
+
+## 6. “Am I looking at stale data?”
+
+| Symptom | Likely cause |
+| --- | --- |
+| Report miss signals all 0 forever | Never labeled after wipe, or wrong `runs.jsonl` |
+| Report still shows old flips/toolloop | Forgot `rm -rf .cache/metrics` |
+| UI field still “labeled” after cache clear | Hit came from `registry/verified/` (by design) |
+| UI looks unchanged | Old `ui:serve` process / browser cache |
+| Journal missing new keys | Label path didn’t use `--analyzer` (agent-loop) |
+
+---
+
+## Minimal happy path
+
+```bash
+cd /path/to/kodiak-agent
+npm run cache:clear
+rm -f registry/runs.jsonl
+rm -rf .cache/metrics
+
+npm run test:journal && npm run test:report
+
+npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
+npm run label -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE" --analyzer
+npm run report -- --worktree "$MAPPER_WORKTREE" --mapper order-request-mapper
+tail -n 1 registry/runs.jsonl | python -m json.tool
+
+npm run ui:serve
+# then: curl /api/health + open viewer
+```
+
+Gotcha: npm may print a banner on stdout — when parsing CLI JSON, slice from the first `{`.
+
+More context: [HANDOFF.md](./HANDOFF.md), [ARCHITECTURE.md](./ARCHITECTURE.md).
