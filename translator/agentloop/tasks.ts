@@ -350,10 +350,10 @@ export function buildLabelTasks(options: {
         targetField: `${pathPrefix}.${site.targetField}`,
       });
     }
-    if (unattributed.length > 0) {
+    for (const site of unattributed) {
       diagnostics.push(
-        `type "${typeName}" feeds ${refs.length} parent fields; ${unattributed.length} write(s) could not be ` +
-          "attributed to a single instance and were applied to all candidates — verify those fields",
+        `multi-instance-unattributed type "${typeName}" line ${site.line} ` +
+          `field ${site.targetField} — applied to all ${refs.length} parent candidates`,
       );
     }
   }

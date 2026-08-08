@@ -769,6 +769,7 @@ createServer(async (req, res) => {
     }
     let verifiedEntries = 0;
     let userCorrected = 0;
+    let pendingReview = 0;
     const verifiedRoot = process.env.KODIAK_VERIFIED_DIR
       ?? join(paths.root, "registry", "verified");
     if (existsSync(verifiedRoot)) {
@@ -785,6 +786,8 @@ createServer(async (req, res) => {
             };
             userCorrected +=
               entry.fields?.filter((x) => x.status === "user-corrected").length ?? 0;
+            pendingReview +=
+              entry.fields?.filter((x) => x.status === "pending-review").length ?? 0;
           } catch { /* skip bad file */ }
         }
       }
@@ -815,6 +818,7 @@ createServer(async (req, res) => {
       modelName,
       verifiedEntries,
       userCorrected,
+      pendingReview,
       staleMappers: staleCount,
       analyzerLanguages: ["java"],
       elapsedMs: Date.now() - started,

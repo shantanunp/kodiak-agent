@@ -29,8 +29,13 @@ test("summarizeJournal aggregates cost and miss signals", async () => {
     tokens: { prompt: 100, completion: 40, retries: 1, latencyMs: 90, p95LatencyMs: 50 },
     writePatterns: { setter: 5, assignment: 1 },
     possibleMissedWrites: 2,
+    unmappedButMentioned: 1,
+    multiInstanceUnattributed: 3,
+    promptInjectionRisks: 1,
+    crossCheckFlips: 2,
     groundingWarnings: 1,
     stepSmells: 1,
+    provenance: { slice: 4, "tool-loop": 2, cache: 2 },
     scores: { coverage: 0.8, grounding: 1, specificity: 0.9, provenance: 1 },
     verifyDivergences: 1,
     criticFindings: 2,
@@ -57,9 +62,14 @@ test("summarizeJournal aggregates cost and miss signals", async () => {
   assert.equal(s.cost.completionTokens, 40);
   assert.equal(s.cost.cacheHits, 2);
   assert.equal(s.possibleMissedWrites, 2);
+  assert.equal(s.unmappedButMentioned, 1);
+  assert.equal(s.multiInstanceUnattributed, 3);
+  assert.equal(s.promptInjectionRisks, 1);
+  assert.equal(s.crossCheckFlips, 2);
   assert.equal(s.groundingWarnings, 1);
   assert.equal(s.stepSmells, 1);
   assert.equal(s.writePatterns.setter, 5);
+  assert.equal(s.provenance["tool-loop"], 2);
   assert.equal(s.judge.rejects, 1);
   assert.equal(s.verifyDivergences, 1);
   assert.equal(s.criticFindings, 2);

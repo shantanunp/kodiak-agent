@@ -400,9 +400,18 @@ export async function runAgentLoop(
       writePatterns[s.via] = (writePatterns[s.via] ?? 0) + 1;
     }
   }
-  const possibleMissedWrites = (tasks.diagnostics ?? []).filter((d) =>
-    d.startsWith("possible-missed-write"),
-  ).length;
+  const diags = tasks.diagnostics ?? [];
+  const countDiag = (prefix: string) =>
+    diags.filter((d) => d.startsWith(prefix)).length;
+  const possibleMissedWrites = countDiag("possible-missed-write");
+  const unmappedButMentioned = countDiag("unmapped-but-mentioned");
+  const multiInstanceUnattributed = countDiag("multi-instance-unattributed");
+  const promptInjectionRisks = countDiag("prompt-injection-risk");
+
+  const provenanceCounts: Record<string, number> = {};
+  for (const tag of Object.values(fieldProvenance)) {
+    provenanceCounts[tag] = (provenanceCounts[tag] ?? 0) + 1;
+  }
 
   try {
     appendRunMetrics({
@@ -445,7 +454,7 @@ export async function runAgentLoop(
     promoted: false,
     checklistSource: tasks.checklistSource,
     diagnostics:
-      (tasks.diagnostics?.length ?? 0) +
+      diags.length +
       groundingWarnings.length +
       smells.length +
       verifyDivergences.length +
@@ -461,8 +470,13 @@ export async function runAgentLoop(
       : undefined,
     writePatterns,
     possibleMissedWrites,
+    unmappedButMentioned,
+    multiInstanceUnattributed,
+    promptInjectionRisks,
+    crossCheckFlips,
     groundingWarnings: groundingWarnings.length,
     stepSmells: smells.length,
+    provenance: provenanceCounts,
     scores: scoresForJournal(scores),
     verifyDivergences: verifyDivergences.length,
     criticFindings: criticFindings.length,

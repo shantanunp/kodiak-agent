@@ -42,8 +42,18 @@ export interface RunJournalEntry {
   /** PAR-4 — write sites found per CST pattern kind. */
   writePatterns?: Record<string, number>;
   possibleMissedWrites?: number;
+  /** PAR-2 — unmapped fields that still mention a setter/getter/name in source. */
+  unmappedButMentioned?: number;
+  /** Multi-instance: writes tainted onto all parent candidates. */
+  multiInstanceUnattributed?: number;
+  /** Prompt-injection posture hits in slices. */
+  promptInjectionRisks?: number;
+  /** Cross-check demotions (unmapped → unresolved). */
+  crossCheckFlips?: number;
   groundingWarnings?: number;
   stepSmells?: number;
+  /** Per-run provenance tag counts (slice / tool-loop / cache / …). */
+  provenance?: Record<string, number>;
   /** EVAL-2 — rule-based labeling scorers (0..1). */
   scores?: {
     coverage: number;

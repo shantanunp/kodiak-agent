@@ -58,6 +58,8 @@ interface MapperScore {
   store?: {
     hasCurrentEntry: boolean;
     fields: number;
+    verified: number;
+    pendingReview: number;
     corrected: number;
     staleEntries: number;
   };
@@ -113,13 +115,22 @@ async function scoreMapper(mapperId: string): Promise<MapperScore> {
       schemaJson: loadSchemaJson(mapperId),
     });
     const entry = getVerified(mapperId, fingerprint);
+    const pendingReview =
+      entry?.fields.filter((f) => f.status === "pending-review").length ?? 0;
+    const verifiedFields =
+      entry?.fields.filter((f) => f.status === "verified").length ?? 0;
     const store = {
       hasCurrentEntry: Boolean(entry),
       fields: entry?.fields.length ?? 0,
+      verified: verifiedFields,
+      pendingReview,
       corrected: entry?.fields.filter((f) => f.status === "user-corrected").length ?? 0,
       staleEntries: listStaleFingerprints(mapperId, fingerprint).length,
     };
     if (!entry) concerns.push("no verified entry for current source (labels not promoted)");
+    else if (pendingReview > 0) {
+      concerns.push(`${pendingReview} field(s) pending review (npm run verified:approve)`);
+    }
 
     const runList = readRunMetrics(mapperId);
     const runs = {
@@ -209,6 +220,7 @@ if (values.json) {
       `${flag} ${s.mapperId.padEnd(28)} fields=${String(c.declaredFields).padStart(3)} ` +
         `mapped=${String(c.mappedPct).padStart(3)}% unmapped=${c.unmapped} unresolved=${c.unresolved} ` +
         `src=${c.checklistSource} store=${s.store!.hasCurrentEntry ? "current" : "MISSING"}` +
+        (s.store!.pendingReview ? ` pending=${s.store!.pendingReview}` : "") +
         (s.store!.corrected ? ` corrected=${s.store!.corrected}` : "") +
         (s.runs!.recorded
           ? ` | runs=${s.runs!.recorded} flips=${s.runs!.crossCheckFlips} toolloop=${s.runs!.toolLoopResolved}/${s.runs!.toolLoopRuns}`
@@ -229,6 +241,10 @@ if (values.json) {
     );
     console.log(
       `  miss signals: possible-missed-write=${journal.possibleMissedWrites} ` +
+        `unmapped-but-mentioned=${journal.unmappedButMentioned} ` +
+        `multi-instance=${journal.multiInstanceUnattributed} ` +
+        `prompt-injection=${journal.promptInjectionRisks} ` +
+        `cross-check-flips=${journal.crossCheckFlips} ` +
         `grounding=${journal.groundingWarnings} step-smells=${journal.stepSmells}` +
         ` verify-diverge=${journal.verifyDivergences} critic=${journal.criticFindings}`,
     );
@@ -237,6 +253,13 @@ if (values.json) {
       console.log(
         `  scores: coverage=${s.coverage} grounding=${s.grounding} ` +
           `specificity=${s.specificity} provenance=${s.provenance}`,
+      );
+    }
+    if (Object.keys(journal.provenance).length) {
+      console.log(
+        `  provenance: ${Object.entries(journal.provenance)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(" ")}`,
       );
     }
     if (Object.keys(journal.writePatterns).length) {

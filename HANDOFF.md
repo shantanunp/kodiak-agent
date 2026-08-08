@@ -164,8 +164,9 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 
 - [x] **Offline parity for bulk-label**: bulk exports ONE multi-field job via `/api/export-label-job` when model is not configured.
 - [x] **Viewer polish**: re-label (`noCache`); checklistSource/worktreeUsed/pending pills; approve bar + previous diff; dots refresh after bulk.
-- [ ] **Registry `language` field** + per-mapper `subMappers` hint (closure walker seed) when multi-file mapper families arrive.
 - [x] **Golden dataset harness**: `npm run test:golden` offline shape check (`validator/golden-dataset/`).
+- [x] **Monitoring backlog (MON-1…5, EVAL-1…2)** — all shipped; see sections below.
+- [x] **Miss-detection backlog (PAR-1…4, AGT-1…6)** — all shipped; see sections below.
 
 ## Field-report protocol (how issues got fixed so far — keep doing this)
 
@@ -173,9 +174,9 @@ Every real-mapper problem so far was diagnosed from: (a) the viewer screenshot, 
 
 ---
 
-## Monitoring & evaluation backlog
+## Monitoring & evaluation backlog — complete ✅
 
-Evaluated Mastra: two useful gaps (tracing/token-cost, evals), five things a framework would duplicate or damage (deterministic write-site scan + gate, content-only verified store, citation judge, offline jobs, no-SDK posture). **Build the two missing capabilities locally; no agent framework.** Constraint: local files and stdout only — no telemetry endpoint, no APM SDK, no new network calls.
+Evaluated Mastra: two useful gaps (tracing/token-cost, evals), five things a framework would duplicate or damage. **Built locally; no agent framework.** Constraint: local files and stdout only — no telemetry endpoint, no APM SDK, no new network calls.
 
 ### MON-1 — Run journal (foundation; do first) ✅
 Append one JSON line per label run to `registry/runs.jsonl` (override via `KODIAK_RUNS_FILE`). Module `translator/telemetry/journal.ts` — `appendRun` / `readRuns`. Wired via agent-loop (covers `cli --analyzer` + `/api/label-field`), `cli` legacy path, and `label:import`. Gitignore by default.
@@ -198,13 +199,15 @@ Report reads `runs.jsonl` + `defects.jsonl`: cost, cache/model/verified breakdow
 ### EVAL-2 — Labeling scorers (rule-based) ✅
 Coverage, grounding, specificity (RAW share), provenance via `translator/report/scorers.ts`. Emitted on each agent-loop journal line; mean scores in `npm run report`.
 
-**Suggested order:** MON-1 → MON-2 → MON-3 → MON-4 + MON-5 → EVAL-1 → EVAL-2. Stopping after MON-3 is a valid resting point.
+**All MON/EVAL items above are done.**
+
+**Also journaled / reported for later increments** (not separate backlog IDs): multi-instance unattributed writes, unmapped-but-mentioned, prompt-injection risks, cross-check flips, provenance tag breakdown, store `pending-review` counts (`npm run report` + `/api/health`).
 
 ---
 
-## Miss-detection backlog — parser (CST) layer and agent layer
+## Miss-detection backlog — parser (CST) layer and agent layer — complete ✅
 
-Companion to monitoring. Monitoring answers *"what happened?"*; this answers *"did we miss anything, and how would we know?"* The audit gate prevents silent absence, but neither layer's *quality* is measured yet.
+Companion to monitoring. Monitoring answers *"what happened?"*; this answers *"did we miss anything, and how would we know?"* The audit gate prevents silent absence; PAR/AGT items below measure parser and agent quality.
 
 ### Layer A — did the parser miss a write?
 
@@ -230,6 +233,6 @@ Already catches: gate (can't skip), recognized=false, escalation/tool-loop, judg
 | **AGT-5** ✅ | Mutation testing on fixtures | Offline: mutate source → baseline pipeline ungrounded / field demoted |
 | **AGT-6** ✅ | Correction-rate metric (judge agree vs reject) | Report: corrected store vs `defects.jsonl` |
 
-**Suggested order:** PAR-1 + PAR-2 + AGT-1 → AGT-6 + PAR-4 → AGT-2 + PAR-3 → AGT-4 + AGT-3 → AGT-5.
+**All PAR/AGT items above are done.** New miss surfaces beyond this table (`multi-instance-unattributed`, `prompt-injection-risk`) feed the same journal miss-signal line in `npm run report`.
 
 **Cost note:** cheapest lever already exists — verified store → zero model calls on warm sources. Watch `resultSource` breakdown (`verified` vs `model`); a high `model` share on unchanged sources means promotions aren't happening.

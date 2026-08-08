@@ -28,8 +28,14 @@ export interface JournalSummary {
   topUnresolved: Array<{ fieldKey: string; count: number }>;
   writePatterns: Record<string, number>;
   possibleMissedWrites: number;
+  unmappedButMentioned: number;
+  multiInstanceUnattributed: number;
+  promptInjectionRisks: number;
+  crossCheckFlips: number;
   groundingWarnings: number;
   stepSmells: number;
+  /** Sum of provenance tag counts across runs. */
+  provenance: Record<string, number>;
   /** EVAL-2 — mean of per-run scores (undefined dims omitted from average). */
   scores?: {
     coverage: number;
@@ -79,10 +85,15 @@ export function summarizeJournal(filter?: {
   let modelLabels = 0;
   let verifiedHits = 0;
   let possibleMissedWrites = 0;
+  let unmappedButMentioned = 0;
+  let multiInstanceUnattributed = 0;
+  let promptInjectionRisks = 0;
+  let crossCheckFlips = 0;
   let groundingWarnings = 0;
   let stepSmells = 0;
   let verifyDivergences = 0;
   let criticFindings = 0;
+  const provenance: Record<string, number> = {};
   const scoreSums = { coverage: 0, grounding: 0, specificity: 0, provenance: 0 };
   let scoreRuns = 0;
 
@@ -94,6 +105,10 @@ export function summarizeJournal(filter?: {
     modelLabels += r.resultSource.model ?? 0;
     verifiedHits += r.resultSource.verified ?? 0;
     possibleMissedWrites += r.possibleMissedWrites ?? 0;
+    unmappedButMentioned += r.unmappedButMentioned ?? 0;
+    multiInstanceUnattributed += r.multiInstanceUnattributed ?? 0;
+    promptInjectionRisks += r.promptInjectionRisks ?? 0;
+    crossCheckFlips += r.crossCheckFlips ?? 0;
     groundingWarnings += r.groundingWarnings ?? 0;
     stepSmells += r.stepSmells ?? 0;
     verifyDivergences += r.verifyDivergences ?? 0;
@@ -108,6 +123,11 @@ export function summarizeJournal(filter?: {
     if (r.writePatterns) {
       for (const [k, v] of Object.entries(r.writePatterns)) {
         writePatterns[k] = (writePatterns[k] ?? 0) + v;
+      }
+    }
+    if (r.provenance) {
+      for (const [k, v] of Object.entries(r.provenance)) {
+        provenance[k] = (provenance[k] ?? 0) + v;
       }
     }
     // Approximate: count unresolved fields by run (field names not always stored).
@@ -145,8 +165,13 @@ export function summarizeJournal(filter?: {
       .slice(0, 20),
     writePatterns,
     possibleMissedWrites,
+    unmappedButMentioned,
+    multiInstanceUnattributed,
+    promptInjectionRisks,
+    crossCheckFlips,
     groundingWarnings,
     stepSmells,
+    provenance,
     scores:
       scoreRuns > 0
         ? {
