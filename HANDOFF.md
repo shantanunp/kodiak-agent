@@ -93,7 +93,6 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 | # | Work item | Status |
 |---|---|---|
 | 3.1–3.6 | Judge + citation verification, sticky corrections, mock defects + defects.jsonl, viewer box, offline judge, fingerprint-scoped staleness | ✅ |
-| 3.7 | Real defect-tracker integration (deliberate network-policy exception) | ⬜ |
 
 ## Onboarding any Spring/Java app (goal: minutes, not days)
 
@@ -137,7 +136,7 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 
 ## Pending — pick up here
 
-**Next increment (do in this order):** Python adapter, real defect tracker, multi-instance builder routing — or ship whatever the next real-mapper field report surfaces.
+**Next increment (do in this order):** multi-instance builder routing — or ship whatever the next real-mapper field report surfaces.
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
 - [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
@@ -163,8 +162,6 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **pending-review** / **approve** / **verified:prune** / offline bulk multi-field export
 - [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
 
-- [ ] **Python adapter**. Contract is `analyzer/types.ts::LanguageAdapter` — implement `analyzer/adapters/python.ts` with tree-sitter (`web-tree-sitter` + `tree-sitter-python` WASM; both installable from npm, satisfies network policy). Write patterns: `obj.attr = expr`, dataclass/pydantic ctor kwargs, `dict["k"] = v`, `setattr`. Register in `scanWriteSites.ADAPTERS`; add `language:` per mapper in the registry (default java). Consider migrating the Java adapter to tree-sitter-java at the same time (error-tolerant parsing; current `java-parser` throws on constructs it doesn't know — that failure is caught and surfaced in diagnostics, but tolerance is better).
-- [ ] **Real defect tracker**. Integration point is exactly `translator/judge/judge.ts::logDefect` + `mockDefectId`. Replace with a provider interface (Jira/ADO webhook via env). NOTE: this adds a network call — extend the policy test allowlist deliberately and document it.
 - [x] **Offline parity for bulk-label**: bulk exports ONE multi-field job via `/api/export-label-job` when model is not configured.
 - [x] **Viewer polish**: re-label (`noCache`); checklistSource/worktreeUsed/pending pills; approve bar + previous diff; dots refresh after bulk.
 - [ ] **Registry `language` field** + per-mapper `subMappers` hint (closure walker seed) when multi-file mapper families arrive.
