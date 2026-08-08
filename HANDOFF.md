@@ -32,6 +32,8 @@ npm run e2e:online          # ONLY script that calls the real model API (needs k
 npm run ui:serve            # viewer at :4173/pipeline-viewer/?mapper=<id>
 npm run analyze -- --file <f> --mapper-class <C> --target-class <C> [--slices]
 npm run label -- --mapper <id> --worktree <path> --analyzer [--promote] [--verify] [--critic]
+npm run label:all -- --worktree <path>       # store-aware batch (verified skips are free)
+npm run registry:check -- --worktree <path>  # sourceFile + type resolve before onboarding
 npm run label:export / label:import          # offline labeling jobs (Copilot agent mode)
 npm run judge:export / judge:import          # offline corrections
 ```
@@ -124,14 +126,14 @@ Reviewed gaps beyond the core loop. Item 1 is built; the rest are specced for wh
 - [ ] **2. Prompt-injection posture.** Source code is untrusted input flowing into prompts. Mitigated so far: all three prompts (labeler, cross-check, judge) now state that code/comments/strings are data, never instructions; deterministic checks cap the blast radius (a poisoned label still can't pass the gate, enter the store without a verified citation, or write code). Still to do: flag suspicious imperative comments in slices as a diagnostic, and document the threat model in ARCHITECTURE.md.
 - [ ] **3. Change lifecycle / CI mode.** `incrementalScan` detects changed files but isn't wired to labeling. Build `npm run ci:check`: for mappers touched in a diff, recompute the verified fingerprint and fail (or auto-export a re-label job) when the store went stale — makes drift between code and documented mappings impossible to merge. Related: prune policy for `registry/verified/` (keep latest N fingerprints per mapper; `listStaleFingerprints` already enumerates them).
 - [ ] **4. Review/approval state in the store.** `--promote` trusts the runner. Add a third status beside `verified` / `user-corrected`: `pending-review`, plus a viewer diff against the previous fingerprint's entry and an approve action. Today git review of the store JSON is the only checkpoint.
-- [ ] **5. Scale ergonomics.** `label:all` batch mode (store-aware, so warm runs are free); parallel field labeling with a concurrency cap (fields are independent); `registry:check` validating every `sourceFile` exists and every `targetType` resolves before onboarding.
+- [x] **5. Scale ergonomics (partial).** `npm run label:all` (store-aware skip on verified hit); `npm run registry:check` (sourceFile + targetType resolve). Still open: parallel field labeling with a concurrency cap.
 - [ ] **6. Confidence surfacing.** Per-field provenance badge in the viewer — labeled from slice / needed escalation / needed tool loop / cross-check flip. The data already exists in the run path; this is purely surfacing so reviewers know where to look.
 
 Explicitly rejected: a second discovery agent (verifier, not discoverer — see PROJECT.md), a database (git + JSON is right at this scale), a workflow engine (the pipeline is a function-call chain by design).
 
 ## Pending — pick up here
 
-**Next increment (do in this order):** `AGT-5` mutation testing, then scale ergonomics / confidence surfacing. See backlog sections below.
+**Next increment (do in this order):** confidence surfacing (#6), parallel field labeling, then architecture #2/#3 (prompt-injection diagnostics, `ci:check`). See backlog sections below.
 
 - [x] **MON-1** Run journal → `registry/runs.jsonl` (`translator/telemetry/journal.ts`; wired in agent-loop + import-job + cli-legacy)
 - [x] **MON-2** Provider metrics (tokens/latency/retries on `HttpModelProvider`)
@@ -148,7 +150,9 @@ Explicitly rejected: a second discovery agent (verifier, not discoverer — see 
 - [x] **AGT-2** Step-count vs helper-closure smell
 - [x] **AGT-3** Opt-in `--verify` double-run at temp 0
 - [x] **AGT-4** Opt-in `--critic` cited missing transforms
+- [x] **AGT-5** Mutation testing on fixture golden pipelines (`translator/agentloop/mutation.ts`)
 - [x] **AGT-6** Judge agree/reject surfaced in report (corrected store vs defects.jsonl)
+- [x] **registry:check** / **label:all** scale ergonomics (store-aware batch)
 - [ ] **Cross-check trace surfacing**: flips currently land in the task note + stderr; also surface them in the viewer checklist response as diagnostics.
 - [ ] **Tool-loop trace persistence**: `runAgentLoop` currently logs the investigation trace to stderr; persist it into the field-cache entry (add optional `toolTrace` to the cache entry type) so agentic runs are replayable evidence.
 - [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
@@ -220,7 +224,7 @@ Already catches: gate (can't skip), recognized=false, escalation/tool-loop, judg
 | **AGT-2** ✅ | Step-count sanity vs helper-closure depth | `translator/agentloop/smells.ts` |
 | **AGT-3** ✅ | Optional `--verify` double-run at temp 0 | `label --analyzer --verify`; divergences on stderr + journal |
 | **AGT-4** ✅ | Opt-in `--critic` model pass with cited missing transforms | `label --analyzer --critic`; reuse verifyCitations |
-| **AGT-5** | Mutation testing on fixtures | Strongest quality gate; later |
+| **AGT-5** ✅ | Mutation testing on fixtures | Offline: mutate source → baseline pipeline ungrounded / field demoted |
 | **AGT-6** ✅ | Correction-rate metric (judge agree vs reject) | Report: corrected store vs `defects.jsonl` |
 
 **Suggested order:** PAR-1 + PAR-2 + AGT-1 → AGT-6 + PAR-4 → AGT-2 + PAR-3 → AGT-4 + AGT-3 → AGT-5.
