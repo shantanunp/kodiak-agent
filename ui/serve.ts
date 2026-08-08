@@ -459,6 +459,8 @@ createServer(async (req, res) => {
         schemaContext: schemaContextForLabeler(mapperId),
         sourceJava: resolved.sourceJava,
         noCache: Boolean(body.noCache),
+        modelConfig: config,
+        schemaContextText: schemaContextForLabeler(mapperId),
       });
 
       const labeled = result.mapping[0];

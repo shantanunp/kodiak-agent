@@ -21,6 +21,9 @@ import {
   setFieldPipelineCache,
 } from "../cache/index.js";
 import type { FieldTask, LabelTasks } from "./tasks.js";
+import { investigateField } from "./toolLoop.js";
+import type { ModelConfig } from "../model/config.js";
+import type { ToolTraceEntry } from "../model/provider.js";
 
 export interface AgentLoopOptions {
   fingerprint: string;
@@ -29,6 +32,9 @@ export interface AgentLoopOptions {
   noCache?: boolean;
   /** Escalation retries for unresolved fields (default 1). */
   maxEscalations?: number;
+  /** Enables the investigation tool loop for still-unresolved fields. */
+  modelConfig?: ModelConfig;
+  schemaContextText?: string;
 }
 
 export interface AgentLoopAudit {
@@ -106,6 +112,33 @@ export async function runAgentLoop(
           attempt === 0 ? indexerOps : escalationOps(task, options.sourceJava),
         schemaContext: options.schemaContext,
       });
+    }
+
+    // Last resort for unresolved fields: Copilot-style investigation loop.
+    if (task.state === "unresolved" && !response?.recognized && options.modelConfig) {
+      try {
+        const investigated = await investigateField({
+          config: options.modelConfig,
+          field: task.field,
+          note: task.note,
+          sourceJava: options.sourceJava,
+          schemaContext: options.schemaContextText,
+        });
+        const parsed = JSON.parse(
+          investigated.text.replace(/```json|```/g, "").trim(),
+        ) as FieldMappingResponse & { toolTrace?: ToolTraceEntry[] };
+        if (parsed && typeof parsed === "object") {
+          response = parsed;
+          if (investigated.trace.length > 0) {
+            console.error(
+              `[tool-loop] ${task.field}: ${investigated.trace.length} tool call(s): ` +
+                investigated.trace.map((t) => t.tool).join(" -> "),
+            );
+          }
+        }
+      } catch (err) {
+        console.error(`[tool-loop] ${task.field}: ${(err as Error).message}`);
+      }
     }
 
     if (task.state === "unresolved" && !response?.recognized) {

@@ -380,3 +380,122 @@ export class HttpModelProvider implements ModelProvider {
 export function createModelProvider(config?: ModelConfig): ModelProvider {
   return new HttpModelProvider(config ?? loadModelConfig());
 }
+
+// ── Tool-use loop (raw HTTP, no SDKs) ────────────────────────────────────────
+// Claude style: tools[{name,description,input_schema}] / tool_use / tool_result
+// OpenAI/Copilot/Gemini-compat: tools[{type:"function",...}] / tool_calls / role:"tool"
+
+export interface LoopTool {
+  name: string;
+  description: string;
+  /** JSON schema for the tool input. */
+  schema: Record<string, unknown>;
+}
+
+export interface ToolTraceEntry {
+  tool: string;
+  input: unknown;
+  output: string;
+}
+
+const MAX_TOOL_ROUNDS = 6;
+
+export async function runToolLoop(options: {
+  config: ModelConfig;
+  systemPrompt: string;
+  userPrompt: string;
+  tools: LoopTool[];
+  executeTool: (name: string, input: Record<string, unknown>) => string;
+}): Promise<{ text: string; trace: ToolTraceEntry[] }> {
+  const { config } = options;
+  const trace: ToolTraceEntry[] = [];
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+  if (config.apiStyle === "claude") {
+    headers["x-api-key"] = config.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    const tools = options.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.schema,
+    }));
+    const messages: unknown[] = [{ role: "user", content: options.userPrompt }];
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const res = await fetch(`${config.baseUrl}/messages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          max_tokens: 2000,
+          temperature: config.temperature,
+          system: options.systemPrompt,
+          tools,
+          messages,
+        }),
+      });
+      if (!res.ok) throw new Error(`tool loop HTTP ${res.status}`);
+      const data = (await res.json()) as {
+        content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
+        stop_reason?: string;
+      };
+      const toolUses = data.content.filter((c) => c.type === "tool_use");
+      if (toolUses.length === 0 || data.stop_reason !== "tool_use") {
+        return {
+          text: data.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n"),
+          trace,
+        };
+      }
+      messages.push({ role: "assistant", content: data.content });
+      messages.push({
+        role: "user",
+        content: toolUses.map((u) => {
+          const output = options.executeTool(u.name!, u.input ?? {});
+          trace.push({ tool: u.name!, input: u.input, output });
+          return { type: "tool_result", tool_use_id: u.id, content: output };
+        }),
+      });
+    }
+    throw new Error(`tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);
+  }
+
+  // openai-compatible (openai / gemini alias / copilot)
+  headers["Authorization"] = `Bearer ${config.apiKey}`;
+  if (config.apiStyle === "copilot") headers["Copilot-Integration-Id"] = "vscode-chat";
+  const tools = options.tools.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description, parameters: t.schema },
+  }));
+  const messages: unknown[] = [
+    { role: "system", content: options.systemPrompt },
+    { role: "user", content: options.userPrompt },
+  ];
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const res = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: config.model,
+        temperature: config.temperature,
+        tools,
+        messages,
+      }),
+    });
+    if (!res.ok) throw new Error(`tool loop HTTP ${res.status}`);
+    const data = (await res.json()) as {
+      choices: Array<{ message: { content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>;
+    };
+    const msg = data.choices[0]!.message;
+    if (!msg.tool_calls?.length) {
+      return { text: msg.content ?? "", trace };
+    }
+    messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
+    for (const call of msg.tool_calls) {
+      let input: Record<string, unknown> = {};
+      try { input = JSON.parse(call.function.arguments); } catch { /* empty input */ }
+      const output = options.executeTool(call.function.name, input);
+      trace.push({ tool: call.function.name, input, output });
+      messages.push({ role: "tool", tool_call_id: call.id, content: output });
+    }
+  }
+  throw new Error(`tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);
+}

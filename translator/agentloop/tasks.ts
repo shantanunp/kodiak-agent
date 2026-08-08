@@ -118,13 +118,15 @@ function flattenTargetType(options: {
       const elemFile = !visitedTypes.has(elemSimple)
         ? findTypeFile(worktree, elementType)
         : null;
+      if (visitedTypes.has(elemSimple)) {
+        diagnostics.push(`${dotted}: type "${elemSimple}" is an ancestor (cycle guard); kept as leaf`);
+      }
       if (!elemFile && !visitedTypes.has(elemSimple)) {
         diagnostics.push(
           `${dotted}: collection element type "${elementType}" — no .java file found under worktree; kept as leaf`,
         );
       }
       if (elemFile) {
-        visitedTypes.add(elemSimple);
         const listPrefix = `${dotted}[]`;
         nested.push({ pathPrefix: listPrefix, typeName: elemSimple });
         try {
@@ -136,7 +138,8 @@ function flattenTargetType(options: {
               typeFilePath: elemFile,
               prefix: listPrefix,
               depth: depth + 1,
-              visitedTypes, nested, diagnostics,
+              visitedTypes: new Set([...visitedTypes, elemSimple]),
+              nested, diagnostics,
             }),
           );
           continue;
@@ -168,7 +171,7 @@ function flattenTargetType(options: {
     }
     const childType = simpleTypeName(f.type!.replace(/\[\]$/, ""));
     if (visitedTypes.has(childType)) {
-      diagnostics.push(`${dotted}: type "${childType}" already expanded elsewhere (cycle guard); kept as leaf`);
+      diagnostics.push(`${dotted}: type "${childType}" is an ancestor (cycle guard); kept as leaf`);
       out.push({ ...f, name: dotted });
       continue;
     }
@@ -180,7 +183,6 @@ function flattenTargetType(options: {
       out.push({ ...f, name: dotted });
       continue;
     }
-    visitedTypes.add(childType);
     nested.push({ pathPrefix: dotted, typeName: childType });
     try {
       out.push(
@@ -191,7 +193,8 @@ function flattenTargetType(options: {
           typeFilePath: childFile,
           prefix: dotted,
           depth: depth + 1,
-          visitedTypes, nested, diagnostics,
+          visitedTypes: new Set([...visitedTypes, childType]),
+          nested, diagnostics,
         }),
       );
     } catch (err) {
@@ -276,18 +279,68 @@ export function buildLabelTasks(options: {
   // mapper (or its helpers); scan write sites against each nested type in the
   // mapper source and prefix them with the nested path.
   // POC assumption: one instance per nested type (typical for DTO builders).
+  // Multi-instance attribution: when the same nested type feeds several parent
+  // fields, attribute each write site to the right dotted path by tracing which
+  // receiver VARIABLE (or which builder helper's local) flows into which parent
+  // field: parent.setX(var) or parent.setX(helper(...)).
   const extraSites: WriteSite[] = [];
+  const byType = new Map<string, NestedTypeRef[]>();
   for (const ref of nestedTypes) {
-    const instances = [...options.sourceJava.matchAll(new RegExp(`new\\s+${ref.typeName}\\s*\\(`, "g"))].length;
-    if (instances > 1) {
-      diagnostics.push(
-        `${ref.pathPrefix}: type "${ref.typeName}" is instantiated ${instances} times — ` +
-          "write attribution assumes one instance per type and may merge them (see HANDOFF.md: multi-instance)",
-      );
+    if (!byType.has(ref.typeName)) byType.set(ref.typeName, []);
+    byType.get(ref.typeName)!.push(ref);
+  }
+  for (const [typeName, refs] of byType) {
+    const sites = adapter.findWriteSites(parsed, options.sourceJava, typeName);
+    if (sites.length === 0) continue;
+
+    if (refs.length === 1) {
+      for (const site of sites) {
+        extraSites.push({ ...site, targetField: `${refs[0]!.pathPrefix}.${site.targetField}` });
+      }
+      continue;
     }
-    const nestedSites = adapter.findWriteSites(parsed, options.sourceJava, ref.typeName);
-    for (const site of nestedSites) {
-      extraSites.push({ ...site, targetField: `${ref.pathPrefix}.${site.targetField}` });
+
+    // prefix -> {vars, methods} whose product flows into that parent field.
+    const routes = refs.map((ref) => {
+      const leaf = ref.pathPrefix.replace(/\[\]$/, "").split(".").pop()!;
+      const cap = leaf.charAt(0).toUpperCase() + leaf.slice(1);
+      const vars = new Set<string>();
+      const methods = new Set<string>();
+      for (const m of options.sourceJava.matchAll(
+        new RegExp(`\\.set${cap}\\s*\\(\\s*(\\w+)\\s*(\\()?`, "g"),
+      )) {
+        if (m[2]) methods.add(m[1]!); // setX(helper(...)) -> attribute by enclosing method
+        else vars.add(m[1]!);         // setX(var)         -> attribute by receiver variable
+      }
+      return { ref, vars, methods };
+    });
+
+    let unattributed = 0;
+    for (const site of sites) {
+      const route = routes.find(
+        (r) => r.vars.has(site.receiver) || r.methods.has(site.inMethod),
+      );
+      if (route) {
+        extraSites.push({
+          ...site,
+          targetField: `${route.ref.pathPrefix}.${site.targetField}`,
+        });
+      } else {
+        // Unattributable: taint every candidate path rather than guess one.
+        unattributed++;
+        for (const r of routes) {
+          extraSites.push({
+            ...site,
+            targetField: `${r.ref.pathPrefix}.${site.targetField}`,
+          });
+        }
+      }
+    }
+    if (unattributed > 0) {
+      diagnostics.push(
+        `type "${typeName}" feeds ${refs.length} parent fields; ${unattributed} write(s) could not be ` +
+          "attributed to a single instance and were applied to all candidates — verify those fields",
+      );
     }
   }
   if (extraSites.length > 0) {

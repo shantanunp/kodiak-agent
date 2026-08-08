@@ -52,10 +52,51 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 | `registry/` | Mapper registry, schemas, verified store, defects.jsonl |
 | `fixtures/` | `ShipmentNoticeMapper.java` exercises every pattern + all three audit states |
 
+## Requirement status (the three original goals)
+
+### Req 1 — no missing mappings on complex mappers
+| # | Work item | Status |
+|---|---|---|
+| 1.1 | Write-site scanner (setter/builder/assignment/put, `var` receivers) | ✅ |
+| 1.2 | Per-field slices: local dataflow + same-class helper closure | ✅ |
+| 1.3 | Cross-file closure: static utils + superclass helpers inlined | ✅ |
+| 1.4 | Audit gate: mapped/unmapped/unresolved + opaque-escape tainting | ✅ |
+| 1.5 | Split-file target DTOs resolved (package path + walk) | ✅ |
+| 1.6 | Nested types flattened to dotted paths | ✅ |
+| 1.7 | Collections flattened (`items[].field`); scalar lists stay leaves | ✅ |
+| 1.8 | Getter-only (generated) classes contribute fields | ✅ |
+| 1.9 | Flatten diagnostics — every skipped expansion named in API/CLI/UI | ✅ |
+| 1.10 | Agent loop: slice-fed labeling, escalation pass, gate-controlled | ✅ |
+| 1.11 | Investigation tool loop (search/read tools via raw HTTP tool-calling) for fields escalation can't settle — claude + openai wire styles, trace logged | ✅ |
+| 1.12 | Multi-instance nested types: same type under multiple parent fields expanded per-path; writes attributed by receiver variable or builder helper; unattributable writes applied to all candidates + diagnostic | ✅ |
+| 1.13 | Validate checklist coverage on a real production mapper (field count + expansion notes) | ⬜ project owner only |
+
+### Req 2 — reproducibility
+| # | Work item | Status |
+|---|---|---|
+| 2.1 | Verified store (git-tracked, content-only fingerprint) | ✅ |
+| 2.2 | Precedence verified > cache > model, all paths | ✅ |
+| 2.3 | `--promote` gated on audit (both label paths) | ✅ |
+| 2.4 | Stale-on-change + previous entry as convergence context | ✅ |
+| 2.5 | Golden-dataset CI harness | ⬜ |
+
+### Req 3 — steering
+| # | Work item | Status |
+|---|---|---|
+| 3.1–3.6 | Judge + citation verification, sticky corrections, mock defects + defects.jsonl, viewer box, offline judge, fingerprint-scoped staleness | ✅ |
+| 3.7 | Real defect-tracker integration (deliberate network-policy exception) | ⬜ |
+
+## Onboarding any Spring/Java app (goal: minutes, not days)
+
+1. Add one entry to `registry/mapping-registry.yaml`: `id`, `sourceFile` (repo-relative), `class`, `entryMethod`, `sourceType`, `targetType` (FQCNs).
+2. `npm run label -- --mapper <id> --worktree <path-to-checkout> --analyzer` — or open the viewer. Worktree is inferred for UI reads; DTOs are found by package path or bounded walk. Nothing in the engine is domain- or project-specific: fixtures use a generic logistics domain, all matching is structural (setters/builders/types), and any remaining domain words in `registry/` or `schema/` are the owner's own config data, not engine code.
+
 ## Done ✅
 
 - [x] Deterministic write-site scanner (setter/builder/assignment/map-put, `var` receivers) + local dataflow tracing
 - [x] Helper closure in slices: same-class, **superclass chain (cross-file)**, **static utils (`Utils.method`, cross-file)**
+- [x] Investigation tool loop (1.11): search_source/read_lines over resolved source, raw HTTP tool-calling both wire styles, capped rounds, trace returned
+- [x] Multi-instance attribution (1.12): per-path expansion of repeated types, receiver-variable + helper routing, taint-all + diagnostic when unattributable
 - [x] Audit gate: mapped/unmapped/unresolved, opaque-escape tainting, dotted/leaf matching, orphan detection
 - [x] Nested-type flattening to dotted paths; collections `List<X>` → `path[].field`; getter-only (JAXB) classes
 - [x] Split-file target resolution (package-path + bounded walk); worktree inference from source path
@@ -70,10 +111,11 @@ Gotcha: npm prints a banner on stdout — when parsing CLI JSON output programma
 
 ## Pending — pick up here
 
-- [ ] **Multi-instance nested types** (diagnostic exists; attribution not implemented). Design: in `tasks.ts` nested scanning, track receiver *variables* per `new Type(...)` (the adapter's `newRe` already captures the variable name); build a var→pathPrefix map by matching which setter on the PARENT receives which variable (`parent.setX(var)` / builder arg); attribute each nested write site by its receiver variable instead of by type. Test: two `Party` instances (borrower/coBorrower) with different values.
+- [ ] **Tool-loop trace persistence**: `runAgentLoop` currently logs the investigation trace to stderr; persist it into the field-cache entry (add optional `toolTrace` to the cache entry type) so agentic runs are replayable evidence.
+- [ ] **Multi-instance edge**: attribution routes by `setX(var)` and `setX(helper(...))`; add builder-chain routing (`.x(var)`) and reassigned-variable tracking if a real mapper hits them (diagnostics will name it).
+
 - [ ] **Python adapter**. Contract is `analyzer/types.ts::LanguageAdapter` — implement `analyzer/adapters/python.ts` with tree-sitter (`web-tree-sitter` + `tree-sitter-python` WASM; both installable from npm, satisfies network policy). Write patterns: `obj.attr = expr`, dataclass/pydantic ctor kwargs, `dict["k"] = v`, `setattr`. Register in `scanWriteSites.ADAPTERS`; add `language:` per mapper in the registry (default java). Consider migrating the Java adapter to tree-sitter-java at the same time (error-tolerant parsing; current `java-parser` throws on constructs it doesn't know — that failure is caught and surfaced in diagnostics, but tolerance is better).
 - [ ] **Real defect tracker**. Integration point is exactly `translator/judge/judge.ts::logDefect` + `mockDefectId`. Replace with a provider interface (Jira/ADO webhook via env). NOTE: this adds a network call — extend the policy test allowlist deliberately and document it.
-- [ ] **Native tool-use loop (online)** for fields the escalation pass can't settle: give the model `search_source`/`read_lines` tools via raw HTTP tool-calling (Anthropic `tools` vs OpenAI `functions` schemas differ — implement per style inside `provider.ts`, keep the ModelProvider interface unchanged). Log every tool call into the cache entry for replay.
 - [ ] **Offline parity for bulk-label**: current bulk button stops in offline mode; make it export ONE multi-field job (exportAgentJob already accepts selectors) instead.
 - [ ] **Viewer polish**: refresh availability dots after bulk without reload; "re-label" button per field (`noCache: true`); show `checklistSource`/`worktreeUsed` in the meta bar.
 - [ ] **Registry `language` field** + per-mapper `subMappers` hint (closure walker seed) when multi-file mapper families arrive.

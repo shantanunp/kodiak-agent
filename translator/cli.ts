@@ -407,6 +407,8 @@ async function main(): Promise<void> {
           schemaContext: schemaContextForLabeler(mapperId),
           sourceJava,
           noCache: Boolean(values["no-cache"]),
+          modelConfig: config,
+          schemaContextText: schemaContextForLabeler(mapperId),
         });
       } catch (err) {
         await offlineAgentFallback(

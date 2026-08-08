@@ -95,3 +95,68 @@ test("retry: 429 then success", async () => {
   assert.equal(call, 2);
   assert.equal(res.reason, "ok");
 });
+
+test("tool loop (claude style): tool_use round trip then final text", async () => {
+  const { runToolLoop } = await import("./provider.js");
+  let call = 0;
+  const bodies: any[] = [];
+  globalThis.fetch = (async (_url: any, init: any) => {
+    call++;
+    bodies.push(JSON.parse(init.body));
+    if (call === 1) {
+      return { ok: true, status: 200, json: async () => ({
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "t1", name: "search_source", input: { query: "setCode" } }],
+      }) } as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: '{"recognized":true}' }],
+    }) } as Response;
+  }) as typeof fetch;
+
+  const executed: any[] = [];
+  const out = await runToolLoop({
+    config: config({ apiStyle: "claude", baseUrl: "https://api.anthropic.com/v1" }),
+    systemPrompt: "sys", userPrompt: "usr",
+    tools: [{ name: "search_source", description: "d", schema: { type: "object" } }],
+    executeTool: (name, input) => { executed.push([name, input]); return "42: x.setCode(y);"; },
+  });
+
+  assert.equal(call, 2);
+  assert.deepEqual(executed, [["search_source", { query: "setCode" }]]);
+  assert.equal(out.text, '{"recognized":true}');
+  assert.equal(out.trace.length, 1);
+  const second = bodies[1];
+  assert.equal(second.messages[2].content[0].type, "tool_result", "tool result sent back");
+});
+
+test("tool loop (openai style): tool_calls round trip then final text", async () => {
+  const { runToolLoop } = await import("./provider.js");
+  let call = 0;
+  globalThis.fetch = (async (_url: any, init: any) => {
+    call++;
+    const body = JSON.parse(init.body);
+    if (call === 1) {
+      assert.equal(body.tools[0].type, "function");
+      return { ok: true, status: 200, json: async () => ({
+        choices: [{ message: { tool_calls: [
+          { id: "c1", function: { name: "read_lines", arguments: '{"start":1,"end":3}' } },
+        ] } }],
+      }) } as Response;
+    }
+    assert.equal(body.messages[3].role, "tool");
+    return { ok: true, status: 200, json: async () => ({
+      choices: [{ message: { content: '{"recognized":false,"reason":"never written"}' } }],
+    }) } as Response;
+  }) as typeof fetch;
+
+  const out = await runToolLoop({
+    config: config({ apiStyle: "openai" }),
+    systemPrompt: "sys", userPrompt: "usr",
+    tools: [{ name: "read_lines", description: "d", schema: { type: "object" } }],
+    executeTool: () => "1: a\n2: b\n3: c",
+  });
+  assert.equal(out.trace[0]!.tool, "read_lines");
+  assert.ok(out.text.includes("never written"));
+});

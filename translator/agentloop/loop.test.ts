@@ -381,3 +381,64 @@ class Out { private String code; public void setCode(String v){this.code=v;} }`)
   assert.ok(code.sliceText.includes("v == null"), "superclass helper body inlined");
   rmSync(wt, { recursive: true, force: true });
 });
+
+test("multi-instance: same nested type feeding two parent fields attributed by receiver/helper", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-multi-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "Record.java"), `package com.acme.dto;
+public class Record {
+  private com.acme.dto.Contact primary;
+  private com.acme.dto.Contact secondary;
+  public void setPrimary(com.acme.dto.Contact v) { this.primary = v; }
+  public void setSecondary(com.acme.dto.Contact v) { this.secondary = v; }
+}`);
+  writeFileSync(join(dtoDir, "Contact.java"), `package com.acme.dto;
+public class Contact {
+  private String email;
+  public void setEmail(String v) { this.email = v; }
+}`);
+  const mapperFile = join(mapDir, "RMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.Record;
+import com.acme.dto.Contact;
+public class RMapper {
+  public Record map(In in) {
+    Record r = new Record();
+    Contact c1 = new Contact();
+    c1.setEmail(in.getMainEmail().toLowerCase());
+    r.setPrimary(c1);
+    r.setSecondary(buildBackup(in));
+    return r;
+  }
+  private Contact buildBackup(In in) {
+    Contact c2 = new Contact();
+    c2.setEmail(in.getAltEmail().trim());
+    return c2;
+  }
+}`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "multi", sourceFile: "src/main/java/com/acme/mapper/RMapper.java",
+      class: "com.acme.mapper.RMapper", entryMethod: "map",
+      sourceType: "In", targetType: "com.acme.dto.Record",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+
+  const names = tasks.tasks.map((t) => t.field).sort();
+  assert.deepEqual(names, ["primary.email", "secondary.email"],
+    "same type expands under BOTH parent prefixes");
+  const primary = tasks.tasks.find((t) => t.field === "primary.email")!;
+  const secondary = tasks.tasks.find((t) => t.field === "secondary.email")!;
+  assert.ok(primary.sliceText.includes("toLowerCase") && !primary.sliceText.includes("trim()"),
+    "var-routed write (c1 -> setPrimary) attributed to primary only");
+  assert.ok(secondary.sliceText.includes("trim()") && !secondary.sliceText.includes("toLowerCase"),
+    "helper-routed write (buildBackup -> setSecondary) attributed to secondary only");
+  rmSync(wt, { recursive: true, force: true });
+});
