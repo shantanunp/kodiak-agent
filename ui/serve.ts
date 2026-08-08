@@ -629,23 +629,57 @@ createServer(async (req, res) => {
     }
   }
 
-  // Mapper of the most recently written view, so the viewer can open it by default
+  // Default mapper for /pipeline-viewer with no ?mapper= :
+  //   1) most recently written .view.json
+  //   2) else a registry mapper whose sourceFile exists under MAPPER_WORKTREE
+  //   3) else first registry entry
   if (pathname === "/api/views/latest" && req.method === "GET") {
-    const latest = existsSync(VIEW_DATA_DIR)
+    const views = existsSync(VIEW_DATA_DIR)
       ? readdirSync(VIEW_DATA_DIR)
           .filter((name) => name.endsWith(VIEW_SUFFIX))
           .map((name) => ({
             mapperId: name.slice(0, -VIEW_SUFFIX.length),
             mtimeMs: statSync(join(VIEW_DATA_DIR, name)).mtimeMs,
           }))
-          .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
-      : undefined;
+          .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      : [];
+    const latest = views[0];
+    let registryIds: string[] = [];
+    let worktreePick: string | undefined;
+    try {
+      const registry = loadRegistry(paths.registry);
+      registryIds = registry.mappers.map((m) => m.id);
+      const wt = getEnvOptional("MAPPER_WORKTREE");
+      if (wt) {
+        worktreePick = registry.mappers.find((m) =>
+          existsSync(join(wt, m.sourceFile)),
+        )?.id;
+      }
+    } catch {
+      registryIds = [];
+    }
+    const mapperId =
+      latest?.mapperId ?? worktreePick ?? registryIds[0] ?? null;
+    const source = latest
+      ? "view"
+      : worktreePick && mapperId === worktreePick
+        ? "worktree"
+        : mapperId
+          ? "registry"
+          : null;
 
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
     });
-    res.end(JSON.stringify({ mapperId: latest?.mapperId ?? null }));
+    res.end(
+      JSON.stringify({
+        mapperId,
+        source,
+        views: views.map((v) => v.mapperId),
+        registry: registryIds,
+      }),
+    );
     return;
   }
 

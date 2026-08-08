@@ -101,7 +101,7 @@
 <div class="app">
   <header>
     <div class="brand"><div class="brand-mark"><span></span></div><h1>Pipeline Viewer</h1></div>
-    <p class="tagline">POC: <span class="mono">npm run label --fields …</span> → view field → Build with AI edits only that field’s helpers</p>
+    <p class="tagline">Pick a target field on the left — its pipeline loads on demand (verified → cache → model).</p>
   </header>
   <div class="meta-bar" id="metaBar"></div>
 
@@ -110,7 +110,7 @@
     <input id="aiInput" type="text" placeholder="e.g. strip punctuation in this field's transform helper" />
     <button type="button" id="aiBtn">Build with AI</button>
   </div>
-  <div class="ai-status" id="aiStatus">Edits only the currently shown field’s mapping functions in MAPPER_WORKTREE, then re-labels that field.</div>
+  <div class="ai-status" id="aiStatus">Edits only the currently selected field’s mapping functions in MAPPER_WORKTREE, then re-labels that field.</div>
 
   <div class="legend">
     <span><span class="dot" style="background:var(--source)"></span>Read</span>
@@ -119,7 +119,17 @@
     <span><span class="dot" style="background:var(--target)"></span>Write / Constant</span>
     <span><span class="dot" style="background:var(--raw)"></span>Raw / unclassified</span>
   </div>
-  <div class="canvas" id="canvas"><p class="error">Loading…</p></div>
+  <div class="layout" id="layout">
+    <aside class="fieldlist" id="fieldlist">
+      <h2>Target fields</h2>
+      <div id="flBulk" style="margin:0 4px 8px"></div>
+      <div id="fieldItems"><p style="font-size:12px;color:var(--ink-faint);padding:6px">Loading checklist…</p></div>
+      <div id="flTriage"></div>
+      <div id="flDiag"></div>
+      <div class="fl-legend">Badge: analyzer state.&nbsp; Dot: label — <span style="color:var(--source)">verified</span> · <span style="color:var(--op)">corrected</span> · <span style="color:var(--target)">cached</span> · gray = labeled on click.</div>
+    </aside>
+    <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
+  </div>
 </div>
 <script>
 const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W', constant:'C', raw:'?' };
@@ -133,6 +143,10 @@ let activeFieldIndex = 0;
 let aiGenerated = false;
 let lastChangeSummary = '';
 let lastChangedFiles = [];
+let checklist = null;
+let activeField = null;
+/** Full dotted target path → viewSteps. Shown only after a LHS click. */
+const fieldPipelines = {};
 
 function badge(step) {
   if (step.kind === 'raw') return '<span class="badge badge-raw">needs review</span>';
@@ -211,7 +225,12 @@ function fieldLeaf(path) {
   return parts[parts.length - 1] || path;
 }
 
+function pipelineKey(field) {
+  return String(field || '').toLowerCase();
+}
+
 function currentFocusField() {
+  if (activeField) return activeField;
   const fields = viewData?.fields;
   if (Array.isArray(fields) && fields.length) {
     const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
@@ -221,15 +240,18 @@ function currentFocusField() {
 }
 
 function currentPipelineHint() {
-  const fields = viewData?.fields;
-  let steps = viewData?.steps || [];
-  if (Array.isArray(fields) && fields.length) {
-    const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
-    steps = fields[idx]?.steps || [];
-  }
-  const reason = steps.find((s) => s.labelReason)?.labelReason || '';
-  const summary = summarize(steps);
   const target = currentFocusField();
+  const steps = fieldPipelines[pipelineKey(target)]
+    || (() => {
+      const fields = viewData?.fields;
+      if (Array.isArray(fields) && fields.length) {
+        const idx = Math.min(Math.max(activeFieldIndex || 0, 0), fields.length - 1);
+        return fields[idx]?.steps || [];
+      }
+      return viewData?.steps || [];
+    })();
+  const reason = (steps || []).find((s) => s.labelReason)?.labelReason || '';
+  const summary = steps?.length ? summarize(steps) : '';
   return [`targetField=${target}`, summary, reason].filter(Boolean).join('\n');
 }
 
@@ -308,19 +330,45 @@ function indexForFieldsParam(data, fieldsParam) {
   return byLeaf >= 0 ? byLeaf : 0;
 }
 
-async function latestMapper(params) {
+let availableMappers = [];
+
+async function latestMapper(_params) {
   try {
     const res = await fetch(`/api/views/latest?t=${Date.now()}`);
     if (!res.ok) return '';
-    const { mapperId } = await res.json();
-    if (!mapperId) return '';
-    // Pin it to the URL so reload and Build with AI stay on the same mapper
-    params.set('mapper', mapperId);
-    history.replaceState(null, '', `${location.pathname}?${params}`);
-    return mapperId;
+    const body = await res.json();
+    availableMappers = Array.isArray(body.registry) && body.registry.length
+      ? body.registry
+      : (Array.isArray(body.views) ? body.views : []);
+    // Keep the URL clean (/pipeline-viewer) — mapper is session state, not required in the query.
+    return body.mapperId || '';
   } catch {
     return '';
   }
+}
+
+function renderMapperPicker() {
+  const meta = document.getElementById('metaBar');
+  if (!meta || availableMappers.length <= 1) return;
+  if (document.getElementById('mapperPick')) return;
+  const sel = document.createElement('select');
+  sel.id = 'mapperPick';
+  sel.className = 'pill';
+  sel.style.cssText = 'font-family:var(--font-mono);font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--panel)';
+  for (const id of availableMappers) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = id;
+    if (id === currentMapper) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    activeField = null;
+    for (const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
+    viewData = null;
+    load(sel.value).then(loadChecklist);
+  });
+  meta.prepend(sel);
 }
 
 function hint(html) {
@@ -328,9 +376,17 @@ function hint(html) {
     `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">${html}</p>`;
 }
 
-async function load() {
+async function load(forcedMapper) {
   const params = new URLSearchParams(location.search);
-  currentMapper = params.get('mapper') || await latestMapper(params);
+  const remembered = (() => { try { return localStorage.getItem('kodiak.mapper') || ''; } catch { return ''; } })();
+  currentMapper = forcedMapper || params.get('mapper') || remembered || await latestMapper(params);
+  // Ensure registry list is loaded even when mapper came from URL / localStorage.
+  if (!availableMappers.length) await latestMapper(params);
+  if (currentMapper && !availableMappers.includes(currentMapper) && availableMappers.length) {
+    // Stale memory / unknown id — fall back to server default.
+    currentMapper = availableMappers.includes(remembered) ? remembered : (await latestMapper(params));
+  }
+  try { if (currentMapper) localStorage.setItem('kodiak.mapper', currentMapper); } catch { /* ignore */ }
   const fieldsParam = params.get('fields');
   // Pre-fill optional re-label filter for Build with AI (after "| fields: …")
   if (fieldsParam && !document.getElementById('aiInput').value.trim()) {
@@ -340,21 +396,45 @@ async function load() {
 
   if (!currentMapper) {
     document.getElementById('metaBar').innerHTML = '';
-    hint(`No pipeline view yet. Run <span class="mono">npm run label -- --mapper &lt;mapper-id&gt; --fields …</span> first.`);
+    document.getElementById('fieldItems').innerHTML =
+      `<p style="font-size:12px;color:var(--ink-faint);padding:6px">No mappers in registry and no .view.json under data/.</p>`;
+    hint(`Add a mapper to <span class="mono">registry/mapping-registry.yaml</span> or run <span class="mono">npm run label</span>.`);
     return;
   }
 
+  document.getElementById('metaBar').innerHTML = [
+    availableMappers.length <= 1 ? `<span class="pill">${esc(currentMapper)}</span>` : '',
+    `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(currentMapper)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
+  ].filter(Boolean).join('');
+  renderMapperPicker();
+  hint('Select a target field on the left to load its pipeline.');
+
+  // Warm the per-field cache from any prior full view — never paint the whole
+  // dump on the canvas. Pipelines still only appear after a LHS click.
   try {
     const viewRes = await fetch(`/data/${currentMapper}.view.json?t=${Date.now()}`);
-    if (!viewRes.ok) {
-      document.getElementById('metaBar').innerHTML = `<span class="pill">${esc(currentMapper)}</span>`;
-      hint(`No pipeline view yet for <strong>${esc(currentMapper)}</strong>. Run <span class="mono">npm run label -- --mapper ${esc(currentMapper)} --fields …</span> first.`);
-      return;
+    if (viewRes.ok) {
+      const data = await viewRes.json();
+      viewData = data;
+      if (data.className || data.labeledAt || data.labelModel) {
+        document.getElementById('metaBar').innerHTML = [
+          availableMappers.length <= 1 ? `<span class="pill">${esc(data.mapperId || currentMapper)}</span>` : '',
+          data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
+          data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
+          data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
+          `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(currentMapper)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
+        ].filter(Boolean).join('');
+        renderMapperPicker();
+      }
+      if (Array.isArray(data.fields)) {
+        for (const f of data.fields) {
+          const key = pipelineKey(f.targetField);
+          if (key) fieldPipelines[key] = f.steps || [];
+        }
+      }
     }
-    const data = await viewRes.json();
-    render(data, indexForFieldsParam(data, fieldsParam));
-  } catch (e) {
-    document.getElementById('canvas').innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  } catch {
+    // optional warm cache — checklist path still works
   }
 }
 
@@ -417,7 +497,20 @@ async function buildWithAi() {
     statusEl.innerHTML = parts.join(' · ') || 'Done.';
 
     if (data.view && (data.view.steps?.length || data.view.fields?.length)) {
-      render(data.view, indexForFieldsParam(data.view, focusField));
+      viewData = data.view;
+      const fields = Array.isArray(data.view.fields) ? data.view.fields : null;
+      if (fields?.length) {
+        for (const f of fields) {
+          const key = pipelineKey(f.targetField);
+          if (key) fieldPipelines[key] = f.steps || [];
+        }
+        const idx = indexForFieldsParam(data.view, focusField);
+        const chosen = fields[idx]?.targetField || focusField;
+        renderFieldSteps(chosen, fieldPipelines[pipelineKey(chosen)] || [], 'Re-labeled after Build with AI.');
+      } else if (data.view.steps?.length) {
+        fieldPipelines[pipelineKey(focusField)] = data.view.steps;
+        renderFieldSteps(focusField, data.view.steps, 'Re-labeled after Build with AI.');
+      }
     } else {
       document.getElementById('canvas').innerHTML =
         `<div class="ai-banner"><span>&#10022;</span><span><b>Files updated for ${esc(focusField)}.</b>
@@ -439,29 +532,8 @@ document.getElementById('aiInput').addEventListener('keydown', (e) => {
 
 
 function ensureFieldPanel(){
-  let el = document.getElementById('fieldlist');
-  if(el) return el;
-  const canvas = document.getElementById('canvas');
-  const layout = document.createElement('div');
-  layout.className = 'layout';
-  canvas.parentNode.insertBefore(layout, canvas);
-  const aside = document.createElement('aside');
-  aside.className = 'fieldlist';
-  aside.id = 'fieldlist';
-  aside.innerHTML = `<h2>Target fields</h2>
-    <div id="flBulk" style="margin:0 4px 8px"></div>
-    <div id="fieldItems"></div>
-    <div id="flTriage"></div>
-    <div id="flDiag"></div>
-    <div class="fl-legend">Badge: analyzer state.&nbsp; Dot: label — <span style="color:var(--source)">verified</span> · <span style="color:var(--op)">corrected</span> · <span style="color:var(--target)">cached</span> · gray = labeled on click.</div>`;
-  layout.appendChild(aside);
-  layout.appendChild(canvas);
-  return aside;
+  return document.getElementById('fieldlist');
 }
-
-let checklist = null;
-let activeField = null;
-const fieldPipelines = {};   // field -> viewSteps (loaded on demand)
 
 function stateBadge(st){return `<span class="state-b state-${st}">${st.toUpperCase()}</span>`;}
 
@@ -475,22 +547,29 @@ async function loadChecklist(){
     if(Array.isArray(body.diagnostics) && body.diagnostics.length){
       console.warn('checklist diagnostics:', body.diagnostics);
     }
-    // Seed pipelines already present in the last full view, keyed by leaf.
-    if(Array.isArray(viewData?.fields)){
-      for(const f of viewData.fields){
-        fieldPipelines[fieldLeaf(f.targetField).toLowerCase()] = f.steps || [];
-      }
+    if(body.checklistSource || body.worktreeUsed){
+      const meta = document.getElementById('metaBar');
+      const extras = [
+        body.checklistSource ? `<span class="pill">checklist: ${esc(body.checklistSource)}</span>` : '',
+        typeof body.declaredFields === 'number' ? `<span class="pill">${body.declaredFields} fields</span>` : '',
+      ].filter(Boolean).join('');
+      if(extras) meta.insertAdjacentHTML('beforeend', extras);
     }
     renderFieldList();
+    // Deep-link: ?fields=message.dataVersionIdentifier opens that field only.
+    const want = new URLSearchParams(location.search).get('fields')?.split(',')[0]?.trim();
+    if(want && checklist.fields.some(f => f.field === want || f.field.endsWith('.'+want) || fieldLeaf(f.field)===want)){
+      const match = checklist.fields.find(f => f.field === want)
+        || checklist.fields.find(f => f.field.endsWith('.'+want) || fieldLeaf(f.field)===want);
+      if(match) openField(match.field);
+    }
   }catch(e){ showChecklistError(e.message); }
 }
 
 function showChecklistError(msg){
-  const el = ensureFieldPanel();
-  el.style.display = '';
   document.getElementById('fieldItems').innerHTML =
     `<div style="font-size:12px;color:var(--cond);line-height:1.5;padding:6px">Checklist unavailable: ${esc(msg)}<br><br>
-     Set <b>MAPPER_WORKTREE</b> in .env (path to your mapper checkout) and restart <span style="font-family:var(--font-mono)">npm run ui:serve</span>.</div>`;
+     Point the UI at a mapper checkout (worktree is inferred from the registry source path when possible) and restart <span style="font-family:var(--font-mono)">npm run ui:serve</span>.</div>`;
 }
 
 function renderFieldList(){
@@ -568,9 +647,9 @@ function renderFieldSteps(field, steps, sourceNote){
 }
 
 async function openField(field){
-  const leaf = fieldLeaf(field).toLowerCase();
-  if(fieldPipelines[leaf]){
-    renderFieldSteps(field, fieldPipelines[leaf], null);
+  const key = pipelineKey(field);
+  if(fieldPipelines[key]){
+    renderFieldSteps(field, fieldPipelines[key], null);
     return;
   }
   renderFieldSteps(field, null, 'Labeling this field on demand…');
@@ -591,8 +670,8 @@ async function openField(field){
       renderFieldSteps(field, null, `Explicitly unmapped — ${data.note||'no write in the source'}.`);
       return;
     }
-    fieldPipelines[leaf] = data.viewSteps||[];
-    renderFieldSteps(field, fieldPipelines[leaf],
+    fieldPipelines[key] = data.viewSteps||[];
+    renderFieldSteps(field, fieldPipelines[key],
       `Labeled from ${data.resultSource}${data.unresolved?.length?` — unresolved: ${data.unresolved.join(', ')}`:''}`);
   }catch(e){
     renderFieldSteps(field, null, e.message);
@@ -615,7 +694,7 @@ async function bulkLabel(fields){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({mapperId:currentMapper, field})});
       const data = await res.json();
-      if(res.ok && data.viewSteps){ fieldPipelines[fieldLeaf(field).toLowerCase()] = data.viewSteps; done++; }
+      if(res.ok && data.viewSteps){ fieldPipelines[pipelineKey(field)] = data.viewSteps; done++; }
       else if(res.ok && data.outcome==='offline-exported'){ status.textContent = 'Offline mode — use the exported job flow instead.'; break; }
       else failed++;
     }catch{ failed++; }
@@ -655,7 +734,7 @@ function wireCorrectionBox(field, currentSteps){
         box.innerHTML = `<div class="verdict"><b>Offline mode — judge job exported.</b><br>
           <span style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11.5px">${esc((data.steps||[]).join('\n'))}</span></div>`;
       } else if(data.outcome==='corrected'){
-        fieldPipelines[fieldLeaf(field).toLowerCase()] = data.viewSteps||[];
+        fieldPipelines[pipelineKey(field)] = data.viewSteps||[];
         renderFieldSteps(field, data.viewSteps||[],
           'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');
         const vb = document.getElementById('verdictBox');

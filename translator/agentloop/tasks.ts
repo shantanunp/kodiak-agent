@@ -54,7 +54,8 @@ function norm(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 }
 
-const MAX_NEST_DEPTH = 3;
+/** Deep enough for typical nested DTO graphs (Message → Deal → Loan → …). */
+const MAX_NEST_DEPTH = 6;
 const SCALAR_TYPES = new Set([
   "string", "int", "integer", "long", "double", "float", "boolean", "char",
   "byte", "short", "bigdecimal", "biginteger", "localdate", "localdatetime",
@@ -86,6 +87,39 @@ export interface NestedTypeRef {
 }
 
 /**
+ * Resolve a nested/project type to a source file. Prefers a dedicated file via
+ * findTypeFile; falls back to the current file when the type is a static/inner
+ * class declared there (e.g. LpaMappedResponse.Message — no Message.java).
+ */
+function resolveNestedTypeSource(options: {
+  adapter: ReturnType<typeof adapterFor>;
+  worktree?: string;
+  typeName: string;
+  currentFile: string;
+  currentSource: string;
+  currentParsed: ReturnType<ReturnType<typeof adapterFor>["parse"]>;
+}): { file: string; source: string; via: "file" | "same-file" } | null {
+  const simple = simpleTypeName(options.typeName);
+  if (options.worktree) {
+    const found = findTypeFile(options.worktree, options.typeName);
+    if (found) {
+      return { file: found, source: readFileSync(found, "utf8"), via: "file" };
+    }
+  }
+  const declaredInFile =
+    options.currentParsed.classes.some((c) => c.name === simple) ||
+    options.adapter.targetFields(options.currentParsed, simple).length > 0;
+  if (declaredInFile) {
+    return {
+      file: options.currentFile,
+      source: options.currentSource,
+      via: "same-file",
+    };
+  }
+  return null;
+}
+
+/**
  * Recursively flatten the target type: scalar fields become dotted checklist
  * paths ("message.dataVersionIdentifier"); each nested project type is also
  * returned so write sites against it can be scanned and path-prefixed.
@@ -113,54 +147,54 @@ function flattenTargetType(options: {
     // Collections: expand the ELEMENT type under "path[]." when it is a
     // resolvable project class; scalar-element collections stay a leaf.
     const elementType = collectionElementType(f.type);
-    if (elementType && depth < MAX_NEST_DEPTH && worktree && !isScalarType(elementType)) {
+    if (elementType && depth < MAX_NEST_DEPTH && !isScalarType(elementType)) {
       const elemSimple = simpleTypeName(elementType);
-      const elemFile = !visitedTypes.has(elemSimple)
-        ? findTypeFile(worktree, elementType)
-        : null;
       if (visitedTypes.has(elemSimple)) {
         diagnostics.push(`${dotted}: type "${elemSimple}" is an ancestor (cycle guard); kept as leaf`);
+        out.push({ ...f, name: dotted });
+        continue;
       }
-      if (!elemFile && !visitedTypes.has(elemSimple)) {
+      const resolved = resolveNestedTypeSource({
+        adapter,
+        worktree,
+        typeName: elementType,
+        currentFile: options.typeFilePath,
+        currentSource: options.typeSource,
+        currentParsed: parsed,
+      });
+      if (!resolved) {
         diagnostics.push(
-          `${dotted}: collection element type "${elementType}" — no .java file found under worktree; kept as leaf`,
+          `${dotted}: collection element type "${elementType}" — no .java file or same-file nested class; kept as leaf`,
         );
+        out.push({ ...f, name: dotted });
+        continue;
       }
-      if (elemFile) {
-        const listPrefix = `${dotted}[]`;
-        nested.push({ pathPrefix: listPrefix, typeName: elemSimple });
-        try {
-          out.push(
-            ...flattenTargetType({
-              adapter, worktree,
-              typeName: elemSimple,
-              typeSource: readFileSync(elemFile, "utf8"),
-              typeFilePath: elemFile,
-              prefix: listPrefix,
-              depth: depth + 1,
-              visitedTypes: new Set([...visitedTypes, elemSimple]),
-              nested, diagnostics,
-            }),
-          );
-          continue;
-        } catch (err) {
-          diagnostics.push(
-            `${dotted}: element type "${elemSimple}" found but parse failed (${(err as Error).message}); kept as leaf`,
-          );
-        }
+      const listPrefix = `${dotted}[]`;
+      nested.push({ pathPrefix: listPrefix, typeName: elemSimple });
+      try {
+        out.push(
+          ...flattenTargetType({
+            adapter, worktree,
+            typeName: elemSimple,
+            typeSource: resolved.source,
+            typeFilePath: resolved.file,
+            prefix: listPrefix,
+            depth: depth + 1,
+            visitedTypes: new Set([...visitedTypes, elemSimple]),
+            nested, diagnostics,
+          }),
+        );
+        continue;
+      } catch (err) {
+        diagnostics.push(
+          `${dotted}: element type "${elemSimple}" found but parse failed (${(err as Error).message}); kept as leaf`,
+        );
       }
       out.push({ ...f, name: dotted });
       continue;
     }
 
     if (isScalarType(f.type)) {
-      out.push({ ...f, name: dotted });
-      continue;
-    }
-    if (!worktree) {
-      diagnostics.push(
-        `${dotted}: type "${f.type}" not expanded — no worktree available (set MAPPER_WORKTREE or pass --worktree)`,
-      );
       out.push({ ...f, name: dotted });
       continue;
     }
@@ -175,10 +209,19 @@ function flattenTargetType(options: {
       out.push({ ...f, name: dotted });
       continue;
     }
-    const childFile = findTypeFile(worktree, f.type!);
-    if (!childFile) {
+    const resolved = resolveNestedTypeSource({
+      adapter,
+      worktree,
+      typeName: f.type!,
+      currentFile: options.typeFilePath,
+      currentSource: options.typeSource,
+      currentParsed: parsed,
+    });
+    if (!resolved) {
       diagnostics.push(
-        `${dotted}: type "${f.type}" — no .java file found under worktree; kept as leaf`,
+        worktree
+          ? `${dotted}: type "${f.type}" — no .java file or same-file nested class; kept as leaf`
+          : `${dotted}: type "${f.type}" not expanded — no worktree available (set MAPPER_WORKTREE or pass --worktree)`,
       );
       out.push({ ...f, name: dotted });
       continue;
@@ -189,8 +232,8 @@ function flattenTargetType(options: {
         ...flattenTargetType({
           adapter, worktree,
           typeName: childType,
-          typeSource: readFileSync(childFile, "utf8"),
-          typeFilePath: childFile,
+          typeSource: resolved.source,
+          typeFilePath: resolved.file,
           prefix: dotted,
           depth: depth + 1,
           visitedTypes: new Set([...visitedTypes, childType]),
@@ -199,7 +242,7 @@ function flattenTargetType(options: {
       );
     } catch (err) {
       diagnostics.push(
-        `${dotted}: type "${childType}" found at ${childFile} but parse failed (${(err as Error).message}); kept as leaf`,
+        `${dotted}: type "${childType}" (${resolved.via}) parse failed (${(err as Error).message}); kept as leaf`,
       );
       out.push({ ...f, name: dotted });
     }

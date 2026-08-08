@@ -220,6 +220,69 @@ public class EnvMapper {
   rmSync(wt, { recursive: true, force: true });
 });
 
+test("same-file nested classes flatten without a separate .java per type", async () => {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-inner-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  // Real-world shape: Message/Deal are static nested classes in one file — no Message.java.
+  writeFileSync(join(dtoDir, "LpaMappedResponse.java"), `package com.acme.dto;
+public class LpaMappedResponse {
+  private Message message;
+  public void setMessage(Message v) { this.message = v; }
+
+  public static class Message {
+    private String dataVersionIdentifier;
+    private Deal deal;
+    public void setDataVersionIdentifier(String v) { this.dataVersionIdentifier = v; }
+    public void setDeal(Deal v) { this.deal = v; }
+  }
+  public static class Deal {
+    private String loanId;
+    public void setLoanId(String v) { this.loanId = v; }
+  }
+}`);
+  const mapperFile = join(mapDir, "LpaMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.LpaMappedResponse;
+public class LpaMapper {
+  public LpaMappedResponse map(In in) {
+    LpaMappedResponse out = new LpaMappedResponse();
+    LpaMappedResponse.Message msg = new LpaMappedResponse.Message();
+    msg.setDataVersionIdentifier("6.1.00");
+    LpaMappedResponse.Deal deal = new LpaMappedResponse.Deal();
+    deal.setLoanId(in.getId());
+    msg.setDeal(deal);
+    out.setMessage(msg);
+    return out;
+  }
+}`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "inner", sourceFile: mapperFile, class: "com.acme.mapper.LpaMapper",
+      entryMethod: "map", sourceType: "com.acme.dto.In",
+      targetType: "com.acme.dto.LpaMappedResponse",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+
+  const names = tasks.tasks.map((t) => t.field).sort();
+  assert.deepEqual(
+    names,
+    ["message.dataVersionIdentifier", "message.deal.loanId"],
+    "same-file nested Message/Deal must flatten; bare 'message' must not remain a leaf",
+  );
+  assert.ok(
+    !tasks.diagnostics.some((d) => d.includes("no .java file")),
+    `should not fall back to leaf for nested classes, got: ${tasks.diagnostics.join("; ")}`,
+  );
+  rmSync(wt, { recursive: true, force: true });
+});
+
 test("collections: List<Element> flattened to path[].field, element writes attributed", async () => {
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const wt = mkdtempSync(join(tmpdir(), "kodiak-coll-"));
