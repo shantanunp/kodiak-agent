@@ -197,8 +197,12 @@ if (isDirectRun) {
         console.error(
           "\nCorrection saved to the verified store (registry/verified/) — commit it.",
         );
-      } else if (outcome.outcome === "rejected") {
-        console.error(`\nDefect ${outcome.defectId} created (mock) — see registry/defects.jsonl`);
+      } else if (outcome.outcome === "confirmed") {
+        console.error("\nPipeline looks correct — claim does not match the code. Nothing changed.");
+      } else if (outcome.outcome === "unverifiable") {
+        console.error(
+          `\nCould not verify — defect ${outcome.defectId} logged (see registry/defects.jsonl)`,
+        );
       } else {
         console.error("\nJudge agreed but cited no checkable evidence — nothing was saved.");
       }

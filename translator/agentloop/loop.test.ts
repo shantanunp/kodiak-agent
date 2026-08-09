@@ -220,6 +220,88 @@ public class EnvMapper {
   rmSync(wt, { recursive: true, force: true });
 });
 
+test("nested leaf collision: dotted checklist fields keep non-empty helper slices", async () => {
+  // Reproduces OrderRequestMapper: `new Outer.Inner()` registers receiver `mapped`,
+  // so a later `Customer mapped = …; mapped.setFirstName(…)` is also scanned as a
+  // top-level leaf. Nested expansion used to skip the path-prefixed site as a
+  // duplicate, leaving order…firstName mapped but sliceText empty (judge blind).
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-leaf-collide-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "Envelope.java"), `package com.acme.dto;
+public class Envelope {
+  private Customer customer;
+  private Address address;
+  public void setCustomer(Customer v) { this.customer = v; }
+  public void setAddress(Address v) { this.address = v; }
+  public static class Customer {
+    private String firstName;
+    private String lastName;
+    public void setFirstName(String v) { this.firstName = v; }
+    public void setLastName(String v) { this.lastName = v; }
+  }
+  public static class Address {
+    private String street;
+    public void setStreet(String v) { this.street = v; }
+  }
+}`);
+  const mapperFile = join(mapDir, "EnvMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.Envelope;
+import com.acme.dto.Envelope.Customer;
+import com.acme.dto.Envelope.Address;
+public class EnvMapper {
+  public Envelope map(In in) {
+    Envelope env = new Envelope();
+    env.setCustomer(buildCustomer(in));
+    env.setAddress(buildAddress(in));
+    return env;
+  }
+  private Customer buildCustomer(In in) {
+    Customer mapped = new Customer();
+    String[] parts = splitName(in.getDisplayName());
+    mapped.setFirstName(parts[0]);
+    mapped.setLastName(parts[1]);
+    return mapped;
+  }
+  private Address buildAddress(In in) {
+    // Same local name "mapped" + Outer.Inner ctor — collides with Customer receiver.
+    Address mapped = new Envelope.Address();
+    mapped.setStreet(in.getStreet());
+    return mapped;
+  }
+  private String[] splitName(String displayName) {
+    String trimmed = displayName.trim();
+    int space = trimmed.indexOf(' ');
+    return new String[] { trimmed.substring(0, space), trimmed.substring(space + 1).trim() };
+  }
+}`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "leaf-collide", sourceFile: mapperFile, class: "com.acme.mapper.EnvMapper",
+      entryMethod: "map", sourceType: "com.acme.dto.In", targetType: "com.acme.dto.Envelope",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+
+  const first = tasks.tasks.find((t) => t.field === "customer.firstName");
+  const last = tasks.tasks.find((t) => t.field === "customer.lastName");
+  assert.ok(first, `expected customer.firstName, got ${tasks.tasks.map((t) => t.field)}`);
+  assert.ok(last, "expected customer.lastName");
+  assert.equal(first!.state, "mapped");
+  assert.ok(first!.sliceText.length > 0, "firstName must have a non-empty slice for the judge");
+  assert.ok(first!.sliceText.includes("setFirstName"), "slice carries the write site");
+  assert.ok(first!.sliceText.includes("splitName"), "slice keeps helper closure after path upgrade");
+  assert.ok(last!.sliceText.includes("setLastName"));
+  assert.ok(last!.sliceText.includes(".trim()"), "lastName helper body visible in slice");
+  rmSync(wt, { recursive: true, force: true });
+});
+
 test("same-file nested classes flatten without a separate .java per type", async () => {
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const wt = mkdtempSync(join(tmpdir(), "kodiak-inner-"));

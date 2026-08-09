@@ -59,6 +59,39 @@ function norm(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 }
 
+/**
+ * findWriteSites treats receivers as file-global, so two methods that both use
+ * `mapped` (Customer vs Address) cross-contaminate when scanning each type.
+ * Keep a site only when its enclosing method actually declares that receiver
+ * as the requested type (or constructs it with new Type / new Outer.Type).
+ */
+export function writeSiteBelongsToType(
+  parsed: { methods: Array<{ name: string; bodyText: string; startLine: number; endLine: number }> },
+  site: WriteSite,
+  typeName: string,
+): boolean {
+  // Builder chains are already scoped to Type.builder() by findWriteSites.
+  if (site.via === "builder" || /\.builder\s*\(\s*\)$/.test(site.receiver)) {
+    return true;
+  }
+  const simple = simpleTypeName(typeName);
+  const enclosing =
+    parsed.methods.find(
+      (m) =>
+        m.name === site.inMethod && site.line >= m.startLine && site.line <= m.endLine,
+    ) ?? parsed.methods.find((m) => m.name === site.inMethod);
+  const body = enclosing?.bodyText ?? "";
+  if (!body) return false;
+  const recv = site.receiver.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Bare Type, Outer.Type, or deeper FQCN ending in Type.
+  const typeAlt = `(?:[\\w.]+\\.)?${simple}`;
+  const decl = new RegExp(`\\b${typeAlt}\\b\\s+${recv}\\b`);
+  const constructed = new RegExp(`\\b${recv}\\s*=\\s*new\\s+${typeAlt}\\b`);
+  // Contact c1 = Contact.builder()… — receiver is c1, constructed via builder.
+  const built = new RegExp(`\\b${recv}\\s*=\\s*${typeAlt}\\s*\\.\\s*builder\\s*\\(`);
+  return decl.test(body) || constructed.test(body) || built.test(body);
+}
+
 /** Deep enough for typical nested DTO graphs (Message → Deal → Loan → …). */
 const MAX_NEST_DEPTH = 6;
 const SCALAR_TYPES = new Set([
@@ -328,7 +361,9 @@ export function buildLabelTasks(options: {
     byType.get(ref.typeName)!.push(ref);
   }
   for (const [typeName, refs] of byType) {
-    const sites = adapter.findWriteSites(parsed, options.sourceJava, typeName);
+    const sites = adapter
+      .findWriteSites(parsed, options.sourceJava, typeName)
+      .filter((site) => writeSiteBelongsToType(parsed, site, typeName));
     if (sites.length === 0) continue;
 
     if (refs.length === 1) {
@@ -358,10 +393,26 @@ export function buildLabelTasks(options: {
     }
   }
   if (extraSites.length > 0) {
-    const known = new Set(slices.map((x) => `${x.line}:${norm(x.targetField)}`));
+    // Nested expansion produces path-prefixed sites (order.details.customer.firstName).
+    // The top-level scan may already have a same-line LEAF site (firstName) — e.g. when
+    // `new Outer.Inner()` registers a receiver name that collides with a nested var.
+    // Skipping the prefixed site left checklist fields "mapped" (auditGate leaf-matches)
+    // but with empty task.sliceText (exact-path lookup). Upgrade the leaf in place and
+    // keep its rich helper-closure slice text. Never let a different dotted path steal
+    // an already-attributed nested site.
     for (const site of extraSites) {
-      const key = `${site.line}:${norm(site.targetField.split(".").pop()!)}`;
-      if (known.has(key)) continue;
+      const leaf = norm(site.targetField.split(".").pop()!);
+      const existingIdx = slices.findIndex(
+        (x) => x.line === site.line && norm(x.targetField.split(".").pop()!) === leaf,
+      );
+      if (existingIdx >= 0) {
+        const existing = slices[existingIdx]!;
+        if (norm(existing.targetField) === norm(site.targetField)) continue;
+        if (!existing.targetField.includes(".")) {
+          slices[existingIdx] = { ...existing, targetField: site.targetField };
+        }
+        continue;
+      }
       const helperClosure: Array<{ name: string; text: string }> = [];
       slices.push({
         ...site,
@@ -428,8 +479,15 @@ export function buildLabelTasks(options: {
     byField.get(key)!.push(s);
   }
 
+  /** Same leaf fallback auditGate uses when matching writes to dotted checklist paths. */
+  function slicesFor(fieldName: string): WriteSlice[] {
+    const full = byField.get(norm(fieldName));
+    if (full?.length) return full;
+    return byField.get(norm(fieldName.split(".").pop()!)) ?? [];
+  }
+
   const tasks: FieldTask[] = report.checklist.map((entry) => {
-    const fieldSlices = byField.get(norm(entry.field)) ?? [];
+    const fieldSlices = slicesFor(entry.field);
     return {
       field: entry.field,
       state: entry.state,

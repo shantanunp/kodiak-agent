@@ -1150,9 +1150,12 @@ function wireCorrectionBox(field, currentSteps){
           'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');
         const vb = document.getElementById('verdictBox');
         if(vb) vb.innerHTML = `<div class="verdict ok">Evidence: ${esc(data.verdict.evidence)}</div>`;
-      } else if(data.outcome==='rejected'){
-        box.innerHTML = `<div class="verdict defect"><b>Defect ${esc(data.defectId)} created for this field.</b><br>
-          Judge evidence: ${esc(data.verdict.evidence||data.verdict.reason||'code does not support the claim')}</div>`;
+      } else if(data.outcome==='confirmed'){
+        box.innerHTML = `<div class="verdict ok"><b>Pipeline looks correct.</b> Your claim does not match the code — nothing changed.<br>
+          ${esc(data.verdict.evidence||data.verdict.reason||'')}</div>`;
+      } else if(data.outcome==='unverifiable' || data.outcome==='rejected'){
+        box.innerHTML = `<div class="verdict defect"><b>Could not verify</b>${data.defectId?` — defect ${esc(data.defectId)} logged`:''}.<br>
+          ${esc(data.verdict?.evidence||data.verdict?.reason||'No usable code evidence for this field.')}</div>`;
       } else {
         box.innerHTML = `<div class="verdict defect">Judge agreed but cited no checkable evidence — nothing was saved. Try rephrasing.</div>`;
       }

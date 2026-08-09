@@ -75,26 +75,59 @@ test("agreement WITHOUT checkable evidence never reaches the store", async () =>
   assert.equal(getVerified("judge-test", "fp-2"), null);
 });
 
-test("disagreement -> mock defect id + defects.jsonl record, store untouched", async () => {
+test("disagreement with checkable evidence -> confirmed (pipeline looks correct), no defect", async () => {
+  const before = existsSync(defectsFile())
+    ? readFileSync(defectsFile(), "utf8")
+    : "";
   const out = await judgeSuggestion({
     provider: fakeJudgeProvider({
       agree: false,
       evidence: 'line 62: only "trimValue(raw)" and split exist; no uppercase anywhere',
-      reason: "code contradicts the claim",
+      reason: "current pipeline already matches the code",
     }),
     mapperId: "judge-test", fingerprint: "fp-3",
     field: "recipientFirst", sliceText: SLICE, sourceJava: SOURCE,
     currentPipeline: [], userClaim: "it should uppercase the name",
   });
 
-  assert.equal(out.outcome, "rejected");
+  assert.equal(out.outcome, "confirmed");
+  assert.equal(getVerified("judge-test", "fp-3"), null, "store untouched");
+  const after = existsSync(defectsFile()) ? readFileSync(defectsFile(), "utf8") : "";
+  assert.equal(after, before, "no defect logged when claim is simply wrong");
+});
+
+test("agree=true without corrected pipeline + cited evidence -> confirmed (pipeline stands)", async () => {
+  // Models sometimes set agree=true meaning "current mapping is right" and omit pipeline.
+  const out = await judgeSuggestion({
+    provider: fakeJudgeProvider({
+      agree: true,
+      evidence: 'String trimmed = displayName.trim(); then substring(0, space) — trim is before take, not after',
+      reason: "pipeline already correct",
+    }),
+    mapperId: "judge-test", fingerprint: "fp-agree-no-pipe",
+    field: "firstName",
+    sliceText: SLICE + "\nString trimmed = displayName.trim();\ntrimmed.substring(0, space)",
+    sourceJava: SOURCE,
+    currentPipeline: [], userClaim: "there should be a trim after take first",
+  });
+  assert.equal(out.outcome, "confirmed");
+  assert.equal(getVerified("judge-test", "fp-agree-no-pipe"), null);
+});
+
+test("empty slice -> unverifiable + defect (cannot check the claim)", async () => {
+  const out = await judgeSuggestion({
+    provider: fakeJudgeProvider({ agree: false, evidence: "should not be called" }),
+    mapperId: "judge-test", fingerprint: "fp-empty",
+    field: "recipientFirst", sliceText: "", sourceJava: SOURCE,
+    currentPipeline: [], userClaim: "there should be a trim after take first",
+  });
+
+  assert.equal(out.outcome, "unverifiable");
   assert.match((out as { defectId: string }).defectId, /^KOD-\d{4}$/);
   assert.ok(existsSync(defectsFile()));
   const rec = JSON.parse(readFileSync(defectsFile(), "utf8").trim().split("\n").pop()!);
-  assert.equal(rec.userClaim, "it should uppercase the name");
-  assert.equal(rec.defectId, (out as { defectId: string }).defectId);
-  // deterministic id for the same claim
-  assert.equal(mockDefectId("judge-test:recipientFirst:it should uppercase the name"), rec.defectId);
+  assert.equal(rec.userClaim, "there should be a trim after take first");
+  assert.equal(mockDefectId("judge-test:recipientFirst:there should be a trim after take first"), rec.defectId);
 });
 
 test("offline judge round trip: export -> agent verdict -> import applies with same rigor", async () => {
