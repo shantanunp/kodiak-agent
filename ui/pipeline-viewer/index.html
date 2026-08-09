@@ -1110,14 +1110,30 @@ function renderFieldSteps(field, steps, sourceNote, provenance){
   if(re) re.addEventListener('click', () => openField(field, true));
 }
 
+function fieldRow(field){
+  return checklist?.fields?.find(x => x.field === field || pipelineKey(x.field) === pipelineKey(field));
+}
+
+/** Verified-store answers must win over the warm .view.json cache after refresh. */
+function shouldPreferStore(field){
+  const row = fieldRow(field);
+  const avail = row?.labelAvailability;
+  const prov = row?.provenance;
+  return avail === 'corrected' || avail === 'verified' || avail === 'pending'
+    || prov === 'corrected' || prov === 'verified' || prov === 'pending-review';
+}
+
 async function openField(field, noCache){
   const key = pipelineKey(field);
-  if(!noCache && fieldPipelines[key]){
-    const f = checklist?.fields?.find(x => x.field === field);
-    renderFieldSteps(field, fieldPipelines[key], null, f?.provenance);
+  const row = fieldRow(field);
+  // Stale .view.json is warmed into fieldPipelines on page load. If the checklist
+  // says this field is in the verified store, always hit /api/label-field so the
+  // corrected constant (e.g. "Shopify") is not shadowed by the old view dump.
+  if(!noCache && fieldPipelines[key] && !shouldPreferStore(field)){
+    renderFieldSteps(field, fieldPipelines[key], null, row?.provenance);
     return;
   }
-  if(noCache) delete fieldPipelines[key];
+  if(noCache || shouldPreferStore(field)) delete fieldPipelines[key];
   renderFieldSteps(field, null, 'Labeling this field on demand…');
   try{
     const res = await fetch('/api/label-field',{method:'POST',
@@ -1138,10 +1154,10 @@ async function openField(field, noCache){
     }
     fieldPipelines[key] = data.viewSteps||[];
     if(checklist?.fields){
-      const row = checklist.fields.find(x => x.field === field);
-      if(row && data.provenance){
-        row.provenance = data.provenance;
-        row.labelAvailability = data.resultSource === 'verified' || data.resultSource === 'corrected'
+      const hit = fieldRow(field);
+      if(hit && data.provenance){
+        hit.provenance = data.provenance;
+        hit.labelAvailability = data.resultSource === 'verified' || data.resultSource === 'corrected'
           ? data.resultSource
           : data.resultSource === 'cache' ? 'cached' : 'cached';
       }
@@ -1301,8 +1317,15 @@ function showVerifyOutcome(box, field, claim, currentSteps, data){
   }
   if(data.outcome==='corrected'){
     fieldPipelines[pipelineKey(field)] = data.viewSteps||[];
+    const row = fieldRow(field);
+    if(row){
+      row.provenance = 'corrected';
+      row.labelAvailability = 'corrected';
+    }
+    renderFieldList();
     renderFieldSteps(field, data.viewSteps||[],
-      'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');
+      'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.',
+      'corrected');
     const vb = document.getElementById('verdictBox');
     if(vb) vb.innerHTML = `<div class="verdict ok">Evidence: ${esc(data.verdict.evidence)}</div>${renderVerdictActivity(data)}`;
     return;

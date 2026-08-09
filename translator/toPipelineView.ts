@@ -173,10 +173,29 @@ function formatWriteTarget(
   return `${targetSimple}.${targetField}`;
 }
 
+/** Strip a single matching quote wrap from model/judge literals (`"Shopify"` → Shopify). */
+function unwrapConstantLiteral(raw: string): string {
+  if (raw.length >= 2) {
+    const a = raw[0]!;
+    const b = raw[raw.length - 1]!;
+    if ((a === '"' && b === '"') || (a === "'" && b === "'")) {
+      return raw.slice(1, -1);
+    }
+  }
+  return raw;
+}
+
 function constantValue(step: PipelineStep): string | undefined {
   const metaVal = step.meta?.value;
-  if (typeof metaVal === "string" || typeof metaVal === "number" || typeof metaVal === "boolean") {
+  if (typeof metaVal === "string") return unwrapConstantLiteral(metaVal);
+  if (typeof metaVal === "number" || typeof metaVal === "boolean") {
     return String(metaVal);
+  }
+  // Judge / view-step shapes sometimes keep value at the top level.
+  const top = (step as { value?: unknown }).value;
+  if (typeof top === "string") return unwrapConstantLiteral(top);
+  if (typeof top === "number" || typeof top === "boolean") {
+    return String(top);
   }
   return undefined;
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.KODIAK_VERIFIED_DIR = mkdtempSync(join(tmpdir(), "kodiak-judge-store-"));
+process.env.KODIAK_VIEW_DIR = mkdtempSync(join(tmpdir(), "kodiak-judge-view-"));
 process.env.KODIAK_DEFECTS_FILE = join(mkdtempSync(join(tmpdir(), "kodiak-judge-def-")), "defects.jsonl");
 process.env.MODEL_API_KEY = process.env.MODEL_API_KEY || "test-key-never-used";
 
@@ -13,6 +14,7 @@ const { getVerified } = await import("../verified/store.js");
 
 after(() => {
   rmSync(process.env.KODIAK_VERIFIED_DIR!, { recursive: true, force: true });
+  rmSync(process.env.KODIAK_VIEW_DIR!, { recursive: true, force: true });
 });
 
 const SLICE = '// write site (line 62, in map, via setter)\nnotice.setRecipientFirst(parts[0]);\n// helper: splitName\nString[] splitName(String raw) { String trimmed = trimValue(raw); return trimmed.split("\\\\s+"); }';
@@ -59,6 +61,14 @@ test("agreement with verified evidence -> corrected pipeline lands in the store"
   assert.equal(f.status, "user-corrected");
   assert.equal(f.pipeline.length, 4);
   assert.equal(f.correction?.userClaim, "there should be a trim before the split");
+
+  // Correction must also patch the viewer dump (not only the verified store).
+  const viewFile = join(process.env.KODIAK_VIEW_DIR!, "judge-test.view.json");
+  assert.equal(existsSync(viewFile), true);
+  const view = JSON.parse(readFileSync(viewFile, "utf8"));
+  assert.ok(view.fields?.some((x: { targetField: string }) =>
+    /recipientFirst$/i.test(x.targetField),
+  ));
 });
 
 test("agreement WITHOUT checkable evidence never reaches the store", async () => {

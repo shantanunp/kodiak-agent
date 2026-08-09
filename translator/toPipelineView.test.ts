@@ -93,6 +93,29 @@ describe("toPipelineView transform param", () => {
     assert.equal(mul!.param, 1000);
   });
 
+  it("unwraps quoted constant literals from verified-store meta.value", () => {
+    const pipeline: PipelineJson = {
+      mapperId: "test-mapper",
+      sourceType: "com.acme.Source",
+      targetType: "com.acme.Target",
+      mapping: [
+        {
+          targetField: "platformIdentifier",
+          pipeline: [
+            {
+              kind: "CONSTANT",
+              meta: { value: '"Shopify"' },
+              summary: "Sets platform to Shopify.",
+            },
+          ],
+        },
+      ],
+    };
+    const view = toPipelineView(pipeline);
+    const c = view.fields?.[0]?.steps.find((s) => s.kind === "constant");
+    assert.equal(c?.value, "Shopify");
+  });
+
   it("nests filter→constant branches for if/else cascades", () => {
     const pipeline: PipelineJson = {
       mapperId: "test-mapper",

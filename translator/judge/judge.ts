@@ -20,6 +20,7 @@ import { HttpModelProvider } from "../model/provider.js";
 import { normalizeFieldMappingResponse } from "../model/applyResponse.js";
 import { fromPipelineOp } from "../model/applyResponse.js";
 import { upsertCorrectedField } from "../verified/store.js";
+import { patchPipelineViewField } from "../writePipelineView.js";
 
 export const JUDGE_PROMPT = `You are a verification judge for one field of a source->target mapping.
 
@@ -166,6 +167,17 @@ export function applyJudgeVerdict(options: {
       userClaim: options.userClaim,
       judgeEvidence: verdict.evidence,
     });
+    // Keep the viewer dump in sync — otherwise refresh warms stale .view.json
+    // and shadows the verified-store answer (e.g. PLATFORM_IDENTIFIER vs Shopify).
+    try {
+      patchPipelineViewField({
+        mapperId: options.mapperId,
+        targetField: options.field,
+        pipeline: steps,
+      });
+    } catch {
+      // View patch is best-effort; verified store is the source of truth.
+    }
     return { outcome: "corrected", verdict, pipeline: steps };
   }
 
