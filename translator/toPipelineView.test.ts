@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coerceViewParam, toPipelineView } from "./toPipelineView.js";
+import {
+  coerceViewParam,
+  foldConditionalBranches,
+  toPipelineView,
+} from "./toPipelineView.js";
 import type { PipelineJson } from "./model/index.js";
+import type { ViewStep } from "./toPipelineView.js";
 
 describe("coerceViewParam", () => {
   it("keeps whitespace delimiters as strings (Number(' ') is 0 in JS)", () => {
@@ -86,5 +91,58 @@ describe("toPipelineView transform param", () => {
     );
     assert.ok(mul);
     assert.equal(mul!.param, 1000);
+  });
+
+  it("nests filter→constant branches for if/else cascades", () => {
+    const pipeline: PipelineJson = {
+      mapperId: "test-mapper",
+      sourceType: "com.acme.Source",
+      targetType: "com.acme.Target",
+      mapping: [
+        {
+          targetField: "deliveryNotes",
+          pipeline: [
+            { kind: "READ", sourceField: "payment.orderType" },
+            { kind: "FILTER", condition: "equalsIgnoreCase Express" },
+            { kind: "CONSTANT", meta: { value: "Priority handoff" } },
+            { kind: "FILTER", condition: "equalsIgnoreCase Pickup" },
+            { kind: "CONSTANT", meta: { value: "Hold at counter" } },
+            { kind: "CONSTANT", meta: { value: "Standard porch delivery" } },
+          ],
+        },
+      ],
+    };
+
+    const view = toPipelineView(pipeline);
+    const steps = view.fields?.[0]?.steps ?? [];
+    assert.equal(steps[0]?.kind, "read");
+    assert.equal(steps[1]?.kind, "filter");
+    assert.equal(steps[1]?.children?.[0]?.kind, "constant");
+    assert.equal(steps[1]?.children?.[0]?.value, "Priority handoff");
+    assert.equal(steps[2]?.kind, "filter");
+    assert.equal(steps[2]?.children?.[0]?.value, "Hold at counter");
+    assert.equal(steps[3]?.kind, "constant");
+    assert.equal(steps[3]?.value, "Standard porch delivery");
+  });
+});
+
+describe("foldConditionalBranches", () => {
+  it("nests transforms under filter and leaves trailing constant as else", () => {
+    const steps: ViewStep[] = [
+      { kind: "filter", value: "not blank" },
+      { kind: "transform", op: "Trim" },
+      { kind: "constant", value: "fallback" },
+      { kind: "write", target: "notes" },
+    ];
+    const folded = foldConditionalBranches(steps);
+    assert.equal(folded.length, 3);
+    assert.equal(folded[0]?.kind, "filter");
+    assert.deepEqual(
+      folded[0]?.children?.map((c) => c.kind),
+      ["transform"],
+    );
+    assert.equal(folded[1]?.kind, "constant");
+    assert.equal(folded[1]?.value, "fallback");
+    assert.equal(folded[2]?.kind, "write");
   });
 });

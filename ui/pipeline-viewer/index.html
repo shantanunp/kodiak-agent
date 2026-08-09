@@ -118,6 +118,21 @@
   .summary{margin-top:20px;border-top:1px solid var(--line);padding-top:14px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;}
   .error{color:var(--cond);padding:20px;background:var(--cond-bg);border-radius:8px;}
   .nested{margin-top:8px;padding-left:12px;border-left:2px solid var(--line);}
+  .branch-block{flex:1;border:1px solid var(--line);border-radius:10px;background:var(--bg);overflow:hidden;}
+  .branch-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--cond-bg);}
+  .branch-head-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--cond);}
+  .branch-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .branch-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--line);}
+  .branch-table td{padding:9px 12px;vertical-align:top;border-bottom:1px solid var(--line);line-height:1.45;}
+  .branch-table tr:last-child td{border-bottom:none;}
+  .branch-table tr:nth-child(even) td{background:rgba(255,255,255,.45);}
+  .branch-label{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--cond);white-space:nowrap;padding-right:8px;}
+  .branch-when{font-family:var(--font-mono);font-size:12px;}
+  .branch-then{color:var(--ink);}
+  .branch-then .mono{background:var(--target-bg);border-color:transparent;color:var(--target);}
+  .branch-else .branch-label{color:var(--ink-soft);}
+  .filter-outcome{margin-top:6px;color:var(--ink-soft);}
+  .filter-outcome .mono{background:var(--target-bg);border-color:transparent;color:var(--target);}
   .score-wrap{margin:0 0 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;}
   .score-wrap summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .score-wrap summary::-webkit-details-marker{display:none;}
@@ -221,14 +236,113 @@ function formatParam(param) {
   return String(param);
 }
 
+function outcomeText(children) {
+  if (!children?.length) return '';
+  const c = children[0];
+  if (c.kind === 'constant') return String(c.value ?? '');
+  if (c.kind === 'transform') {
+    const rest = children.slice(1).map((x) => x.op || x.kind).filter(Boolean);
+    return rest.length ? `${c.op} → ${rest.join(' → ')}` : String(c.op || 'transform');
+  }
+  return children.map((x) => x.kind).join(', ');
+}
+
+function isLiteralBranch(step) {
+  return step?.kind === 'filter' && step.children?.length === 1 && step.children[0].kind === 'constant';
+}
+
+/** Collapse adjacent if/else-if literal branches into one decision table. */
+function groupStepsForDisplay(steps) {
+  const out = [];
+  let i = 0;
+  while (i < steps.length) {
+    if (isLiteralBranch(steps[i])) {
+      const branches = [];
+      while (i < steps.length && isLiteralBranch(steps[i])) {
+        branches.push(steps[i]);
+        i += 1;
+      }
+      let elseStep = null;
+      if (i < steps.length && steps[i].kind === 'constant') {
+        elseStep = steps[i];
+        i += 1;
+      }
+      if (branches.length >= 2 || (branches.length === 1 && elseStep)) {
+        out.push({ kind: '_branches', branches, elseStep, labelSource: branches[0].labelSource });
+      } else {
+        out.push(branches[0]);
+        if (elseStep) out.push(elseStep);
+      }
+      continue;
+    }
+    // filter → transform… ; else → constant
+    if (
+      steps[i].kind === 'filter' &&
+      steps[i].children?.length &&
+      i + 1 < steps.length &&
+      steps[i + 1].kind === 'constant'
+    ) {
+      out.push({
+        kind: '_branches',
+        branches: [steps[i]],
+        elseStep: steps[i + 1],
+        labelSource: steps[i].labelSource,
+      });
+      i += 2;
+      continue;
+    }
+    out.push(steps[i]);
+    i += 1;
+  }
+  return out;
+}
+
+function renderBranchTable(group) {
+  const rows = group.branches.map((b, idx) => {
+    const label = idx === 0 ? 'if' : 'else if';
+    const then = outcomeText(b.children);
+    const thenHtml = b.children?.some((c) => c.kind === 'constant')
+      ? `<span class="mono">${esc(then)}</span>`
+      : esc(then || 'then-branch');
+    return `<tr>
+      <td class="branch-label">${label}</td>
+      <td class="branch-when">${esc(b.value || b.op || '')}</td>
+      <td class="branch-then">${thenHtml}</td>
+    </tr>`;
+  }).join('');
+  const elseRow = group.elseStep
+    ? `<tr class="branch-else">
+        <td class="branch-label">else</td>
+        <td class="branch-when">default</td>
+        <td class="branch-then"><span class="mono">${esc(group.elseStep.value ?? '')}</span></td>
+      </tr>`
+    : '';
+  return `<div class="step">
+    <div class="step-rail"><div class="step-icon" style="background:var(--cond-bg);color:var(--cond)">if</div><div class="step-line"></div></div>
+    <div class="branch-block">
+      <div class="branch-head">
+        <span class="branch-head-title">Conditional branches${badge(group)}</span>
+        <span style="font-size:11px;color:var(--ink-faint)">${group.branches.length + (group.elseStep ? 1 : 0)} arms</span>
+      </div>
+      <table class="branch-table">
+        <thead><tr><th></th><th>When</th><th>Then</th></tr></thead>
+        <tbody>${rows}${elseRow}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 function renderStepBody(step) {
   if (step.kind === 'read') return `Field <span class="mono">${esc(step.field)}</span>`;
   if (step.kind === 'filter') {
-    let inner = `When <span class="mono">${esc(step.value || step.op)}</span>`;
-    if (step.children?.length) {
-      inner += `<div class="nested">${step.children.map(s => renderStep(s)).join('')}</div>`;
+    const when = `When <span class="mono">${esc(step.value || step.op)}</span>`;
+    if (isLiteralBranch(step)) {
+      return `${when}<div class="filter-outcome">→ <span class="mono">${esc(outcomeText(step.children))}</span></div>`;
     }
-    return inner;
+    if (step.children?.length) {
+      return `${when}<div class="nested">${step.children.map(s => renderStep(s)).join('')}</div>`;
+    }
+    return when;
   }
   if (step.kind === 'select') return `Take <span class="mono">${esc(step.mode)}</span>`;
   if (step.kind === 'transform') {
@@ -245,24 +359,32 @@ function renderStepBody(step) {
   }
   if (step.kind === 'write') return `Save to <span class="mono">${esc(step.target)}</span>`;
   if (step.kind === 'constant') {
-    return `Set <span class="mono">${esc(step.target)}</span> to <span class="mono">${esc(step.value ?? '')}</span>`;
+    const target = step.target ? `<span class="mono">${esc(step.target)}</span> to ` : '';
+    return `Set ${target}<span class="mono">${esc(step.value ?? '')}</span>`;
   }
   if (step.kind === 'raw') return `Could not classify automatically`;
   return esc(step.sourceText || '');
 }
 
 function renderStep(step) {
+  if (step.kind === '_branches') return renderBranchTable(step);
   const k = step.kind;
   const summary = typeof step.summary === 'string' ? step.summary.trim() : '';
+  // Nested filter→constant already shows the outcome; skip redundant summary clutter.
+  const showSummary = summary && !(isLiteralBranch(step));
   return `<div class="step">
     <div class="step-rail"><div class="step-icon" style="background:var(${BG[k]});color:var(${COLOR[k]})">${ICONS[k]||'?'}</div><div class="step-line"></div></div>
     <div class="step-card">
       <div class="step-kicker" style="color:var(${COLOR[k]})">${LABELS[k]||k}${badge(step)}</div>
       <div class="step-body">${renderStepBody(step)}</div>
-      ${summary ? `<div class="step-summary">${esc(summary)}</div>` : ''}
+      ${showSummary ? `<div class="step-summary">${esc(summary)}</div>` : ''}
       ${step.sourceText ? `<div class="code-block">${esc(step.sourceText)}</div>` : ''}
     </div>
   </div>`;
+}
+
+function renderPipeline(steps) {
+  return groupStepsForDisplay(steps || []).map((s) => renderStep(s)).join('');
 }
 
 function esc(s) {
@@ -270,16 +392,30 @@ function esc(s) {
 }
 
 function summarize(steps) {
-  return steps.map(s => {
-    if (s.kind === 'read') return `read ${s.field}`;
-    if (s.kind === 'transform') return `${s.op}`;
-    if (s.kind === 'write') return `write ${s.target}`;
-    if (s.kind === 'constant') return `constant ${s.target}=${s.value??''}`;
-    if (s.kind === 'filter') return `filter ${s.value||''}`;
-    if (s.kind === 'build') return 'build object';
-    if (s.kind === 'raw') return 'raw (review)';
-    return s.kind;
-  }).join(', then ') + '.';
+  const parts = [];
+  for (const item of groupStepsForDisplay(steps || [])) {
+    if (item.kind === '_branches') {
+      const arms = item.branches.map((b) =>
+        `${b.value || 'cond'} → ${outcomeText(b.children)}`
+      );
+      if (item.elseStep) arms.push(`else → ${item.elseStep.value ?? ''}`);
+      parts.push(`if/else (${arms.join('; ')})`);
+      continue;
+    }
+    if (item.kind === 'read') { parts.push(`read ${item.field}`); continue; }
+    if (item.kind === 'transform') { parts.push(`${item.op}`); continue; }
+    if (item.kind === 'write') { parts.push(`write ${item.target}`); continue; }
+    if (item.kind === 'constant') { parts.push(`constant ${item.value??''}`); continue; }
+    if (item.kind === 'filter') {
+      const out = outcomeText(item.children);
+      parts.push(out ? `if ${item.value||''} → ${out}` : `filter ${item.value||''}`);
+      continue;
+    }
+    if (item.kind === 'build') { parts.push('build object'); continue; }
+    if (item.kind === 'raw') { parts.push('raw (review)'); continue; }
+    parts.push(item.kind);
+  }
+  return parts.join(', then ') + '.';
 }
 
 function fieldLeaf(path) {
@@ -366,7 +502,7 @@ function render(data, fieldIndex) {
     ${banner}
     ${tabsHtml}
     <span class="target-name">${esc(targetLabel)}</span>
-    <div class="pipeline">${steps.map((s) => renderStep(s)).join('')}</div>
+    <div class="pipeline">${renderPipeline(steps)}</div>
     <div class="summary">
       <strong>Summary:</strong> ${esc(summarize(steps))}
       ${fieldReason ? `<div style="margin-top:8px">${esc(fieldReason)}</div>` : ''}
@@ -964,7 +1100,7 @@ function renderFieldSteps(field, steps, sourceNote, provenance){
       <span class="target-name">${esc(field)}</span>
       ${provLine}
       ${sourceNote?`<div class="ai-banner"><span>&#10003;</span><span>${esc(sourceNote)}</span></div>`:''}
-      <div class="pipeline">${steps.map(s=>renderStep(s)).join('')}</div>
+      <div class="pipeline">${renderPipeline(steps)}</div>
       <div class="summary"><strong>Summary:</strong> ${esc(summarize(steps))}</div>
       <button type="button" class="re-label" id="reLabelBtn">Re-label (bypass cache)</button>
       ${correctionBoxHtml(field)}`;

@@ -455,6 +455,45 @@ function collectFields(steps: ViewStep[]): { source: Set<string>; target: Set<st
   return { source, target };
 }
 
+/**
+ * Nest FILTER outcomes as filter.children so if/else cascades render compactly.
+ *
+ * - FILTER → CONSTANT → nest the constant (typical literal branch)
+ * - FILTER → TRANSFORM+ → nest transforms (true-branch transforms)
+ * - FILTER → TRANSFORM+ → CONSTANT → nest transforms only; leave CONSTANT as the
+ *   following else/default sibling (common in cascading if/else labels)
+ */
+export function foldConditionalBranches(steps: ViewStep[]): ViewStep[] {
+  const out: ViewStep[] = [];
+  let i = 0;
+  while (i < steps.length) {
+    const step = steps[i]!;
+    if (step.kind !== "filter") {
+      out.push(step);
+      i += 1;
+      continue;
+    }
+
+    i += 1;
+    const children: ViewStep[] = [];
+    while (i < steps.length && steps[i]!.kind === "transform") {
+      children.push(steps[i]!);
+      i += 1;
+    }
+    if (
+      children.length === 0 &&
+      i < steps.length &&
+      steps[i]!.kind === "constant"
+    ) {
+      children.push(steps[i]!);
+      i += 1;
+    }
+
+    out.push(children.length ? { ...step, children } : step);
+  }
+  return out;
+}
+
 export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const mapperId = pipeline.mapperId ?? "unknown";
   const sourceType = pipeline.sourceType ?? "Source";
@@ -470,8 +509,10 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const targetPathHints = schemaTargetFields;
 
   const fields: FieldPipelineView[] = (pipeline.mapping ?? []).map((m) => {
-    const fieldSteps = flattenFieldPipeline(m.targetField, m.pipeline).flatMap((s) =>
-      convertStep(s, sourceSimple, targetSimple, targetPathHints),
+    const fieldSteps = foldConditionalBranches(
+      flattenFieldPipeline(m.targetField, m.pipeline).flatMap((s) =>
+        convertStep(s, sourceSimple, targetSimple, targetPathHints),
+      ),
     );
     return {
       targetField: formatWriteTarget(m.targetField, targetSimple, targetPathHints),
@@ -482,8 +523,10 @@ export function toPipelineView(pipeline: PipelineJson): PipelineViewModel {
   const steps =
     fields.length > 0
       ? fields.flatMap((f) => f.steps)
-      : flattenPipeline(pipeline).flatMap((s) =>
-          convertStep(s, sourceSimple, targetSimple, targetPathHints),
+      : foldConditionalBranches(
+          flattenPipeline(pipeline).flatMap((s) =>
+            convertStep(s, sourceSimple, targetSimple, targetPathHints),
+          ),
         );
 
   const collected = collectFields(steps);
