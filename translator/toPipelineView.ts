@@ -181,6 +181,24 @@ function constantValue(step: PipelineStep): string | undefined {
   return undefined;
 }
 
+/**
+ * Coerce transform meta.value for the view model.
+ * Numeric strings → number; everything else stays a string.
+ *
+ * Important: Number(" ") === 0 in JS (whitespace coerces to 0). Split
+ * delimiters like " " / "\\t" must not be treated as numbers.
+ */
+export function coerceViewParam(param: unknown): string | number | undefined {
+  if (param == null) return undefined;
+  if (typeof param === "number") return Number.isNaN(param) ? undefined : param;
+  if (typeof param === "boolean") return String(param);
+  const s = String(param);
+  // Empty / whitespace-only are delimiter values, never numbers.
+  if (s.trim() === "") return s;
+  const n = Number(s);
+  return Number.isNaN(n) ? s : n;
+}
+
 function withSummary<T extends ViewStep>(view: T, step: PipelineStep): T {
   if (typeof step.summary === "string" && step.summary.trim()) {
     return { ...view, summary: step.summary.trim() };
@@ -325,13 +343,12 @@ function convertStep(
       keepdigitsandhyphen: "Keep digits",
     };
     const opLabel = opLabels[opRaw.toLowerCase()] ?? opRaw;
-    const param = step.meta?.value;
     return [
       withSummary(
         {
           kind: "transform",
           op: opLabel,
-          param: param != null ? (Number.isNaN(Number(param)) ? String(param) : Number(param)) : undefined,
+          param: coerceViewParam(step.meta?.value),
           target: formatWriteTarget(step.targetField, targetSimple, schemaTargetFields),
           field: step.sourceField,
           labelSource: step.labelSource,

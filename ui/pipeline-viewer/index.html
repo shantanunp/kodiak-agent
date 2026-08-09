@@ -208,6 +208,14 @@ function fieldReasonFromSteps(steps) {
   return steps.find((s) => s.labelReason)?.labelReason || '';
 }
 
+/** Show string params so empty / whitespace delimiters stay visible (e.g. " "). */
+function formatParam(param) {
+  if (typeof param === 'string' && (param.length === 0 || param.trim() === '' || param !== param.trim())) {
+    return JSON.stringify(param);
+  }
+  return String(param);
+}
+
 function renderStepBody(step) {
   if (step.kind === 'read') return `Field <span class="mono">${esc(step.field)}</span>`;
   if (step.kind === 'filter') {
@@ -223,7 +231,7 @@ function renderStepBody(step) {
     if (step.field2) {
       t += ` to <span class="mono">${esc(step.field)}</span> and <span class="mono">${esc(step.field2)}</span>`;
     }
-    if (step.param !== undefined) t += ` · param <span class="mono">${esc(String(step.param))}</span>`;
+    if (step.param !== undefined) t += ` · param <span class="mono">${esc(formatParam(step.param))}</span>`;
     return t;
   }
   if (step.kind === 'build') {
