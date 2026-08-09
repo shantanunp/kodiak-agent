@@ -27,7 +27,7 @@
     "test:agentloop": "tsx --test translator/agentloop/loop.test.ts translator/agentloop/grounding.test.ts translator/agentloop/smells.test.ts translator/agentloop/verify.test.ts translator/agentloop/critic.test.ts translator/agentloop/mutation.test.ts translator/agentloop/promptInjection.test.ts translator/agentloop/pool.test.ts translator/agentloop/multiInstance.test.ts",
     "test:journal": "tsx --test translator/telemetry/journal.test.ts translator/telemetry/journalReport.test.ts",
     "test:drift": "tsx --test translator/telemetry/drift.test.ts",
-    "test:judge": "tsx --test translator/judge/judge.test.ts",
+    "test:judge": "tsx --test translator/judge/judge.test.ts translator/judge/explore.test.ts",
     "test:policy": "tsx --test analyzer/noExternal.test.ts",
     "test:wire": "tsx --test translator/model/provider.wire.test.ts",
     "test:crosscheck": "tsx --test translator/agentloop/crossCheck.test.ts",

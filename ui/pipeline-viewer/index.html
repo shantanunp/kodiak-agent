@@ -86,6 +86,11 @@
   .verdict{margin-top:10px;font-size:12.5px;line-height:1.55;border-radius:8px;padding:10px 12px;}
   .verdict.ok{background:var(--source-bg);color:var(--source);}
   .verdict.defect{background:var(--cond-bg);color:var(--cond);}
+  .verdict-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+  .verdict-actions button{border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:12px;font-weight:600;padding:6px 12px;border-radius:7px;cursor:pointer;}
+  .verdict-actions button:hover{border-color:var(--op);color:var(--op);}
+  .verdict-actions button:disabled{opacity:.55;cursor:wait;}
+  .activity-log{margin-top:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:7px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;color:var(--ink-soft);max-height:220px;overflow:auto;}
 
   .legend{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;font-size:12.5px;color:var(--ink-soft);}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
@@ -1126,6 +1131,97 @@ function correctionBoxHtml(field){
   </div>`;
 }
 
+function renderVerdictActivity(data){
+  if(!data.activityLog) return '';
+  return `<div class="activity-log"><b>Independent scan</b>\n${esc(data.activityLog)}</div>`;
+}
+
+function renderConfirmedFollowUps(field, claim, currentSteps, data){
+  const evidence = esc(data.verdict?.evidence||data.verdict?.reason||'');
+  return `<div class="verdict ok"><b>Pipeline looks correct.</b> Your claim does not match the code — nothing changed.<br>
+    ${evidence}
+    ${renderVerdictActivity(data)}
+    <div class="verdict-actions">
+      <button type="button" id="forceDefectBtn">Still create defect</button>
+      <button type="button" id="exploreBtn">Independent scan</button>
+    </div>
+  </div>`;
+}
+
+async function postVerifySuggestion({ field, claim, currentSteps, mode }){
+  const res = await fetch('/api/verify-suggestion',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({mapperId:currentMapper, field, claim, currentPipeline:currentSteps, mode})});
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+  return data;
+}
+
+function showVerifyOutcome(box, field, claim, currentSteps, data){
+  if(data.outcome==='offline-exported'){
+    box.innerHTML = `<div class="verdict"><b>Offline mode — judge job exported.</b><br>
+      <span style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11.5px">${esc((data.steps||[]).join('\n'))}</span></div>`;
+    return;
+  }
+  if(data.outcome==='corrected'){
+    fieldPipelines[pipelineKey(field)] = data.viewSteps||[];
+    renderFieldSteps(field, data.viewSteps||[],
+      'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');
+    const vb = document.getElementById('verdictBox');
+    if(vb) vb.innerHTML = `<div class="verdict ok">Evidence: ${esc(data.verdict.evidence)}</div>${renderVerdictActivity(data)}`;
+    return;
+  }
+  if(data.outcome==='confirmed'){
+    box.innerHTML = renderConfirmedFollowUps(field, claim, currentSteps, data);
+    wireConfirmedFollowUps(field, claim, currentSteps);
+    return;
+  }
+  if(data.outcome==='unverifiable' || data.outcome==='rejected'){
+    const forced = data.forced
+      ? `<b>Defect ${esc(data.defectId)} created</b> (you forced it after the judge said the pipeline looks correct).`
+      : `<b>Could not verify</b>${data.defectId?` — defect ${esc(data.defectId)} logged.`:'.'}`;
+    box.innerHTML = `<div class="verdict defect">${forced}<br>
+      ${esc(data.verdict?.evidence||data.verdict?.reason||'No usable code evidence for this field.')}
+      ${renderVerdictActivity(data)}
+      ${data.forced?'':`<div class="verdict-actions"><button type="button" id="exploreBtn">Independent scan</button></div>`}
+    </div>`;
+    if(!data.forced) wireConfirmedFollowUps(field, claim, currentSteps);
+    return;
+  }
+  box.innerHTML = `<div class="verdict defect">Judge agreed but cited no checkable evidence — nothing was saved. Try rephrasing.</div>`;
+}
+
+function wireConfirmedFollowUps(field, claim, currentSteps){
+  const box = document.getElementById('verdictBox');
+  const forceBtn = document.getElementById('forceDefectBtn');
+  const exploreBtn = document.getElementById('exploreBtn');
+  if(forceBtn){
+    forceBtn.addEventListener('click', async () => {
+      forceBtn.disabled = true;
+      if(exploreBtn) exploreBtn.disabled = true;
+      try{
+        const data = await postVerifySuggestion({ field, claim, currentSteps, mode:'force-defect' });
+        showVerifyOutcome(box, field, claim, currentSteps, data);
+      }catch(e){
+        box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
+      }
+    });
+  }
+  if(exploreBtn){
+    exploreBtn.addEventListener('click', async () => {
+      exploreBtn.disabled = true;
+      if(forceBtn) forceBtn.disabled = true;
+      box.innerHTML = '<div class="verdict">Independent scan — searching worktree…</div>';
+      try{
+        const data = await postVerifySuggestion({ field, claim, currentSteps, mode:'explore' });
+        showVerifyOutcome(box, field, claim, currentSteps, data);
+      }catch(e){
+        box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
+      }
+    });
+  }
+}
+
 function wireCorrectionBox(field, currentSteps){
   const btn = document.getElementById('claimBtn');
   if(!btn) return;
@@ -1136,29 +1232,8 @@ function wireCorrectionBox(field, currentSteps){
     box.innerHTML = '<div class="verdict">Judge is re-checking the source…</div>';
     btn.disabled = true;
     try{
-      const res = await fetch('/api/verify-suggestion',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({mapperId:currentMapper, field, claim, currentPipeline:currentSteps})});
-      const data = await res.json();
-      if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
-      if(data.outcome==='offline-exported'){
-        box.innerHTML = `<div class="verdict"><b>Offline mode — judge job exported.</b><br>
-          <span style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11.5px">${esc((data.steps||[]).join('\n'))}</span></div>`;
-      } else if(data.outcome==='corrected'){
-        fieldPipelines[pipelineKey(field)] = data.viewSteps||[];
-        renderFieldSteps(field, data.viewSteps||[],
-          'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.');
-        const vb = document.getElementById('verdictBox');
-        if(vb) vb.innerHTML = `<div class="verdict ok">Evidence: ${esc(data.verdict.evidence)}</div>`;
-      } else if(data.outcome==='confirmed'){
-        box.innerHTML = `<div class="verdict ok"><b>Pipeline looks correct.</b> Your claim does not match the code — nothing changed.<br>
-          ${esc(data.verdict.evidence||data.verdict.reason||'')}</div>`;
-      } else if(data.outcome==='unverifiable' || data.outcome==='rejected'){
-        box.innerHTML = `<div class="verdict defect"><b>Could not verify</b>${data.defectId?` — defect ${esc(data.defectId)} logged`:''}.<br>
-          ${esc(data.verdict?.evidence||data.verdict?.reason||'No usable code evidence for this field.')}</div>`;
-      } else {
-        box.innerHTML = `<div class="verdict defect">Judge agreed but cited no checkable evidence — nothing was saved. Try rephrasing.</div>`;
-      }
+      const data = await postVerifySuggestion({ field, claim, currentSteps, mode:'judge' });
+      showVerifyOutcome(box, field, claim, currentSteps, data);
     }catch(e){
       box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
     }finally{ btn.disabled = false; }

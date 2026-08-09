@@ -49,7 +49,12 @@ import {
   diffAgainstPrevious,
   getVerified,
 } from "../translator/verified/store.js";
-import { judgeSuggestion } from "../translator/judge/judge.js";
+import {
+  judgeSuggestion,
+  logDefect,
+  mockDefectId,
+} from "../translator/judge/judge.js";
+import { exploreAndJudge, formatExploreTrace } from "../translator/judge/explore.js";
 import { inferWorktree } from "../analyzer/resolveType.js";
 import { exportJudgeJob } from "../translator/judge/offline.js";
 import { exportAgentJob } from "../translator/agent/exportJob.js";
@@ -615,17 +620,23 @@ createServer(async (req, res) => {
   }
 
   // ── Steering: user challenges a field's pipeline; judge verifies ──────────
+  // mode: judge (default) | force-defect | explore
   if (pathname === "/api/verify-suggestion" && req.method === "POST") {
     try {
       const body = JSON.parse(await readBody(req)) as {
         mapperId?: string; field?: string; claim?: string;
         currentPipeline?: unknown[]; worktree?: string;
+        mode?: string;
       };
       const mapperId = body.mapperId?.trim();
       const field = body.field?.trim();
       const claim = body.claim?.trim();
+      const mode = (body.mode?.trim() || "judge").toLowerCase();
       if (!mapperId || !field || !claim) {
         sendJson(res, 400, { error: "mapperId, field, and claim required" }); return;
+      }
+      if (mode !== "judge" && mode !== "force-defect" && mode !== "explore") {
+        sendJson(res, 400, { error: 'mode must be "judge", "force-defect", or "explore"' }); return;
       }
 
       let worktree: string | undefined;
@@ -645,6 +656,29 @@ createServer(async (req, res) => {
 
       const schemaJson = loadSchemaJson(mapperId);
       const vfp = computeVerifiedFingerprint({ sourceJava: resolved.sourceJava, schemaJson });
+      const resolvedField = task?.field ?? field;
+
+      if (mode === "force-defect") {
+        const defectId = mockDefectId(`${mapperId}:${resolvedField}:${claim}:forced`);
+        logDefect({
+          mapperId,
+          field: resolvedField,
+          userClaim: claim,
+          judgeEvidence: "User forced defect after judge confirmed the pipeline looks correct.",
+          defectId,
+        });
+        sendJson(res, 200, {
+          outcome: "unverifiable",
+          forced: true,
+          defectId,
+          verdict: {
+            agree: false,
+            evidence: "User forced defect after judge confirmed the pipeline looks correct.",
+            citationsVerified: false,
+          },
+        });
+        return;
+      }
 
       if (!isModelConfigured()) {
         const exported = await exportJudgeJob({
@@ -662,11 +696,43 @@ createServer(async (req, res) => {
         return;
       }
 
+      if (mode === "explore") {
+        if (!worktree) {
+          sendJson(res, 400, {
+            error: "Independent scan needs MAPPER_WORKTREE or an explicit worktree.",
+          });
+          return;
+        }
+        const outcome = await exploreAndJudge({
+          config: loadModelConfig(),
+          worktree,
+          mapperId,
+          fingerprint: vfp,
+          field: resolvedField,
+          userClaim: claim,
+          currentPipeline: body.currentPipeline ?? [],
+          sliceText: task?.sliceText ?? "",
+          sourceJava: resolved.sourceJava,
+          schemaContext: schemaContextForLabeler(mapperId),
+        });
+        sendJson(res, 200, {
+          ...outcome,
+          activityLog: formatExploreTrace(outcome.trace),
+          viewSteps:
+            outcome.outcome === "corrected"
+              ? viewStepsFor(mapperId, [
+                  { targetField: resolvedField, pipeline: outcome.pipeline },
+                ])
+              : undefined,
+        });
+        return;
+      }
+
       const outcome = await judgeSuggestion({
         provider: createModelProvider(),
         mapperId,
         fingerprint: vfp,
-        field: task?.field ?? field,
+        field: resolvedField,
         sliceText: task?.sliceText ?? "",
         sourceJava: resolved.sourceJava,
         currentPipeline: body.currentPipeline ?? [],
@@ -679,7 +745,7 @@ createServer(async (req, res) => {
         viewSteps:
           outcome.outcome === "corrected"
             ? viewStepsFor(mapperId, [
-                { targetField: task?.field ?? field, pipeline: outcome.pipeline },
+                { targetField: resolvedField, pipeline: outcome.pipeline },
               ])
             : undefined,
       });
