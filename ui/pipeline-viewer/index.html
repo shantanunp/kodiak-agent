@@ -75,6 +75,10 @@
   .prov-cache{background:var(--target-bg);color:var(--target);}
   .approve-bar{margin:8px 4px 0;padding:8px 10px;border:1px dashed var(--cond);border-radius:8px;font-size:11.5px;color:var(--cond);line-height:1.45;}
   .approve-bar button{margin-top:6px;border:none;background:var(--cond);color:#fff;font-weight:600;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;}
+  .reset-bar{margin:10px 4px 0;padding:8px 10px;border:1px dashed var(--ink-faint);border-radius:8px;font-size:11.5px;color:var(--ink-soft);line-height:1.45;}
+  .reset-bar button{margin-top:6px;border:1px solid var(--cond);background:var(--bg);color:var(--cond);font-weight:600;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;}
+  .reset-bar button:hover{background:var(--cond-bg);}
+  .reset-bar button:disabled{opacity:.55;cursor:default;}
   .fl-legend{font-size:11px;color:var(--ink-faint);margin:10px 6px 2px;line-height:1.8;}
   .re-label{margin-top:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;}
   .re-label:hover{border-color:var(--ink-faint);color:var(--ink);}
@@ -257,6 +261,10 @@
       <div id="fieldItems"><p style="font-size:12px;color:var(--ink-faint);padding:6px">Loading checklist…</p></div>
       <div id="flTriage"></div>
       <div id="flDiag"></div>
+      <div id="flReset" class="reset-bar">
+        <div>Fresh start — clears caches, verified store, viewer dump, and offline jobs for this mapper. Schema is kept.</div>
+        <button type="button" id="resetMappingsBtn">Reset mappings</button>
+      </div>
       <div class="fl-legend">Load = fetch pipeline for one field.&nbsp; Load all = progress bar over pending fields.&nbsp; Dot: store/cache.&nbsp; Badge: analyzer state.</div>
     </aside>
     <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
@@ -1368,6 +1376,40 @@ async function approveStore(){
   }
 }
 
+async function resetMappings(){
+  if(!currentMapper){ alert('No mapper selected.'); return; }
+  const ok = confirm(
+    `Reset all field mappings for "${currentMapper}"?\n\n` +
+    'This deletes translator caches, the verified store, viewer dump, offline agent jobs, and scorecard history for this mapper. Schema fields are kept.\n\n' +
+    'This cannot be undone.'
+  );
+  if(!ok) return;
+  const btn = document.getElementById('resetMappingsBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Resetting…'; }
+  try{
+    const res = await fetch('/api/reset-mappings',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ mapperId: currentMapper, confirm: true }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    activeField = null;
+    for(const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
+    viewData = null;
+    aiGenerated = false;
+    lastChangeSummary = '';
+    lastChangedFiles = [];
+    document.getElementById('canvas').innerHTML =
+      `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Mappings cleared for <b>${esc(currentMapper)}</b>. Select a field and Load / Load all to label from scratch.</p>`;
+    await loadChecklist();
+    await loadScorecard();
+  }catch(e){
+    alert(e.message || String(e));
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = 'Reset mappings'; }
+  }
+}
+
 async function bulkLabel(fields){
   if(!fields.length){ renderLoadBar(); return; }
   if(bulkRunning){ bulkStop = true; return; }
@@ -1601,6 +1643,7 @@ window.addEventListener('message', (e) => {
 });
 
 document.getElementById('editSchemaBtn')?.addEventListener('click', () => openSchemaEditor());
+document.getElementById('resetMappingsBtn')?.addEventListener('click', resetMappings);
 
 load().then(() => Promise.all([loadChecklist(), loadScorecard()]));
 </script>

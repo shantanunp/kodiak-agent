@@ -22,6 +22,8 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -251,6 +253,32 @@ export function diffAgainstPrevious(
     });
   }
   return { previousFingerprint: prev.fingerprint, rows };
+}
+
+/**
+ * Delete verified-store entries (permanent mappings). Pass mapperId to wipe
+ * one mapper; omit to wipe the entire verified root. Returns files removed.
+ */
+export function clearVerifiedStore(mapperId?: string): number {
+  const root = verifiedRoot();
+  if (!existsSync(root)) return 0;
+
+  if (mapperId) {
+    const dir = join(root, mapperId);
+    if (!existsSync(dir)) return 0;
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+    rmSync(dir, { recursive: true, force: true });
+    return files.length;
+  }
+
+  let n = 0;
+  for (const name of readdirSync(root)) {
+    const dir = join(root, name);
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
+    n += readdirSync(dir).filter((f) => f.endsWith(".json")).length;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return n;
 }
 
 /**

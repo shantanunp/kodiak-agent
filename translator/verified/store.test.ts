@@ -15,6 +15,7 @@ const {
   findPreviousVerified,
   approveVerified,
   pruneStaleFingerprints,
+  clearVerifiedStore,
   countByStatus,
   diffAgainstPrevious,
 } = await import("./store.js");
@@ -177,6 +178,20 @@ test("prune keeps current + newest stale, removes older", () => {
   for (const fp of removed) {
     assert.equal(getVerified(mapperId, fp), null);
   }
+});
+
+test("clearVerifiedStore removes all fingerprints for a mapper", () => {
+  const mapperId = "clear-store-mapper";
+  const fp = computeVerifiedFingerprint({ sourceJava: SOURCE_V1, schemaJson: "" });
+  promoteToVerified({
+    mapperId,
+    fingerprint: fp,
+    mapping: [{ targetField: "Out.a", pipeline: [{ kind: "READ" }] }],
+    labeledBy: "test",
+  });
+  assert.ok(getVerified(mapperId, fp));
+  assert.equal(clearVerifiedStore(mapperId), 1);
+  assert.equal(getVerified(mapperId, fp), null);
 });
 
 test("diffAgainstPrevious reports kind changes", () => {

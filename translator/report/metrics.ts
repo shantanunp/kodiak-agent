@@ -6,7 +6,14 @@
  * loop fires (slice quality).
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
 import { paths } from "../../src/config/env.js";
 
@@ -22,11 +29,30 @@ export interface RunMetrics {
   toolLoopResolved: number;
 }
 
+function metricsDir(): string {
+  return process.env.KODIAK_METRICS_DIR ?? join(paths.cacheDir, "metrics");
+}
+
 function metricsFile(mapperId: string): string {
-  return join(
-    process.env.KODIAK_METRICS_DIR ?? join(paths.cacheDir, "metrics"),
-    `${mapperId}.jsonl`,
-  );
+  return join(metricsDir(), `${mapperId}.jsonl`);
+}
+
+/** Delete metrics jsonl for one mapper, or all metrics files when omitted. */
+export function clearRunMetrics(mapperId?: string): number {
+  const dir = metricsDir();
+  if (!existsSync(dir)) return 0;
+  const files = mapperId
+    ? [metricsFile(mapperId)]
+    : readdirSync(dir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => join(dir, f));
+  let n = 0;
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    unlinkSync(file);
+    n += 1;
+  }
+  return n;
 }
 
 export function appendRunMetrics(m: RunMetrics): void {

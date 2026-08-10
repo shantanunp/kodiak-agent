@@ -11,7 +11,14 @@
  * cannot slip a bogus correction into the store.
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { paths } from "../../src/config/env.js";
@@ -72,6 +79,34 @@ export function logDefect(record: {
   const file = defectsFile();
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, JSON.stringify({ ...record, at: new Date().toISOString() }) + "\n");
+}
+
+/** Drop defect lines for one mapper, or delete the whole file when omitted. */
+export function clearDefects(mapperId?: string): number {
+  const file = defectsFile();
+  if (!existsSync(file)) return 0;
+  if (!mapperId) {
+    const n = readFileSync(file, "utf8").trim().split("\n").filter(Boolean).length;
+    unlinkSync(file);
+    return n;
+  }
+  const kept: string[] = [];
+  let removed = 0;
+  for (const line of readFileSync(file, "utf8").trim().split("\n").filter(Boolean)) {
+    try {
+      const e = JSON.parse(line) as { mapperId?: string };
+      if (e.mapperId === mapperId) {
+        removed += 1;
+        continue;
+      }
+    } catch {
+      /* keep unparseable lines */
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) unlinkSync(file);
+  else writeFileSync(file, kept.join("\n") + "\n");
+  return removed;
 }
 
 /** True when evidence quotes a fragment that appears in the slice or source. */

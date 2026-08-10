@@ -4,7 +4,14 @@
  * Gitignored by default; committing it is an ops choice for shared history.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { paths } from "../../src/config/env.js";
@@ -106,4 +113,32 @@ export function readRuns(filter?: {
       if (filter?.since && e.at < filter.since) return false;
       return true;
     });
+}
+
+/** Drop journal lines for one mapper, or delete the whole file when omitted. */
+export function clearRuns(mapperId?: string): number {
+  const file = runsFile();
+  if (!existsSync(file)) return 0;
+  if (!mapperId) {
+    const n = readFileSync(file, "utf8").trim().split("\n").filter(Boolean).length;
+    unlinkSync(file);
+    return n;
+  }
+  const kept: string[] = [];
+  let removed = 0;
+  for (const line of readFileSync(file, "utf8").trim().split("\n").filter(Boolean)) {
+    try {
+      const e = JSON.parse(line) as RunJournalEntry;
+      if (e.mapperId === mapperId) {
+        removed += 1;
+        continue;
+      }
+    } catch {
+      /* keep unparseable lines */
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) unlinkSync(file);
+  else writeFileSync(file, kept.join("\n") + "\n");
+  return removed;
 }

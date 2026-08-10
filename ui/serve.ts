@@ -62,6 +62,7 @@ import { exportAgentJob } from "../translator/agent/exportJob.js";
 import type { PipelineViewModel } from "../translator/toPipelineView.js";
 import { toPipelineView } from "../translator/toPipelineView.js";
 import { buildMapperReport } from "../translator/report/scorecard.js";
+import { resetMappingData } from "../translator/resetMappingData.js";
 
 const PORT = Number(process.env.VIEW_PORT ?? 4173);
 const UI_ROOT = join(paths.root, "ui");
@@ -594,6 +595,32 @@ createServer(async (req, res) => {
         steps: exported.vscodeSteps,
         vscodePrompt: exported.vscodePrompt,
       });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  // ── Fresh-start: wipe caches + verified store + views + jobs for a mapper ─
+  if (pathname === "/api/reset-mappings" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req)) as {
+        mapperId?: string;
+        confirm?: boolean;
+      };
+      const mapperId = body.mapperId?.trim();
+      if (!mapperId) {
+        sendJson(res, 400, { error: "mapperId required" });
+        return;
+      }
+      if (body.confirm !== true) {
+        sendJson(res, 400, {
+          error: 'Pass confirm: true to wipe mapping stores for this mapper.',
+        });
+        return;
+      }
+      const result = resetMappingData(mapperId);
+      sendJson(res, 200, { ok: true, ...result });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }

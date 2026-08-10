@@ -2,7 +2,14 @@
  * Write labeled pipeline → ui/pipeline-viewer/data/{mapperId}.view.json
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { paths } from "../src/config/env.js";
 import {
@@ -18,6 +25,24 @@ export function pipelineViewDataDir(): string {
 
 export function pipelineViewFile(mapperId: string): string {
   return join(pipelineViewDataDir(), `${mapperId}.view.json`);
+}
+
+/** Remove viewer dump(s). Pass mapperId for one file; omit to clear all `.view.json`. */
+export function clearPipelineView(mapperId?: string): number {
+  const dir = pipelineViewDataDir();
+  if (!existsSync(dir)) return 0;
+  const files = mapperId
+    ? [pipelineViewFile(mapperId)]
+    : readdirSync(dir)
+        .filter((f) => f.endsWith(".view.json"))
+        .map((f) => join(dir, f));
+  let n = 0;
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    unlinkSync(file);
+    n += 1;
+  }
+  return n;
 }
 
 export function writePipelineView(pipeline: PipelineJson): {
