@@ -29,7 +29,7 @@ npm run test:all            # offline suites including test:golden (no model)
 npm run test:golden         # EVAL-1 shape harness (add -- --model for guidance only)
 npm run report / npm run drift
 npm run e2e:online          # ONLY script that calls the real model API (needs key)
-npm run ui:serve            # viewer Scorecard + :4173/pipeline-viewer/?mapper=<id>
+npm run ui:serve            # app at :4173/kodiak (schema → pipeline; Scorecard in viewer)
                             # GET /api/report?mapper=<id> (same payload as report CLI)
 npm run analyze -- --file <f> --mapper-class <C> --target-class <C> [--slices]
 npm run label -- --mapper <id> --worktree <path> --analyzer [--promote] [--verify] [--critic]

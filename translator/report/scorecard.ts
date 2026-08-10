@@ -128,6 +128,9 @@ export async function scoreMapper(
     if (tasks.checklistSource === "write-sites") {
       concerns.push("checklist from write sites only — unmapped fields undetectable");
     }
+    if (tasks.checklistSource === "schema") {
+      concerns.push("checklist from saved schema — agent labels only user-defined target fields");
+    }
 
     const fingerprint = computeVerifiedFingerprint({
       sourceJava: resolved.sourceJava,

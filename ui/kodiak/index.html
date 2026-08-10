@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodiak</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #EEF1EC; }
+  #frame { border: 0; width: 100%; height: 100%; display: block; background: #EEF1EC; }
+  #boot {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    color: #5C665F; font-size: 14px; padding: 40px 24px; text-align: center;
+  }
+  #boot a { color: #4A3F8C; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="boot">Loading Kodiak…</div>
+<iframe id="frame" title="Kodiak" style="display:none"></iframe>
+<script>
+const MAPPER_KEY = "kodiak.mapper";
+const EMBED_KEY = "kodiak.ui.embed";
+const MODE_KEY = "kodiak.ui.mode"; // "schema" | "pipeline"
+
+function getMapper() {
+  try { return localStorage.getItem(MAPPER_KEY) || ""; } catch { return ""; }
+}
+function setMapper(id) {
+  try { if (id) localStorage.setItem(MAPPER_KEY, id); } catch { /* ignore */ }
+}
+function setEmbed(on) {
+  try {
+    if (on) sessionStorage.setItem(EMBED_KEY, "1");
+    else sessionStorage.removeItem(EMBED_KEY);
+  } catch { /* ignore */ }
+}
+
+async function resolveMapper() {
+  let id = getMapper();
+  try {
+    const res = await fetch(`/api/views/latest?t=${Date.now()}`);
+    if (!res.ok) return id;
+    const body = await res.json();
+    const registry = Array.isArray(body.registry) ? body.registry : [];
+    if (id && registry.length && !registry.includes(id)) id = "";
+    if (!id) id = body.mapperId || registry[0] || "";
+    if (id) setMapper(id);
+    return id;
+  } catch {
+    return id;
+  }
+}
+
+async function isReady(mapperId) {
+  if (!mapperId) return false;
+  try {
+    const res = await fetch(`/api/schemas/${encodeURIComponent(mapperId)}/ready`);
+    if (!res.ok) return false;
+    const body = await res.json();
+    return Boolean(body.ready);
+  } catch {
+    return false;
+  }
+}
+
+function showFrame(src) {
+  const boot = document.getElementById("boot");
+  const frame = document.getElementById("frame");
+  boot.style.display = "none";
+  frame.style.display = "block";
+  if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
+}
+
+function showBoot(html) {
+  const boot = document.getElementById("boot");
+  const frame = document.getElementById("frame");
+  frame.style.display = "none";
+  frame.removeAttribute("src");
+  boot.style.display = "block";
+  boot.innerHTML = html;
+}
+
+async function route() {
+  const mapperId = await resolveMapper();
+  if (!mapperId) {
+    showBoot(
+      `No mapper selected. Add one in <span style="font-family:ui-monospace,monospace">registry/mapping-registry.yaml</span>, then reload.`,
+    );
+    return;
+  }
+
+  const ready = await isReady(mapperId);
+  try { sessionStorage.setItem(MODE_KEY, ready ? "pipeline" : "schema"); } catch { /* ignore */ }
+
+  if (ready) {
+    try { sessionStorage.removeItem(EMBED_KEY); } catch { /* ignore */ }
+    showFrame("/kodiak/frame/pipeline");
+  } else {
+    // Full-page schema setup (not the drawer embed).
+    try { sessionStorage.setItem(EMBED_KEY, "setup"); } catch { /* ignore */ }
+    showFrame("/kodiak/frame/schema");
+  }
+}
+
+window.addEventListener("message", (e) => {
+  const data = e.data;
+  if (!data || typeof data !== "object") return;
+  if (data.type === "kodiak-schema-saved") {
+    if (data.mapperId) setMapper(data.mapperId);
+    route();
+    return;
+  }
+  if (data.type === "kodiak-mapper" && data.mapperId) {
+    setMapper(data.mapperId);
+    route();
+    return;
+  }
+  if (data.type === "kodiak-need-schema") {
+    if (data.mapperId) setMapper(data.mapperId);
+    setEmbed(false);
+    try { sessionStorage.setItem(EMBED_KEY, "setup"); } catch { /* ignore */ }
+    showFrame("/kodiak/frame/schema");
+  }
+});
+
+route();
+</script>
+</body>
+</html>

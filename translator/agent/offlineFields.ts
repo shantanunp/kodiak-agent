@@ -20,8 +20,9 @@ export function buildOfflineFieldGroups(
 
   if (selectors.length === 0) {
     throw new Error(
-      "Source could not be analyzed and no --fields given. " +
-        "Pass --fields (e.g. --fields Summary.displayName) for a selector-only job.",
+      "Source could not be analyzed and no field selectors given. " +
+        "Save a schema in the pipeline viewer (Edit schema) or pass --fields " +
+        "(e.g. --fields Summary.displayName).",
     );
   }
 

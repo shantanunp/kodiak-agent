@@ -142,7 +142,16 @@ npm run label -- --mapper demo-ai-recognition-mapper --remote
 
 ## Offline mode (no model API access)
 
-Offline labeling needs only Node.js and a mapper checkout (`--worktree`). Pass `--fields` so export knows which fields to label.
+Offline labeling needs only Node.js and a mapper checkout (`--worktree`).
+
+**Schema-scoped fields (recommended):** open `http://localhost:4173/kodiak` (no query
+params — the active mapper is stored in the browser). You see the schema builder until
+source and target both have fields, then the pipeline viewer. Click **Edit schema** to
+change fields. The checklist and agent use **only those target fields** (works when DTOs
+live in JARs). Export without `--fields` picks them up from
+`registry/schemas/{mapperId}.schema.json`.
+
+You can still pass `--fields` to narrow further.
 
 For offices that block outbound calls to the model API: `npm run label` auto-detects this —
 when `MODEL_API_KEY` (or `ANTHROPIC_API_KEY` / `COPILOT_TOKEN`) isn't set, **or** the live
@@ -200,36 +209,26 @@ npm run label -- --mapper demo-ai-recognition-mapper \
 
 
 
-## Schema builder
-
-Define source/target structures before mapping. Saved to `registry/schemas/{mapperId}.schema.json`.
+## App UI
 
 ```bash
 npm run ui:serve
+# → http://localhost:4173/kodiak
 ```
 
-- **Page 1:** [http://localhost:4173/structure-setup/?mapper=my-new-mapper](http://localhost:4173/structure-setup/?mapper=my-new-mapper)
-- **Page 2 (manual build):** [http://localhost:4173/schema-builder/?mapper=my-new-mapper](http://localhost:4173/schema-builder/?mapper=my-new-mapper)
-- **Viewer:** [http://localhost:4173/pipeline-viewer/?mapper=my-new-mapper](http://localhost:4173/pipeline-viewer/?mapper=my-new-mapper)
+One URL: schema setup until source+target are saved, then pipeline viewer. Mapper id is
+chosen in the UI (stored in `localStorage`).
 
-Export/import uses Kodiak JSON (`.schema.json`). Import also accepts JSON/XML samples, JSON Schema, and XSD.
+Schemas save to `registry/schemas/{mapperId}.schema.json`. Export/import uses Kodiak JSON;
+import also accepts JSON/XML sample payloads.
 
 ```bash
 npm run schema:validate -- registry/schemas/my-new-mapper.schema.json
 ```
 
-
-
-## Pipeline viewer (optional)
-
-After `label` looks right:
-
 ```bash
-npm run view   # export demo mapper + serve
-# → http://localhost:4173/pipeline-viewer/?mapper=demo-ai-recognition-mapper
+npm run view   # export demo mapper + serve → http://localhost:4173/kodiak
 ```
-
-Or: `npm run view:export -- --mapper demo-ai-recognition-mapper --label && npm run view:serve`
 
 ## Architecture
 

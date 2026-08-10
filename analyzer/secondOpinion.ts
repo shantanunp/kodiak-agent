@@ -94,6 +94,7 @@ export function looseWriteCandidates(source: string): Array<{ line: number; evid
     { re: /\.\s*with([A-Z]\w*)\s*\(/g, hint: "fluent with* call" },
     { re: /\.\s*put\s*\(\s*"/g, hint: "map put" },
     { re: /::\s*set([A-Z]\w*)\b/g, hint: "method-reference setter" },
+    { re: /\.\s*get([A-Z]\w*)\s*\(\s*\)\s*\.\s*(?:add|addAll)\s*\(/g, hint: "collection getter-add" },
   ];
 
   for (const { re, hint } of patterns) {

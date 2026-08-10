@@ -23,7 +23,7 @@
     },
     "schemaNode": {
       "type": "object",
-      "required": ["id", "name", "type"],
+      "required": ["id", "name"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },

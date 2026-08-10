@@ -10,7 +10,7 @@
 <div class="app">
   <header>
     <div class="brand"><div class="brand-mark"><span></span></div><h1>Kodiak — build your schemas</h1></div>
-    <p class="tagline">Before mapping, define the data shape. Import a schema, infer it from a sample payload, or build the element tree by hand.</p>
+    <p class="tagline">Before mapping, define the data shape. Infer it from a sample payload, import Kodiak JSON, or build the element tree by hand.</p>
     <div class="mapper-bar">
       <label for="mapperId">Mapper id</label>
       <input id="mapperId" type="text" placeholder="e.g. my-new-mapper" />
@@ -90,8 +90,8 @@
   <div class="footer">
     <div class="summary-text" id="summary"></div>
     <div class="footer-actions">
-      <a class="btn-ghost" href="/structure-setup/" style="text-decoration:none;display:inline-block">&#8592; Structures</a>
-      <button class="continue-btn" id="continueBtn">Continue to mapping &rarr;</button>
+      <button class="continue-btn" id="continueBtn">Save &amp; open mapping &rarr;</button>
+      <button class="continue-btn" id="doneEmbedBtn" style="display:none">Save &amp; use these fields</button>
     </div>
   </div>
 </div>
@@ -102,9 +102,7 @@
     <p class="sub" id="modalSub">Paste your content and Kodiak will build the element tree. You can edit everything afterwards.</p>
     <div class="seg" id="modalSeg">
       <button data-mode="payload-json">JSON payload</button>
-      <button data-mode="json-schema">JSON Schema</button>
       <button data-mode="payload-xml">XML payload</button>
-      <button data-mode="xsd">XSD schema</button>
       <button data-mode="kodiak">Kodiak JSON</button>
     </div>
     <textarea id="modalText" spellcheck="false" placeholder="Paste here..."></textarea>

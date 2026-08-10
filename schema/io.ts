@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { paths } from "../src/config/env.js";
 import type { MappingSchemaDocument } from "./types.js";
 import { validateSchemaDocument } from "./validate.js";
-import { flattenPaths } from "./flatten.js";
+import { flattenLeafPaths, flattenPaths } from "./flatten.js";
+import { sideHasContent } from "./validate.js";
 
 export const SCHEMAS_DIR = join(paths.root, "registry/schemas");
 
@@ -20,6 +21,24 @@ export function loadSchema(mapperId: string): MappingSchemaDocument | null {
     throw new Error(`Invalid schema file ${file}: ${result.errors.join(", ")}`);
   }
   return result.doc;
+}
+
+/** Target leaf paths from a saved schema, or [] when none / empty. */
+export function schemaTargetLeafPaths(mapperId: string): string[] {
+  const doc = loadSchema(mapperId);
+  if (!doc?.target?.root) return [];
+  return flattenLeafPaths(doc.target.root);
+}
+
+/** True when saved schema has at least one field on both source and target. */
+export function isSchemaReadyForMapping(mapperId: string): boolean {
+  try {
+    const doc = loadSchema(mapperId);
+    if (!doc) return false;
+    return sideHasContent(doc.source) && sideHasContent(doc.target);
+  } catch {
+    return false;
+  }
 }
 
 export function saveSchema(doc: MappingSchemaDocument): string {

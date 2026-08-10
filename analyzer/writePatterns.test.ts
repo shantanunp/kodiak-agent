@@ -116,6 +116,28 @@ test("PAR-3: method-reference setter is enumerated", () => {
   assert.ok(hits.some((h) => h.field === "tag" && h.via === "setter"), JSON.stringify(hits));
 });
 
+test("PAR-3: getX().add / addAll is enumerated as collection-add", () => {
+  const hits = fieldsOf(
+    `import java.util.*;
+     class M {
+       Out map(String a, List<String> more){
+         Out o=new Out();
+         o.getItems().add(a);
+         o.getItems().addAll(more);
+         return o;
+       }
+     }
+     class Out {
+       List<String> getItems(){ return null; }
+     }`,
+    "Out",
+  );
+  assert.ok(
+    hits.some((h) => h.field === "items" && h.via === "collection-add"),
+    JSON.stringify(hits),
+  );
+});
+
 test("PAR-3: fixture corpus file parses and covers core patterns", () => {
   const source = readFileSync("fixtures/write-patterns/WritePatternCorpus.java", "utf8");
   const { slices } = scanWriteSites({

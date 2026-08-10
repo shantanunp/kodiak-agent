@@ -252,6 +252,26 @@ export const javaAdapter: LanguageAdapter = {
           statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
         });
       }
+
+      // 6) Collection mutation via getter: recv.getFoo().add|addAll(...)
+      const collAddRe = new RegExp(
+        `\\b(${recvAlt})\\.get([A-Z]\\w*)\\s*\\(\\s*\\)\\s*\\.\\s*(?:add|addAll)\\s*\\(`,
+        "g",
+      );
+      for (const m of source.matchAll(collAddRe)) {
+        const openIdx = m.index! + m[0].length - 1;
+        const { text, endIdx } = extractBalanced(source, openIdx);
+        const line = lineOfOffset(source, m.index!);
+        sites.push({
+          targetField: decap(m[2]!),
+          via: "collection-add",
+          receiver: m[1]!,
+          expression: text.trim(),
+          inMethod: methodAt(parsed, line),
+          line,
+          statement: source.slice(m.index!, Math.min(endIdx + 2, source.length)).trim(),
+        });
+      }
     }
 
     // 4) Builder chains: TargetClass.builder() ... .x(expr) ... .build()

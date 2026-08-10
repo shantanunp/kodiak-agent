@@ -12,7 +12,8 @@ export type StructureMethod = "manual" | "schema" | "sample";
 export interface SchemaNode {
   id: string;
   name: string;
-  type: SchemaNodeType;
+  /** Optional — omit or leave unset when the concrete type is unknown. */
+  type?: SchemaNodeType;
   /** When type === "array", type of each item (primitive or "object"). */
   itemType?: SchemaNodeType | "object";
   required?: boolean;

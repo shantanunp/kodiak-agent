@@ -2,17 +2,18 @@
 /**
  * Dev server for all UI apps + schema API.
  *
- *   npm run ui:serve
- *   http://localhost:4173/structure-setup/?mapper=my-mapper
- *   http://localhost:4173/schema-builder/?mapper=my-mapper
- *   http://localhost:4173/pipeline-viewer/
+ * App entry (no query params — mapper is localStorage `kodiak.mapper`):
+ *   http://localhost:4173/kodiak
+ *
+ * Internal frames (loaded by the shell; do not use as bookmarks):
+ *   /kodiak/frame/schema    /kodiak/frame/pipeline
  */
 
 import { createServer, type IncomingMessage } from "node:http";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import { getEnvOptional, paths } from "../src/config/env.js";
-import { loadSchema, saveSchema, SCHEMAS_DIR } from "../schema/io.js";
+import { isSchemaReadyForMapping, loadSchema, saveSchema, SCHEMAS_DIR } from "../schema/io.js";
 import { parseImport } from "../schema/parse.js";
 import { validateSchemaDocument } from "../schema/validate.js";
 import type { ImportMode, MappingSchemaDocument } from "../schema/types.js";
@@ -75,11 +76,21 @@ const MIME: Record<string, string> = {
 };
 
 const ROUTES: Record<string, string> = {
-  "/": "schema-builder/index.html",
-  "/structure-setup": "structure-setup/index.html",
+  "/kodiak": "kodiak/index.html",
+  "/kodiak/frame/schema": "schema-builder/index.html",
+  "/kodiak/frame/pipeline": "pipeline-viewer/index.html",
+  // Legacy paths still serve assets (app.js / styles); HTML entry redirects to /kodiak.
   "/schema-builder": "schema-builder/index.html",
   "/pipeline-viewer": "pipeline-viewer/index.html",
 };
+
+function redirect(
+  res: import("node:http").ServerResponse,
+  location: string,
+): void {
+  res.writeHead(302, { Location: location, "Cache-Control": "no-store" });
+  res.end();
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -179,7 +190,16 @@ function serveStatic(urlPath: string, res: import("node:http").ServerResponse): 
 
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-  const pathname = url.pathname;
+  const pathname = url.pathname.replace(/\/$/, "") || "/";
+
+  // ── App entry: / and legacy HTML bookmarks → /kodiak (no query params) ──
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    (pathname === "/" || pathname === "/pipeline-viewer" || pathname === "/schema-builder")
+  ) {
+    redirect(res, "/kodiak");
+    return;
+  }
 
   // Label → write pipeline-viewer data (server-side model; no browser → vendor API)
   if (pathname === "/api/label" && req.method === "POST") {
@@ -781,6 +801,16 @@ createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && action === "ready") {
+      const ready = isSchemaReadyForMapping(mapperId);
+      sendJson(res, 200, {
+        mapperId,
+        ready,
+        entry: "/kodiak",
+      });
+      return;
+    }
+
     if (req.method === "GET" && !action) {
       const doc = loadSchema(mapperId);
       if (!doc) {
@@ -1001,7 +1031,6 @@ createServer(async (req, res) => {
   res.writeHead(404);
   res.end("Not found");
 }).listen(PORT, () => {
-  console.log(`Kodiak UI: http://localhost:${PORT}/structure-setup/?mapper=my-mapper`);
-  console.log(`  Schema builder: http://localhost:${PORT}/schema-builder/?mapper=my-mapper`);
-  console.log(`  Pipeline viewer: http://localhost:${PORT}/pipeline-viewer/`);
+  console.log(`Kodiak UI: http://localhost:${PORT}/kodiak`);
+  console.log(`  (mapper in localStorage; schema → pipeline when source+target are saved)`);
 });

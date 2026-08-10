@@ -12,6 +12,7 @@ import { scanWriteSites, adapterFor } from "../../analyzer/scanWriteSites.js";
 import { runAuditGate } from "../../analyzer/auditGate.js";
 import { findTypeFile } from "../../analyzer/resolveType.js";
 import { missDiagnostics } from "../../analyzer/secondOpinion.js";
+import { schemaTargetLeafPaths } from "../../schema/io.js";
 import { injectionDiagnostics } from "./promptInjection.js";
 import { attributeMultiInstanceWrites, type NestedTypeRef } from "./multiInstance.js";
 import type { AuditReport, WriteSlice } from "../../analyzer/types.js";
@@ -37,12 +38,14 @@ export interface LabelTasks {
   targetClass: string;
   /**
    * Where the checklist universe came from:
+   *   schema       — saved registry schema target leaf paths (agent universe =
+   *                  only fields the user defined)
    *   target-type  — declared fields of the target type (full guarantee:
    *                  unmapped fields are detectable)
    *   write-sites  — target type source not found; checklist derived from the
    *                  writes themselves (weaker: cannot detect unmapped fields)
    */
-  checklistSource: "target-type" | "write-sites";
+  checklistSource: "target-type" | "write-sites" | "schema";
   /** File the target type was read from, when found outside the mapper file. */
   targetTypeFile?: string;
   /** Human-readable notes on why nested expansion did or didn't happen. */
@@ -282,8 +285,134 @@ function flattenTargetType(options: {
 }
 
 /**
- * Deterministic pre-pass. Throws if the source cannot be parsed — callers
- * decide whether to fall back to the legacy discovery path.
+ * When a saved schema exists, its target leaf paths are the checklist universe
+ * (and what the agent may label). Analyzer write sites still attach as slices.
+ * Schema fields without a matching write stay labelable (`unresolved`), not
+ * hard-`unmapped` — the user explicitly asked for those fields.
+ */
+function applySchemaChecklist(
+  schemaPaths: string[],
+  targetClass: string,
+  slices: WriteSlice[],
+  sourceJava: string,
+  diagnostics: string[],
+): {
+  declared: SourceField[];
+  checklistSource: "schema";
+  report: AuditReport;
+  tasks: FieldTask[];
+} {
+  const declared: SourceField[] = schemaPaths.map((name) => ({
+    className: targetClass,
+    name,
+    line: 0,
+  }));
+  diagnostics.push(
+    `checklist from saved schema (${schemaPaths.length} target leaf field${schemaPaths.length === 1 ? "" : "s"})`,
+  );
+
+  const byField = new Map<string, WriteSlice[]>();
+  for (const s of slices) {
+    const key = norm(s.targetField);
+    if (!byField.has(key)) byField.set(key, []);
+    byField.get(key)!.push(s);
+  }
+  function slicesFor(fieldName: string): WriteSlice[] {
+    const full = byField.get(norm(fieldName));
+    if (full?.length) return full;
+    return byField.get(norm(fieldName.split(".").pop()!.replace(/\[\]$/, ""))) ?? [];
+  }
+
+  const checklist = schemaPaths.map((field) => {
+    const fieldSlices = slicesFor(field);
+    if (fieldSlices.length > 0) {
+      return {
+        field,
+        state: "mapped" as const,
+        writes: fieldSlices.map((w) => ({
+          line: w.line,
+          via: w.via,
+          inMethod: w.inMethod,
+        })),
+      };
+    }
+    return {
+      field,
+      state: "unresolved" as const,
+      writes: [],
+      note: "schema field; no matching write site — agent may label from full mapper source",
+    };
+  });
+
+  const mapped = checklist.filter((c) => c.state === "mapped").length;
+  const unresolved = checklist.filter((c) => c.state === "unresolved").length;
+  const report: AuditReport = {
+    sourceFile: "",
+    targetClass,
+    declaredFields: declared.length,
+    mapped,
+    unmapped: 0,
+    unresolved,
+    gatePassed: true,
+    checklist,
+    orphanWrites: [],
+  };
+
+  diagnostics.push(
+    ...missDiagnostics(
+      sourceJava,
+      slices,
+      checklist.filter((c) => c.state === "unresolved").map((c) => c.field),
+    ),
+  );
+
+  const tasks: FieldTask[] = checklist.map((entry) => {
+    const fieldSlices = slicesFor(entry.field);
+    return {
+      field: entry.field,
+      state: entry.state,
+      slices: fieldSlices,
+      sliceText: fieldSlices.map((s) => s.sliceText).join("\n\n"),
+      note: entry.note,
+    };
+  });
+
+  return { declared, checklistSource: "schema", report, tasks };
+}
+
+function schemaOnlyFallback(
+  options: { mapper: MapperEntry; sourceJava: string },
+  schemaPaths: string[],
+  err: unknown,
+): LabelTasks {
+  const mapperClass = simpleTypeName(options.mapper.class);
+  const targetClass = simpleTypeName(options.mapper.targetType);
+  const diagnostics = [
+    `analyzer unavailable (${err instanceof Error ? err.message : String(err)}); using schema fields only`,
+  ];
+  const { report, tasks, checklistSource } = applySchemaChecklist(
+    schemaPaths,
+    targetClass,
+    [],
+    options.sourceJava,
+    diagnostics,
+  );
+  diagnostics.push(
+    ...injectionDiagnostics(tasks.map((t) => ({ field: t.field, sliceText: t.sliceText }))),
+  );
+  return {
+    report,
+    tasks,
+    mapperClass,
+    targetClass,
+    checklistSource,
+    diagnostics,
+  };
+}
+
+/**
+ * Deterministic pre-pass. Throws if the source cannot be parsed and no saved
+ * schema supplies field paths — callers may fall back to selector-only export.
  */
 export function buildLabelTasks(options: {
   mapper: MapperEntry;
@@ -292,22 +421,30 @@ export function buildLabelTasks(options: {
   /** Worktree root — used to resolve the target type when it lives in another file. */
   worktree?: string;
 }): LabelTasks {
+  const schemaPaths = schemaTargetLeafPaths(options.mapper.id);
   const language = options.language ?? "java";
   const mapperClass = simpleTypeName(options.mapper.class);
   const targetClass = simpleTypeName(options.mapper.targetType);
 
-  const { parsed, slices } = scanWriteSites({
-    filePath: options.mapper.sourceFile,
-    language,
-    mapperClass,
-    targetClass,
-    source: options.sourceJava,
-    worktree: options.worktree,
-  });
+  let parsed: ReturnType<typeof scanWriteSites>["parsed"];
+  let slices: WriteSlice[];
+  try {
+    ({ parsed, slices } = scanWriteSites({
+      filePath: options.mapper.sourceFile,
+      language,
+      mapperClass,
+      targetClass,
+      source: options.sourceJava,
+      worktree: options.worktree,
+    }));
+  } catch (err) {
+    if (schemaPaths.length > 0) return schemaOnlyFallback(options, schemaPaths, err);
+    throw err;
+  }
 
   const adapter = adapterFor(language);
   let declared = adapter.targetFields(parsed, targetClass);
-  let checklistSource: "target-type" | "write-sites" = "target-type";
+  let checklistSource: "target-type" | "write-sites" | "schema" = "target-type";
   let targetTypeFile: string | undefined;
 
   // Target type in a separate file (the common real-world case): resolve it
@@ -426,6 +563,32 @@ export function buildLabelTasks(options: {
     slices.sort((a, b) => a.line - b.line);
   }
 
+  // Prefer saved schema as the agent/checklist universe when present.
+  if (schemaPaths.length > 0) {
+    const applied = applySchemaChecklist(
+      schemaPaths,
+      targetClass,
+      slices,
+      options.sourceJava,
+      diagnostics,
+    );
+    checklistSource = applied.checklistSource;
+    diagnostics.push(
+      ...injectionDiagnostics(
+        applied.tasks.map((t) => ({ field: t.field, sliceText: t.sliceText })),
+      ),
+    );
+    return {
+      report: applied.report,
+      tasks: applied.tasks,
+      mapperClass,
+      targetClass,
+      checklistSource,
+      targetTypeFile,
+      diagnostics,
+    };
+  }
+
   // Last resort: derive the checklist from the writes themselves. Functional,
   // but explicitly weaker — unmapped fields cannot be detected this way.
   if (declared.length === 0) {
@@ -451,7 +614,7 @@ export function buildLabelTasks(options: {
     throw new Error(
       `No declared fields for target type "${options.mapper.targetType}" and no write sites ` +
         `against "${targetClass}" found in ${options.mapper.sourceFile}. ` +
-        `Check registry targetType/class, or pass the correct --worktree.`,
+        `Save a schema in the pipeline viewer (Edit schema), check registry targetType/class, or pass --worktree.`,
     );
   }
 

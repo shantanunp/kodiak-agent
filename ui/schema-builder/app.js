@@ -1,6 +1,7 @@
 import {
   escHtml, escAttr, toast, getMapperId, requireMapperId,
   parseViaApi, saveSchemaDoc, downloadJson, loadDraft,
+  getStoredMapper, setStoredMapper, getEmbedMode,
 } from "/shared/schema-ui.js";
 
 const TYPES = ["object", "array", "string", "integer", "number", "boolean", "date", "datetime"];
@@ -17,9 +18,7 @@ const TYPE_STYLE = {
 const CONTAINER = new Set(["object", "array"]);
 const MODE_LABEL = {
   "payload-json": "JSON payload",
-  "json-schema": "JSON Schema",
   "payload-xml": "XML payload",
-  xsd: "XSD schema",
   kodiak: "Kodiak JSON",
 };
 
@@ -28,9 +27,22 @@ const nid = () => "n" + uid++;
 
 function makeNode(name, type, extra = {}) {
   return Object.assign(
-    { id: nid(), name, type, doc: "", required: false, expanded: true, children: [] },
+    { id: nid(), name, type: type ?? "", doc: "", required: false, expanded: true, children: [] },
     extra,
   );
+}
+
+function isContainerNode(node) {
+  if (CONTAINER.has(node.type)) return true;
+  // Untyped nodes with children act as objects for tree expand / flatten.
+  return !node.type && (node.children?.length ?? 0) > 0;
+}
+
+function typeSelectHtml(selected) {
+  const cur = selected || "";
+  const opts = [`<option value="" ${cur === "" ? "selected" : ""}>(optional)</option>`]
+    .concat(TYPES.map((t) => `<option value="${t}" ${t === cur ? "selected" : ""}>${t}</option>`));
+  return opts.join("");
 }
 
 function emptyRoot(name) {
@@ -77,7 +89,7 @@ function subtreeMatches(node, q) {
 }
 
 function fromApiNode(n) {
-  const type = n.type === "array" ? "array" : n.type;
+  const type = n.type === "array" ? "array" : (n.type || "");
   const ui = makeNode(n.name, type, {
     doc: n.description || "",
     required: !!n.required,
@@ -93,26 +105,28 @@ function fromApiNode(n) {
 }
 
 function toApiNode(uiNode) {
-  const type = uiNode.type === "datetime" ? "string" : uiNode.type;
+  const raw = uiNode.type === "datetime" ? "string" : uiNode.type;
+  const type = raw || undefined;
   const n = {
     id: uiNode.id,
     name: uiNode.name,
-    type,
     required: !!uiNode.required,
     description: uiNode.doc || "",
     children: [],
   };
-  if (uiNode.type === "array") {
+  if (type) n.type = type;
+  if (type === "array") {
     if (uiNode.children?.length) {
       const item = uiNode.children[0];
-      if (item.type === "object" || CONTAINER.has(item.type)) {
+      if (item.type === "object" || CONTAINER.has(item.type) || (!item.type && item.children?.length)) {
         n.itemType = "object";
         n.children = [toApiNode(item)];
-      } else {
+      } else if (item.type) {
         n.itemType = item.type === "datetime" ? "string" : item.type;
       }
     }
-  } else if (uiNode.type === "object") {
+  } else if (type === "object" || (!type && (uiNode.children || []).length)) {
+    if (!type && (uiNode.children || []).length) n.type = "object";
     n.children = (uiNode.children || []).map(toApiNode);
   }
   return n;
@@ -124,6 +138,9 @@ function markExpanded(node, depth) {
 }
 
 function typeBadge(t) {
+  if (!t) {
+    return `<span class="type-badge" style="color:var(--ink-faint);background:var(--bg)">any</span>`;
+  }
   const s = TYPE_STYLE[t] || TYPE_STYLE.string;
   const label = t === "array" ? "array[ ]" : t;
   return `<span class="type-badge" style="color:${s.c};background:${s.bg}">${label}</span>`;
@@ -132,7 +149,7 @@ function typeBadge(t) {
 function nodeRowHtml(node, key, isRoot) {
   const q = schemas[key].query;
   const selId = schemas[key].selectedId;
-  const hasKids = CONTAINER.has(node.type);
+  const hasKids = isContainerNode(node);
   const dim = q && !subtreeMatches(node, q);
   const nameCls = matches(node, q) ? "node-name hit" : "node-name";
   const twist = hasKids
@@ -168,8 +185,8 @@ function inlineEditorHtml(key, node, isRoot) {
   return `<div class="inline-editor" data-inline-for="${node.id}">
     <div class="field"><label>Name</label>
       <input type="text" id="fName-${key}" value="${escAttr(node.name)}"></div>
-    <div class="field"><label>Data type</label>
-      <select id="fType-${key}">${TYPES.map((t) => `<option value="${t}" ${t === node.type ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <div class="field"><label>Data type <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label>
+      <select id="fType-${key}">${typeSelectHtml(node.type)}</select>
     </div>
     <div class="field"><label class="field-row"><input type="checkbox" id="fReq-${key}" ${node.required ? "checked" : ""}> Required field</label></div>
     <div class="field"><label>Documentation</label>
@@ -188,7 +205,7 @@ function renderNode(node, key, depth = 0, isRoot = false, inline = false) {
   if (inline && schemas[key].selectedId === node.id) {
     html += inlineEditorHtml(key, node, isRoot);
   }
-  const isContainer = CONTAINER.has(node.type);
+  const isContainer = isContainerNode(node);
   if (isContainer && node.expanded !== false) {
     html +=
       `<div class="children-wrap">` +
@@ -204,7 +221,7 @@ function renderPaneTree(key, elId, inline = false) {
   let html = renderNode(root, key, 0, true, inline);
   if (!root.children?.length) {
     html +=
-      `<div class="empty" style="padding:28px 16px;margin-top:4px">No fields yet — use <b>+</b> on the root, the source buttons below, or import a schema.</div>`;
+      `<div class="empty" style="padding:28px 16px;margin-top:4px">No fields yet — use the buttons below, or add a root element.</div>`;
   }
   el.innerHTML = html;
   bindPane(key, elId, inline);
@@ -291,12 +308,13 @@ function bindInlineFields(key, container) {
   });
 
   editorEl.querySelector(`#fType-${key}`).addEventListener("change", (e) => {
-    node.type = e.target.value;
-    if (!CONTAINER.has(node.type)) {
+    node.type = e.target.value || "";
+    // Only clear children when switching to a concrete non-container type.
+    if (node.type && !CONTAINER.has(node.type)) {
       node.children = [];
     } else {
       if (!Array.isArray(node.children)) node.children = [];
-      node.expanded = true;
+      if (CONTAINER.has(node.type)) node.expanded = true;
     }
     refreshInline();
   });
@@ -332,9 +350,7 @@ function renderSourcesRow(key, elId) {
   if (empty) {
     el.innerHTML = `<div class="sources">
       <button class="src-btn" data-src-mode="payload-json" data-target="${key}"><span class="ic">{ }</span> From JSON payload</button>
-      <button class="src-btn" data-src-mode="json-schema" data-target="${key}"><span class="ic">JSC</span> Import JSON Schema</button>
       <button class="src-btn" data-src-mode="payload-xml" data-target="${key}"><span class="ic">&lt;/&gt;</span> From XML payload</button>
-      <button class="src-btn" data-src-mode="xsd" data-target="${key}"><span class="ic">XSD</span> Import XSD schema</button>
       <button class="src-btn ghost" data-addroot="${key}"><span class="ic">+</span> Add root element</button>
     </div>`;
   } else {
@@ -362,16 +378,18 @@ function detailBodyHtml(key) {
   }
   const { node, parent } = found;
   const isRoot = !parent;
-  const primitiveHint = !CONTAINER.has(node.type)
+  const primitiveHint = node.type && !CONTAINER.has(node.type)
     ? `<p class="detail-empty" style="margin-bottom:10px">Type is <b>${escHtml(node.type)}</b> — click <b>Add child</b> to convert this field to an <b>object</b> and add nested fields.</p>`
-    : "";
+    : !node.type
+      ? `<p class="detail-empty" style="margin-bottom:10px">Data type is optional — leave as <b>(optional)</b> if unknown.</p>`
+      : "";
   return `
     <div class="detail-label">${isRoot ? "Root element" : "Element"}</div>
     ${primitiveHint}
     <div class="field"><label>Name</label>
       <input type="text" id="fName-${key}" value="${escAttr(node.name)}"></div>
-    <div class="field"><label>Data type</label>
-      <select id="fType-${key}">${TYPES.map((t) => `<option value="${t}" ${t === node.type ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <div class="field"><label>Data type <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label>
+      <select id="fType-${key}">${typeSelectHtml(node.type)}</select>
     </div>
     <div class="field"><label class="field-row"><input type="checkbox" id="fReq-${key}" ${node.required ? "checked" : ""}> Required field</label></div>
     <div class="field"><label>Documentation</label>
@@ -394,12 +412,12 @@ function bindDetailFields(key, container) {
     softRefresh(key);
   });
   container.querySelector(`#fType-${key}`)?.addEventListener("change", (e) => {
-    node.type = e.target.value;
-    if (!CONTAINER.has(node.type)) {
+    node.type = e.target.value || "";
+    if (node.type && !CONTAINER.has(node.type)) {
       node.children = [];
     } else {
       if (!Array.isArray(node.children)) node.children = [];
-      node.expanded = true;
+      if (CONTAINER.has(node.type)) node.expanded = true;
     }
     renderTree();
   });
@@ -451,7 +469,7 @@ function addChild(key, id) {
   }
   const { node } = found;
   const converted = ensureContainer(node);
-  const child = makeNode("newField", "string");
+  const child = makeNode("newField", "");
   node.children.push(child);
   schemas[key].selectedId = child.id;
   if (converted) {
@@ -474,7 +492,7 @@ function addSibling(key, id) {
     return;
   }
   const { node, parent } = found;
-  const sib = makeNode("newField", "string");
+  const sib = makeNode("newField", "");
   const idx = parent.children.indexOf(node);
   parent.children.splice(idx + 1, 0, sib);
   schemas[key].selectedId = sib.id;
@@ -635,13 +653,21 @@ function buildDocument() {
   };
 }
 
+function notifyParentSchemaSaved(mapperId) {
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ type: "kodiak-schema-saved", mapperId }, "*");
+  }
+}
+
 async function onSave() {
   const mapperId = requireMapperId();
   if (!mapperId) return;
   try {
     const doc = buildDocument();
     await saveSchemaDoc(doc);
+    setStoredMapper(mapperId);
     toast(`Saved registry/schemas/${mapperId}.schema.json`);
+    notifyParentSchemaSaved(mapperId);
   } catch (err) {
     toast(err.message);
   }
@@ -663,7 +689,30 @@ async function onContinue() {
   }
   try {
     await saveSchemaDoc(buildDocument());
-    location.href = `/pipeline-viewer/?mapper=${encodeURIComponent(mapperId)}`;
+    setStoredMapper(mapperId);
+    notifyParentSchemaSaved(mapperId);
+    const embed = getEmbedMode();
+    if (embed === "1" || embed === "setup" || window.parent !== window) {
+      return;
+    }
+    location.href = "/kodiak";
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function onDoneEmbed() {
+  const mapperId = requireMapperId();
+  if (!mapperId) return;
+  if (countElements("source") === 0 || countElements("target") === 0) {
+    toast("Define at least one field on both source and target");
+    return;
+  }
+  try {
+    await saveSchemaDoc(buildDocument());
+    setStoredMapper(mapperId);
+    toast(`Saved — agent will use ${countElements("target")} target field(s)`);
+    notifyParentSchemaSaved(mapperId);
   } catch (err) {
     toast(err.message);
   }
@@ -716,8 +765,7 @@ async function buildFromModal() {
       const result = await parseViaApi(modalMode, text, rootName);
       schemas[modalTarget].root = fromApiNode(result.root);
       schemas[modalTarget].format = result.format;
-      schemas[modalTarget].method =
-        modalMode.includes("schema") || modalMode === "xsd" ? "schema" : "sample";
+      schemas[modalTarget].method = modalMode === "kodiak" ? "manual" : "sample";
       markExpanded(schemas[modalTarget].root, 2);
       schemas[modalTarget].selectedId = schemas[modalTarget].root.children[0]
         ? schemas[modalTarget].root.children[0].id
@@ -867,6 +915,7 @@ function wireEvents() {
     if (e.key === "Enter") aiDraft();
   });
   document.getElementById("continueBtn").addEventListener("click", onContinue);
+  document.getElementById("doneEmbedBtn")?.addEventListener("click", onDoneEmbed);
   document.getElementById("btnSave").addEventListener("click", onSave);
   document.getElementById("btnExport").addEventListener("click", onExport);
   document.getElementById("btnImportDoc").addEventListener("click", () => openModal("kodiak", side));
@@ -876,9 +925,32 @@ function wireEvents() {
 }
 
 async function init() {
-  const params = new URLSearchParams(location.search);
-  if (params.get("mapper")) {
-    document.getElementById("mapperId").value = params.get("mapper");
+  const stored = getStoredMapper();
+  if (stored) {
+    document.getElementById("mapperId").value = stored;
+  }
+
+  const embedMode = getEmbedMode(); // "1" drawer | "setup" full-page in /kodiak
+  const embed = embedMode === "1" || embedMode === "setup";
+  if (embed) {
+    document.body.classList.add("embed");
+    const steps = document.querySelector(".steps");
+    if (steps) steps.style.display = "none";
+    const tagline = document.querySelector(".tagline");
+    if (tagline) {
+      tagline.textContent =
+        embedMode === "setup"
+          ? "Define source and target fields. Save to open the mapping view."
+          : "Define fields here. After save, the checklist and agent use only these target fields.";
+    }
+    const cont = document.getElementById("continueBtn");
+    if (cont) cont.style.display = "none";
+    const done = document.getElementById("doneEmbedBtn");
+    if (done) {
+      done.style.display = "";
+      done.textContent =
+        embedMode === "setup" ? "Save & open mapping" : "Save & use these fields";
+    }
   }
 
   const draft = loadDraft();
@@ -890,9 +962,16 @@ async function init() {
     schemas.target.root = fromApiNode(draft.target.root);
     schemas.target.method = draft.target.method || "manual";
   }
+  if (draft?.mapperId && !getMapperId()) {
+    document.getElementById("mapperId").value = draft.mapperId;
+    setStoredMapper(draft.mapperId);
+  }
 
   const mapperId = getMapperId();
-  if (mapperId) await loadExistingSchema(mapperId);
+  if (mapperId) {
+    setStoredMapper(mapperId);
+    await loadExistingSchema(mapperId);
+  }
 
   wireEvents();
   renderTree();

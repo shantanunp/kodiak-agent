@@ -12,13 +12,13 @@ export function newNodeId(): string {
 
 export function makeNode(
   name: string,
-  type: SchemaNodeType,
+  type?: SchemaNodeType,
   extra: Partial<Omit<SchemaNode, "id" | "name" | "type">> = {},
 ): SchemaNode {
   return {
     id: newNodeId(),
     name,
-    type,
+    ...(type ? { type } : {}),
     itemType: extra.itemType,
     required: extra.required ?? false,
     description: extra.description ?? "",

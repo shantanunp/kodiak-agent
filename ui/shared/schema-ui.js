@@ -25,9 +25,29 @@ export function toast(msg) {
   el._t = setTimeout(() => el.classList.remove("show"), 2800);
 }
 
+export const MAPPER_STORAGE_KEY = "kodiak.mapper";
+export const EMBED_STORAGE_KEY = "kodiak.ui.embed";
+
+export function getStoredMapper() {
+  try {
+    return localStorage.getItem(MAPPER_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredMapper(id) {
+  try {
+    if (id) localStorage.setItem(MAPPER_STORAGE_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Mapper id from input / localStorage — never from URL query params. */
 export function getMapperId() {
-  const params = new URLSearchParams(location.search);
-  return params.get("mapper") || document.getElementById("mapperId")?.value?.trim() || "";
+  const input = document.getElementById("mapperId")?.value?.trim() || "";
+  return input || getStoredMapper();
 }
 
 export function requireMapperId() {
@@ -36,7 +56,17 @@ export function requireMapperId() {
     toast("Enter a mapper id first");
     return null;
   }
+  setStoredMapper(id);
   return id;
+}
+
+/** "1" = drawer embed, "setup" = full-page setup inside /kodiak shell. */
+export function getEmbedMode() {
+  try {
+    return sessionStorage.getItem(EMBED_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 
 export async function parseViaApi(mode, text, rootName) {
@@ -94,23 +124,20 @@ export const TYPES = [
   { v: "object", label: "Object (dict)" },
 ];
 
-export const METHODS = [
-  { id: "schema", icon: "\u29C9", title: "Load a schema file", desc: "XSD or JSON Schema — fields, types and rules parsed from the definition." },
-  { id: "sample", icon: "\u21E9", title: "Load a sample payload", desc: "A real XML or JSON example — structure is inferred from the data." },
-  { id: "manual", icon: "\u270E", title: "Build manually", desc: "Define fields yourself using simple types — text, number, list, object." },
-];
-
 let uid = 1;
 export function newNode(name, type) {
-  return {
+  const node = {
     id: "n" + uid++,
     name: name || "field",
-    type: type || "string",
-    itemType: "string",
     description: "",
     required: false,
     children: [],
   };
+  if (type) {
+    node.type = type;
+    if (type === "array") node.itemType = "string";
+  }
+  return node;
 }
 
 export function resetIds() {

@@ -46,7 +46,7 @@ export interface WriteSite {
   /** Normalized field leaf, e.g. "recipientFirst". */
   targetField: string;
   /** How the write happens. */
-  via: "setter" | "builder" | "assignment" | "map-put";
+  via: "setter" | "builder" | "assignment" | "map-put" | "collection-add";
   /** Receiver variable, e.g. "notice". */
   receiver: string;
   /** The full argument / right-hand-side expression, verbatim. */

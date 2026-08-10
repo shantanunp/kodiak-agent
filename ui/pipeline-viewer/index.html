@@ -152,14 +152,47 @@
   .score-runs th{color:var(--ink-faint);font-weight:600;}
   .score-refresh{margin-left:auto;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;}
   .score-refresh:hover{color:var(--ink);border-color:var(--ink-faint);}
+  .schema-drawer{
+    position:fixed;inset:0;z-index:40;display:none;background:rgba(23,32,28,.45);
+  }
+  .schema-drawer.open{display:block;}
+  .schema-drawer-panel{
+    position:absolute;top:0;right:0;bottom:0;width:min(960px,100%);
+    background:var(--bg);box-shadow:-8px 0 32px rgba(0,0,0,.12);
+    display:flex;flex-direction:column;
+  }
+  .schema-drawer-head{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);
+  }
+  .schema-drawer-head h2{margin:0;font-size:15px;font-weight:600;}
+  .schema-drawer-head p{margin:2px 0 0;font-size:12px;color:var(--ink-soft);}
+  .schema-drawer-close{
+    border:1px solid var(--line);background:var(--bg);color:var(--ink);
+    font-weight:600;font-size:12px;padding:7px 12px;border-radius:7px;cursor:pointer;
+  }
+  .schema-drawer-close:hover{border-color:var(--ink-faint);}
+  .schema-drawer iframe{flex:1;border:0;width:100%;background:var(--bg);}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <div class="brand"><div class="brand-mark"><span></span></div><h1>Pipeline Viewer</h1></div>
-    <p class="tagline">Pick a target field on the left — its pipeline loads on demand (verified → cache → model).</p>
+    <p class="tagline">Define target fields in <b>Edit schema</b>, then pick a field on the left — the agent maps only those fields.</p>
   </header>
+  <div class="schema-drawer" id="schemaDrawer" aria-hidden="true">
+    <div class="schema-drawer-panel">
+      <div class="schema-drawer-head">
+        <div>
+          <h2>Edit schema</h2>
+          <p>Saved target fields become the checklist the agent labels.</p>
+        </div>
+        <button type="button" class="schema-drawer-close" id="schemaDrawerClose">Close</button>
+      </div>
+      <iframe id="schemaFrame" title="Schema builder"></iframe>
+    </div>
+  </div>
   <div class="meta-bar" id="metaBar"></div>
 
   <div class="ai-bar">
@@ -462,8 +495,9 @@ function render(data, fieldIndex) {
     data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
     data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
     data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
-    `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(data.mapperId)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
+    `<button type="button" class="pill" data-edit-schema style="cursor:pointer">Edit schema</button>`,
   ].join('');
+  wireEditSchemaButtons();
 
   const fields = Array.isArray(data.fields) ? data.fields : null;
   let steps = data.steps || [];
@@ -531,7 +565,7 @@ function indexForFieldsParam(data, fieldsParam) {
 
 let availableMappers = [];
 
-async function latestMapper(_params) {
+async function latestMapper() {
   try {
     const res = await fetch(`/api/views/latest?t=${Date.now()}`);
     if (!res.ok) return '';
@@ -539,7 +573,6 @@ async function latestMapper(_params) {
     availableMappers = Array.isArray(body.registry) && body.registry.length
       ? body.registry
       : (Array.isArray(body.views) ? body.views : []);
-    // Keep the URL clean (/pipeline-viewer) — mapper is session state, not required in the query.
     return body.mapperId || '';
   } catch {
     return '';
@@ -565,6 +598,10 @@ function renderMapperPicker() {
     activeField = null;
     for (const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
     viewData = null;
+    try { localStorage.setItem('kodiak.mapper', sel.value); } catch { /* ignore */ }
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'kodiak-mapper', mapperId: sel.value }, '*');
+    }
     load(sel.value).then(loadChecklist);
   });
   meta.prepend(sel);
@@ -576,37 +613,45 @@ function hint(html) {
 }
 
 async function load(forcedMapper) {
-  const params = new URLSearchParams(location.search);
   const remembered = (() => { try { return localStorage.getItem('kodiak.mapper') || ''; } catch { return ''; } })();
-  currentMapper = forcedMapper || params.get('mapper') || remembered || await latestMapper(params);
-  // Ensure registry list is loaded even when mapper came from URL / localStorage.
-  if (!availableMappers.length) await latestMapper(params);
+  currentMapper = forcedMapper || remembered || await latestMapper();
+  if (!availableMappers.length) await latestMapper();
   if (currentMapper && !availableMappers.includes(currentMapper) && availableMappers.length) {
-    // Stale memory / unknown id — fall back to server default.
-    currentMapper = availableMappers.includes(remembered) ? remembered : (await latestMapper(params));
+    currentMapper = availableMappers.includes(remembered) ? remembered : (await latestMapper());
   }
   try { if (currentMapper) localStorage.setItem('kodiak.mapper', currentMapper); } catch { /* ignore */ }
-  const fieldsParam = params.get('fields');
-  // Pre-fill optional re-label filter for Build with AI (after "| fields: …")
-  if (fieldsParam && !document.getElementById('aiInput').value.trim()) {
-    document.getElementById('aiInput').placeholder =
-      `e.g. rename helper | fields: ${fieldsParam}`;
-  }
 
   if (!currentMapper) {
     document.getElementById('metaBar').innerHTML = '';
     document.getElementById('fieldItems').innerHTML =
       `<p style="font-size:12px;color:var(--ink-faint);padding:6px">No mappers in registry and no .view.json under data/.</p>`;
-    hint(`Add a mapper to <span class="mono">registry/mapping-registry.yaml</span> or run <span class="mono">npm run label</span>.`);
+    hint(`Add a mapper to <span class="mono">registry/mapping-registry.yaml</span>, then reload.`);
     return;
   }
 
+  // Tell /kodiak shell to show schema setup when source+target are incomplete.
+  try {
+    const readyRes = await fetch(`/api/schemas/${encodeURIComponent(currentMapper)}/ready`);
+    if (readyRes.ok) {
+      const readyBody = await readyRes.json();
+      if (!readyBody.ready) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'kodiak-need-schema', mapperId: currentMapper }, '*');
+        } else {
+          location.replace('/kodiak');
+        }
+        return;
+      }
+    }
+  } catch { /* stay on viewer if readiness check fails */ }
+
   document.getElementById('metaBar').innerHTML = [
     availableMappers.length <= 1 ? `<span class="pill">${esc(currentMapper)}</span>` : '',
-    `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(currentMapper)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
+    `<button type="button" class="pill" data-edit-schema style="cursor:pointer">Edit schema</button>`,
   ].filter(Boolean).join('');
+  wireEditSchemaButtons();
   renderMapperPicker();
-  hint('Select a target field on the left to load its pipeline.');
+  hint('Select a target field on the left to load its pipeline. Use Edit schema to define which fields the agent maps.');
 
   // Warm the per-field cache from any prior full view — never paint the whole
   // dump on the canvas. Pipelines still only appear after a LHS click.
@@ -621,8 +666,9 @@ async function load(forcedMapper) {
           data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
           data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
           data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
-          `<a class="pill" href="/structure-setup/?mapper=${encodeURIComponent(currentMapper)}" style="text-decoration:none;color:inherit">Edit schema</a>`,
+          `<button type="button" class="pill" data-edit-schema style="cursor:pointer">Edit schema</button>`,
         ].filter(Boolean).join('');
+        wireEditSchemaButtons();
         renderMapperPicker();
       }
       if (Array.isArray(data.fields)) {
@@ -907,20 +953,41 @@ async function loadChecklist(){
     if(extras) meta.insertAdjacentHTML('beforeend', extras);
     applyScorePills();
     renderFieldList();
-    // Deep-link: ?fields=message.dataVersionIdentifier opens that field only.
-    const want = new URLSearchParams(location.search).get('fields')?.split(',')[0]?.trim();
-    if(want && checklist.fields.some(f => f.field === want || f.field.endsWith('.'+want) || fieldLeaf(f.field)===want)){
-      const match = checklist.fields.find(f => f.field === want)
-        || checklist.fields.find(f => f.field.endsWith('.'+want) || fieldLeaf(f.field)===want);
-      if(match) openField(match.field);
-    }
   }catch(e){ showChecklistError(e.message); }
 }
 
 function showChecklistError(msg){
   document.getElementById('fieldItems').innerHTML =
     `<div style="font-size:12px;color:var(--cond);line-height:1.5;padding:6px">Checklist unavailable: ${esc(msg)}<br><br>
-     Point the UI at a mapper checkout (worktree is inferred from the registry source path when possible) and restart <span style="font-family:var(--font-mono)">npm run ui:serve</span>.</div>`;
+     Use <b>Edit schema</b> to define target fields (works even when DTOs are JAR-only), or point the UI at a mapper checkout and restart <span style="font-family:var(--font-mono)">npm run ui:serve</span>.</div>`;
+}
+
+function wireEditSchemaButtons(){
+  document.querySelectorAll('[data-edit-schema]').forEach((el) => {
+    el.addEventListener('click', () => openSchemaEditor());
+  });
+}
+
+function openSchemaEditor(){
+  if(!currentMapper){
+    hint('Pick a mapper first, then edit its schema.');
+    return;
+  }
+  try { localStorage.setItem('kodiak.mapper', currentMapper); } catch { /* ignore */ }
+  try { sessionStorage.setItem('kodiak.ui.embed', '1'); } catch { /* ignore */ }
+  const drawer = document.getElementById('schemaDrawer');
+  const frame = document.getElementById('schemaFrame');
+  const url = '/kodiak/frame/schema';
+  // Reload so embed mode + mapper are picked up from storage.
+  frame.setAttribute('src', url);
+  drawer.classList.add('open');
+  drawer.setAttribute('aria-hidden', 'false');
+}
+
+function closeSchemaEditor(){
+  const drawer = document.getElementById('schemaDrawer');
+  drawer.classList.remove('open');
+  drawer.setAttribute('aria-hidden', 'true');
 }
 
 /** Collapsed group paths — empty Set means "all expanded" (default). */
@@ -1403,6 +1470,18 @@ document.getElementById('scoreRefresh')?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   loadScorecard();
+});
+
+document.getElementById('schemaDrawerClose')?.addEventListener('click', () => closeSchemaEditor());
+document.getElementById('schemaDrawer')?.addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeSchemaEditor();
+});
+window.addEventListener('message', (e) => {
+  const data = e.data;
+  if (!data || data.type !== 'kodiak-schema-saved') return;
+  if (data.mapperId && data.mapperId !== currentMapper) return;
+  closeSchemaEditor();
+  loadChecklist().then(loadScorecard);
 });
 
 load().then(() => Promise.all([loadChecklist(), loadScorecard()]));

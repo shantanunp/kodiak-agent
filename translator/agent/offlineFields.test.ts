@@ -12,10 +12,10 @@ describe("buildOfflineFieldGroups", () => {
     assert.deepEqual(groups[0]!.pipeline, []);
   });
 
-  it("requires --fields", () => {
+  it("requires selectors when analyzer/schema unavailable", () => {
     assert.throws(
       () => buildOfflineFieldGroups({ selectors: [] }),
-      /--fields/,
+      /schema|fields/i,
     );
   });
 });

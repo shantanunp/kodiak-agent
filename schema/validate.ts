@@ -7,7 +7,10 @@ const VALID_METHODS = new Set(["manual", "schema", "sample"]);
 function validateNode(node: SchemaNode, path: string, errors: string[]): void {
   if (!node.id) errors.push(`${path}: missing id`);
   if (!node.name?.trim()) errors.push(`${path}: missing name`);
-  if (!VALID_TYPES.has(node.type)) errors.push(`${path}: invalid type ${node.type}`);
+  // type is optional; only reject when present and unknown
+  if (node.type && !VALID_TYPES.has(node.type)) {
+    errors.push(`${path}: invalid type ${node.type}`);
+  }
 
   if (node.type === "array" && node.itemType && !VALID_TYPES.has(node.itemType) && node.itemType !== "object") {
     errors.push(`${path}: invalid itemType ${node.itemType}`);

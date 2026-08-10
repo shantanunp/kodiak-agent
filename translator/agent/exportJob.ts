@@ -22,7 +22,7 @@ import {
   loadSchemaJson,
   type IndexAst,
 } from "../model/index.js";
-import { schemaContextForLabeler } from "../../schema/io.js";
+import { schemaContextForLabeler, schemaTargetLeafPaths } from "../../schema/io.js";
 import { parseFieldSelectors } from "../filterByFields.js";
 import {
   computePipelineFingerprint,
@@ -120,6 +120,7 @@ export async function exportAgentJob(
   }>;
 
   if (tasks) {
+    // Schema checklists keep "unresolved" (no write site) labelable; only skip hard unmapped.
     const wanted = tasks.tasks.filter((t) => t.state !== "unmapped");
     const filtered =
       selectors.length > 0
@@ -132,19 +133,22 @@ export async function exportAgentJob(
     groups = filtered.map((t) => ({
       targetField: t.field,
       pipeline: [],
-      slice: t.state === "mapped" ? t.sliceText : undefined,
+      slice: t.state === "mapped" && t.sliceText ? t.sliceText : undefined,
       auditState: t.state as "mapped" | "unresolved",
       auditNote: t.note,
     }));
   } else {
-    groups = buildOfflineFieldGroups({ selectors });
+    const schemaSelectors = schemaTargetLeafPaths(mapperId);
+    const effective =
+      selectors.length > 0 ? selectors : schemaSelectors;
+    groups = buildOfflineFieldGroups({ selectors: effective });
   }
 
   if (groups.length === 0) {
     throw new Error(
       selectors.length > 0
         ? `No field groups matched --fields ${selectors.join(",")}`
-        : "No field groups found for mapper",
+        : "No field groups found for mapper. Save a schema in the pipeline viewer (Edit schema) or pass --fields.",
     );
   }
 

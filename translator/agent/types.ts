@@ -52,7 +52,7 @@ export interface AgentJob {
   fields: AgentJobField[];
   /** Analyzer checklist summary embedded so import can detect gaps. */
   audit?: {
-    checklistSource?: "target-type" | "write-sites";
+    checklistSource?: "target-type" | "write-sites" | "schema";
     targetTypeFile?: string;
     declaredFields: number;
     mapped: number;
