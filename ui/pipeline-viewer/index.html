@@ -1384,6 +1384,10 @@ async function resetMappings(){
     'This cannot be undone.'
   );
   if(!ok) return;
+  // Stop any in-flight Load all so it cannot rewrite caches after the wipe.
+  bulkStop = true;
+  bulkRunning = false;
+  lastLoadSummary = '';
   const btn = document.getElementById('resetMappingsBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Resetting…'; }
   try{
@@ -1400,7 +1404,7 @@ async function resetMappings(){
     lastChangeSummary = '';
     lastChangedFiles = [];
     document.getElementById('canvas').innerHTML =
-      `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Mappings cleared for <b>${esc(currentMapper)}</b>. Select a field and Load / Load all to label from scratch.</p>`;
+      `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Mappings cleared for <b>${esc(currentMapper)}</b>. The field list will reload from your <b>schema</b> — <span style="font-family:var(--font-mono)">MAPPED</span> badges mean the analyzer found a Java write site, not a saved pipeline. Use <b>Load</b> / <b>Load all</b> only when you want to label again.</p>`;
     await loadChecklist();
     await loadScorecard();
   }catch(e){
