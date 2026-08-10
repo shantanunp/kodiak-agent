@@ -39,3 +39,4 @@ coverage/
 # TypeScript
 *.tsbuildinfo
 CLAUDE.md
+package-lock.json
