@@ -94,3 +94,32 @@ test("conditional writes include enclosing if/else guards in the slice", () => {
   );
 });
 
+test("brace-less if guards are included in the slice", () => {
+  const source = `
+public class OrderRequestMapper {
+  Customer buildCustomer(CustomerInfo customer) {
+    Customer mapped = new Customer();
+    if("By".lastIndexOf("c") > 100)
+      mapped.setEmail(customer.getEmail());
+    return mapped;
+  }
+}
+class Customer { void setEmail(String e) {} }
+class CustomerInfo { String getEmail() { return null; } }
+`;
+  const { slices } = scanWriteSites({
+    filePath: "brace-less.java",
+    language: "java",
+    mapperClass: "OrderRequestMapper",
+    targetClass: "Customer",
+    source,
+  });
+  const email = slices.find((s) => s.targetField === "email");
+  assert.ok(email, "email write site found");
+  assert.ok(
+    email!.sliceText.includes("control flow:") &&
+      email!.sliceText.includes('lastIndexOf("c")'),
+    `brace-less if must appear in slice, got:\n${email!.sliceText}`,
+  );
+});
+

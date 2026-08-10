@@ -58,15 +58,113 @@ function referencedIdentifiers(expression: string): string[] {
   return [...out];
 }
 
+type GuardHeader = { start: number; header: string };
+
+/**
+ * Control header immediately before `pos` whose body is a single statement
+ * (no `{` between header and `pos`): `if (pred)\n  stmt;`
+ *
+ * `pos` must be the start of that body (write statement, or an inner brace-less
+ * header) — not the start of the `if` itself, or the header is skipped.
+ */
+function peekBraceLessHeaderBefore(
+  bodyText: string,
+  pos: number,
+): GuardHeader | null {
+  let j = pos - 1;
+  while (j >= 0 && /\s/.test(bodyText[j]!)) j--;
+  if (j < 0) return null;
+  // Braced body — handled by the brace walk, not here.
+  if (bodyText[j] === "{") return null;
+
+  let headerEnd = j + 1;
+  let start: number;
+
+  if (bodyText[j] === ")") {
+    // Walk back over balanced `(...)`, then the if/for/while keyword.
+    let paren = 0;
+    let s: string | null = null;
+    const closeParen = j;
+    let openParen = -1;
+    for (; j >= 0; j--) {
+      const c = bodyText[j]!;
+      const p = j > 0 ? bodyText[j - 1]! : "";
+      if (s) {
+        if (c === s && p !== "\\") s = null;
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        s = c;
+        continue;
+      }
+      if (c === ")") paren++;
+      else if (c === "(") {
+        paren--;
+        if (paren === 0) {
+          openParen = j;
+          j--;
+          while (j >= 0 && /\s/.test(bodyText[j]!)) j--;
+          break;
+        }
+      }
+    }
+    if (openParen < 0) return null;
+    headerEnd = closeParen + 1;
+
+    let k = j;
+    while (k >= 0 && /[A-Za-z]/.test(bodyText[k]!)) k--;
+    const keyword = bodyText.slice(k + 1, j + 1).trim();
+    if (keyword !== "if" && keyword !== "for" && keyword !== "while") return null;
+    start = k + 1;
+    if (keyword === "if") {
+      let p = start - 1;
+      while (p >= 0 && /\s/.test(bodyText[p]!)) p--;
+      if (p >= 3 && bodyText.slice(p - 3, p + 1) === "else") {
+        start = p - 3;
+      }
+    }
+  } else if (/[A-Za-z]/.test(bodyText[j]!)) {
+    let k = j;
+    while (k >= 0 && /[A-Za-z]/.test(bodyText[k]!)) k--;
+    const keyword = bodyText.slice(k + 1, j + 1).trim();
+    if (keyword !== "else") return null;
+    start = k + 1;
+    headerEnd = j + 1;
+  } else {
+    return null;
+  }
+
+  if (/[{}]/.test(bodyText.slice(headerEnd, pos))) return null;
+
+  const header = bodyText.slice(start, headerEnd).replace(/\s+/g, " ").trim();
+  if (!/^(?:else\s+if|if|else|for|while)\b/.test(header)) return null;
+  return { start, header };
+}
+
+/** Brace-less guard chain whose body begins at `pos` (outer → inner). */
+function braceLessGuardChain(bodyText: string, pos: number): GuardHeader[] {
+  const found: GuardHeader[] = [];
+  let cursor = pos;
+  while (cursor > 0) {
+    const g = peekBraceLessHeaderBefore(bodyText, cursor);
+    if (!g) break;
+    found.push(g);
+    cursor = g.start;
+  }
+  return found.reverse();
+}
+
 /**
  * Headers of if/else/for/while/switch blocks that enclose `atOffset` in bodyText.
  * Constant / branched writes need their predicates in the slice — local-def
  * tracing alone cannot see them (true/false literals have no identifiers).
+ *
+ * Handles both braced (`if (p) { stmt; }`) and brace-less (`if (p)\n  stmt;`) forms.
  */
 export function enclosingGuards(bodyText: string, atOffset: number): string[] {
   if (atOffset <= 0 || atOffset > bodyText.length) return [];
 
-  const guards: string[] = [];
+  const braced: GuardHeader[] = [];
   let depth = 0;
   let inStr: string | null = null;
   /** After recording `else` / `else if`, skip the `}` that closed the then-block so the matching `if (` still surfaces. */
@@ -152,14 +250,26 @@ export function enclosingGuards(bodyText: string, atOffset: number): string[] {
     const header = bodyText.slice(start, headerEnd).replace(/\s+/g, " ").trim();
     if (
       /^(?:else\s+if|if|else|for|while|switch|do|catch)\b/.test(header) &&
-      !guards.includes(header)
+      !braced.some((g) => g.header === header)
     ) {
-      guards.push(header);
+      braced.push({ start, header });
       if (/^else\b/.test(header)) skipNextCloseBrace = true;
     }
   }
 
-  return guards.reverse();
+  braced.reverse(); // outer → inner
+
+  // Anchor at the write (or braced header start) — not "statement start" after
+  // the previous `;`, which for `if (p)\n  stmt;` is the `if` itself.
+  const lessInner = braceLessGuardChain(bodyText, atOffset);
+  const lessOuter =
+    braced.length > 0 ? braceLessGuardChain(bodyText, braced[0]!.start) : [];
+
+  const guards: string[] = [];
+  for (const g of [...lessOuter, ...braced, ...lessInner]) {
+    if (!guards.includes(g.header)) guards.push(g.header);
+  }
+  return guards;
 }
 
 /**

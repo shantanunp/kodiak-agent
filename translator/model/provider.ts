@@ -126,7 +126,13 @@ Rules:
    {"kind":"constant","value":true,"summary":"Sets priority true on the EXPRESS branch."}]
   When the slice shows BOTH branches, emit ONE non-empty pipeline that captures the mapping
   (read + condition + resulting value); never return recognized=true with an empty pipeline.
-- Direct getter→setter → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads customer.displayName from the source."}]
+- CRITICAL — when the slice includes "// control flow:" headers (if/else/for/while), you MUST
+  emit a filter step for each header, even for a plain getter→setter under that guard.
+  Example: control flow if("By".lastIndexOf("c") > 100) around setEmail →
+  [{"kind":"read","sourceField":"customer.email","summary":"…"},
+   {"kind":"filter","condition":"\\"By\\".lastIndexOf(\\"c\\") > 100","summary":"Only sets email when the predicate holds."}]
+  Do not collapse guarded writes to read-only.
+- Direct getter→setter (no control-flow header) → [{"kind":"read","sourceField":"<schema source path>","summary":"Reads customer.displayName from the source."}]
 - Arithmetic (e.g. quantity * 12) → read + transform multiply with value "12"
 - Name-split (parts[0]/parts[1] from trim+split helper):
   [{"kind":"read","sourceField":"customer.displayName","summary":"…"},
@@ -143,7 +149,8 @@ Rules:
   e.g. sanitizeAlpha(...) that actually calls keepDigits → emit keepDigits, NOT lettersOnly.
   Follow what each helper does (trim / digit filter / letter filter / uppercase / passthrough).
   Drop null-guard and identity passthrough helpers (no pipeline step).
-- Drop meaningless null-guard filters.
+- Drop meaningless null-guard filters you invent yourself. Keep filters that appear as
+  "// control flow:" headers in the slice.
 - If RAW meta.code is present, expand it into the correct pipeline from the real transforms in that code.
 - EVERY pipeline step MUST include "summary": one short plain-English sentence describing what THAT step does (mention the real helper/method when known, e.g. "trimValue trims leading/trailing whitespace.").
 - "reason" is a brief overall field explanation (helpers chain + source→target). Do not put per-step detail only in reason — put it in each step's summary.

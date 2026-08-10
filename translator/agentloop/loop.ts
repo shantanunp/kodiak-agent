@@ -268,6 +268,7 @@ export async function runAgentLoop(
       { targetField: task.field, pipeline: [] },
       response ?? { recognized: false, reason: "no model response" },
       "model",
+      task.sliceText,
     );
     if (labeled.pipeline.length === 0) {
       console.error(

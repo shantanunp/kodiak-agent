@@ -203,7 +203,15 @@ async function main(): Promise<void> {
       }
     }
 
-    const labeled = applyFieldMappingResponse(entry, field.response, "model");
+    const jobField = job?.fields?.find(
+      (f) => f.javaTargetField === field.javaTargetField,
+    );
+    const labeled = applyFieldMappingResponse(
+      entry,
+      field.response,
+      "model",
+      jobField?.slice,
+    );
     const now = new Date().toISOString();
     setFieldPipelineCache({
       fingerprint,

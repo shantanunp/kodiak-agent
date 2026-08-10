@@ -13,11 +13,12 @@ When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` 
    - `mapper` — registry metadata (class, entryMethod, sourceType, targetType)
    - `fields[]` — each `businessFieldSelector` the user asked to label
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
-3. For **each** entry in `fields[]`, find the Java write in `sourceJava` and produce a `FieldMappingResponse`:
+3. For **each** entry in `fields[]`, find the Java write in `sourceJava` (prefer `fields[].slice` when present) and produce a `FieldMappingResponse`:
    - `recognized` (boolean)
    - `targetField` (business path from schema, e.g. `DeliveryPayload.shipTo.postalCode`)
-   - `pipeline` (array of steps: read / transform / constant / …)
+   - `pipeline` (array of steps: read / filter / transform / constant / …)
    - `reason` (short string)
+   - If the slice has `// control flow:` headers, each header **must** become a `filter` step (even for plain getter→setter).
 4. Write **only** `result.json` next to `job.json`:
 
 ```json

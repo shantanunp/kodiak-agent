@@ -90,14 +90,87 @@ export function fromPipelineOp(
 }
 
 /**
+ * Pull `// control flow:` headers from a write-site slice (analyzer output).
+ * Outer → inner order, same as the slice.
+ */
+export function controlFlowHeadersFromSlice(sliceText: string): string[] {
+  if (!sliceText) return [];
+  const lines = sliceText.split(/\r?\n/);
+  const idx = lines.findIndex((l) => /\/\/\s*control flow:/i.test(l));
+  if (idx < 0) return [];
+  const headers: string[] = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (!line) continue;
+    if (line.startsWith("//")) break;
+    if (/^(?:else\s+if|if|else|for|while)\b/.test(line)) {
+      headers.push(line);
+      continue;
+    }
+    break;
+  }
+  return headers;
+}
+
+/** Turn an analyzer control-flow header into a FILTER condition string. */
+export function conditionFromControlFlowHeader(header: string): string {
+  const trimmed = header.trim();
+  // if (pred) / else if (pred) — optionally followed by `{ … } else`
+  const m = trimmed.match(
+    /^(?:else\s+)?if\s*\((.*)\)\s*(?:\{\s*[.…]{1,3}\s*\}\s*else)?\s*$/s,
+  );
+  if (m?.[1]) return m[1].trim();
+  return trimmed;
+}
+
+/**
+ * If the slice documents enclosing if/else/for/while and the model omitted
+ * FILTER, inject deterministic FILTER steps after leading READ/SELECT.
+ * Does not invent predicates — only headers already present in the slice.
+ */
+export function mergeControlFlowFilters(
+  pipeline: PipelineStep[],
+  sliceText: string | undefined,
+): PipelineStep[] {
+  if (!sliceText || pipeline.length === 0) return pipeline;
+  if (pipeline.some((s) => String(s.kind).toUpperCase() === "FILTER")) {
+    return pipeline;
+  }
+  const headers = controlFlowHeadersFromSlice(sliceText);
+  if (headers.length === 0) return pipeline;
+
+  const filters: PipelineStep[] = headers.map((header) => {
+    const condition = conditionFromControlFlowHeader(header);
+    return {
+      kind: "FILTER",
+      condition,
+      summary: `Applies when ${condition}.`,
+      labelSource: "deterministic",
+      labelReason: "control-flow header from write-site slice",
+    };
+  });
+
+  let insertAt = 0;
+  for (let i = 0; i < pipeline.length; i++) {
+    const k = String(pipeline[i]!.kind).toUpperCase();
+    if (k === "READ" || k === "SELECT") insertAt = i + 1;
+    else break;
+  }
+  return [...pipeline.slice(0, insertAt), ...filters, ...pipeline.slice(insertAt)];
+}
+
+/**
  * Convert a model/agent FieldMappingResponse into the same FieldMappingJson
  * shape used by live labeling and field cache.
  * Trust the model pipeline — do not invent or drop transform steps here.
+ * When `sliceText` carries `// control flow:` headers, missing FILTERs are
+ * filled in deterministically (models often collapse guarded getter→setter to READ).
  */
 export function applyFieldMappingResponse(
   entry: FieldMapping,
   response: FieldMappingResponse,
   labelSource: "model" = "model",
+  sliceText?: string,
 ): FieldMappingJson {
   const pipeline = response.pipeline?.map((op) => ({
     ...op,
@@ -107,26 +180,30 @@ export function applyFieldMappingResponse(
 
   if (response.recognized && pipeline?.length) {
     const normalized = normalizeKeepDigitsOp(pipeline);
+    const steps = normalized.map((op) => fromPipelineOp(op, response.reason, labelSource));
     return {
       targetField: response.targetField?.trim() || entry.targetField,
-      pipeline: normalized.map((op) => fromPipelineOp(op, response.reason, labelSource)),
+      pipeline: mergeControlFlowFilters(steps, sliceText),
     };
   }
 
   return {
     targetField: entry.targetField,
-    pipeline: entry.pipeline.map((op) => ({
-      kind: op.kind,
-      sourceField: typeof op.sourceField === "string" ? op.sourceField : undefined,
-      condition: typeof op.condition === "string" ? op.condition : undefined,
-      meta: stripCodeMeta(
-        op.meta && typeof op.meta === "object"
-          ? (op.meta as Record<string, unknown>)
-          : undefined,
-      ),
-      labelSource: "deterministic",
-      labelReason: response.reason ?? "model did not rewrite field",
-    })),
+    pipeline: mergeControlFlowFilters(
+      entry.pipeline.map((op) => ({
+        kind: op.kind,
+        sourceField: typeof op.sourceField === "string" ? op.sourceField : undefined,
+        condition: typeof op.condition === "string" ? op.condition : undefined,
+        meta: stripCodeMeta(
+          op.meta && typeof op.meta === "object"
+            ? (op.meta as Record<string, unknown>)
+            : undefined,
+        ),
+        labelSource: "deterministic",
+        labelReason: response.reason ?? "model did not rewrite field",
+      })),
+      sliceText,
+    ),
   };
 }
 
