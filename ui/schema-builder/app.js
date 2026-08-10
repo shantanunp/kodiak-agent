@@ -356,7 +356,7 @@ function renderSourcesRow(key, elId) {
   } else {
     el.innerHTML = `<div class="sources-compact">
       <button class="mini-btn" data-addroot="${key}">+ Add element</button>
-      <button class="link-btn" data-reimport="${key}">Import a different source (replaces this schema)</button>
+      <button class="link-btn" data-reimport="${key}">Import JSON/XML (replace or append)</button>
     </div>`;
   }
   el.querySelectorAll("[data-src-mode]").forEach((b) =>
@@ -718,6 +718,78 @@ async function onDoneEmbed() {
   }
 }
 
+function cloneUiTree(node) {
+  const copy = makeNode(node.name, node.type || "", {
+    doc: node.doc || "",
+    required: !!node.required,
+  });
+  copy.expanded = node.expanded !== false;
+  copy.children = (node.children || []).map(cloneUiTree);
+  return copy;
+}
+
+function countSubtree(node) {
+  let n = 1;
+  for (const c of node.children || []) n += countSubtree(c);
+  return n;
+}
+
+/**
+ * Append paths from `incoming` that are missing under `existing`.
+ * Existing names/types/docs are kept; only new siblings (and nested gaps) are added.
+ * Returns number of new nodes added.
+ */
+function mergeSchemaTrees(existing, incoming) {
+  if (!incoming?.children?.length) return 0;
+  if (!Array.isArray(existing.children)) existing.children = [];
+
+  // Incoming has nested fields but existing was a leaf — promote so we can merge kids.
+  if (
+    incoming.children.length &&
+    existing.type &&
+    !CONTAINER.has(existing.type) &&
+    !(existing.children || []).length
+  ) {
+    existing.type = "object";
+  }
+
+  let added = 0;
+  for (const inc of incoming.children) {
+    const match = existing.children.find((c) => c.name === inc.name);
+    if (!match) {
+      existing.children.push(cloneUiTree(inc));
+      added += countSubtree(inc);
+      continue;
+    }
+    if ((inc.children || []).length) {
+      if (!match.type && (match.children || []).length === 0 && CONTAINER.has(inc.type)) {
+        // Fill type only when existing field had none and no children yet.
+        match.type = inc.type;
+      }
+      added += mergeSchemaTrees(match, inc);
+    }
+  }
+  return added;
+}
+
+function syncAppendUi() {
+  const appendRow = document.getElementById("appendRow");
+  const appendCb = document.getElementById("modalAppend");
+  const buildBtn = document.getElementById("modalBuild");
+  const payloadMode = modalMode === "payload-json" || modalMode === "payload-xml";
+  const existing = schemas[modalTarget]?.root?.children?.length || 0;
+  if (appendRow) {
+    appendRow.style.display = payloadMode && existing > 0 ? "flex" : "none";
+  }
+  if (appendCb && !(payloadMode && existing > 0)) {
+    appendCb.checked = false;
+  }
+  if (buildBtn) {
+    buildBtn.textContent =
+      appendCb?.checked && payloadMode && existing > 0 ? "Append fields" : "Build tree";
+  }
+}
+
 function openModal(mode, targetKey) {
   modalMode = mode;
   modalTarget = targetKey || side;
@@ -726,12 +798,18 @@ function openModal(mode, targetKey) {
   );
   document.getElementById("modalTitle").textContent = "Import from " + MODE_LABEL[mode];
   const existing = schemas[modalTarget].root.children?.length || 0;
+  const payloadMode = mode === "payload-json" || mode === "payload-xml";
   document.getElementById("modalSub").textContent = existing
-    ? `Paste your content and Kodiak will rebuild the element tree. This replaces the ${existing} element(s) already in ${schemas[modalTarget].label}.`
+    ? payloadMode
+      ? `Paste a payload for ${schemas[modalTarget].label}. Use Append to add only missing fields, or leave it unchecked to replace the ${existing} existing element(s).`
+      : `Paste your content and Kodiak will rebuild the element tree. This replaces the ${existing} element(s) already in ${schemas[modalTarget].label}.`
     : "Paste your content and Kodiak will build the element tree. You can edit everything afterwards.";
   document.getElementById("modalMsg").textContent = "";
   document.getElementById("modalText").value = "";
   document.getElementById("modalText").placeholder = "Paste your " + MODE_LABEL[mode] + " here...";
+  const appendCb = document.getElementById("modalAppend");
+  if (appendCb) appendCb.checked = false;
+  syncAppendUi();
   document.getElementById("overlay").classList.add("show");
 }
 
@@ -760,17 +838,40 @@ async function buildFromModal() {
         schemas.target.method = doc.target.method || "manual";
         schemas.target.format = doc.target.format || null;
       }
-    } else {
-      const rootName = schemas[modalTarget].root.name;
-      const result = await parseViaApi(modalMode, text, rootName);
-      schemas[modalTarget].root = fromApiNode(result.root);
-      schemas[modalTarget].format = result.format;
-      schemas[modalTarget].method = modalMode === "kodiak" ? "manual" : "sample";
-      markExpanded(schemas[modalTarget].root, 2);
-      schemas[modalTarget].selectedId = schemas[modalTarget].root.children[0]
-        ? schemas[modalTarget].root.children[0].id
-        : schemas[modalTarget].root.id;
+      closeModal();
+      renderTree();
+      toast(MODE_LABEL[modalMode] + " imported");
+      return;
     }
+
+    const rootName = schemas[modalTarget].root.name;
+    const result = await parseViaApi(modalMode, text, rootName);
+    const incoming = fromApiNode(result.root);
+    const append =
+      (modalMode === "payload-json" || modalMode === "payload-xml") &&
+      document.getElementById("modalAppend")?.checked &&
+      (schemas[modalTarget].root.children?.length || 0) > 0;
+
+    if (append) {
+      const added = mergeSchemaTrees(schemas[modalTarget].root, incoming);
+      markExpanded(schemas[modalTarget].root, 2);
+      closeModal();
+      renderTree();
+      toast(
+        added > 0
+          ? `Appended ${added} field${added === 1 ? "" : "s"} into ${schemas[modalTarget].label}`
+          : `No new fields — ${schemas[modalTarget].label} already had these paths`,
+      );
+      return;
+    }
+
+    schemas[modalTarget].root = incoming;
+    schemas[modalTarget].format = result.format;
+    schemas[modalTarget].method = "sample";
+    markExpanded(schemas[modalTarget].root, 2);
+    schemas[modalTarget].selectedId = schemas[modalTarget].root.children[0]
+      ? schemas[modalTarget].root.children[0].id
+      : schemas[modalTarget].root.id;
     closeModal();
     renderTree();
     toast(MODE_LABEL[modalMode] + " imported into " + schemas[modalTarget].label);
@@ -851,6 +952,7 @@ function wireEvents() {
   );
   document.getElementById("modalCancel").addEventListener("click", closeModal);
   document.getElementById("modalBuild").addEventListener("click", buildFromModal);
+  document.getElementById("modalAppend")?.addEventListener("change", syncAppendUi);
   document.getElementById("clearText").addEventListener("click", () => {
     document.getElementById("modalText").value = "";
   });

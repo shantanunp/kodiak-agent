@@ -40,3 +40,4 @@ coverage/
 *.tsbuildinfo
 CLAUDE.md
 package-lock.json
+registry/schemas/order-request-mapper.schema.json

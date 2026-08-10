@@ -152,6 +152,34 @@
   .score-runs th{color:var(--ink-faint);font-weight:600;}
   .score-refresh{margin-left:auto;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;}
   .score-refresh:hover{color:var(--ink);border-color:var(--ink-faint);}
+  .load-bar{margin:0 4px 10px;padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;}
+  .load-bar-actions{display:flex;gap:6px;flex-wrap:wrap;}
+  .load-bar-actions button{
+    flex:1;min-width:0;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    font-size:12px;font-weight:600;padding:7px 10px;border-radius:7px;cursor:pointer;
+  }
+  .load-bar-actions button:hover{border-color:var(--ink-faint);}
+  .load-bar-actions button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink);}
+  .load-bar-actions button:disabled{opacity:.55;cursor:default;}
+  .load-progress{margin-top:8px;}
+  .load-progress-track{height:6px;background:var(--line);border-radius:99px;overflow:hidden;}
+  .load-progress-fill{height:100%;width:0%;background:var(--source);border-radius:99px;transition:width .2s ease;}
+  .load-progress-meta{display:flex;justify-content:space-between;gap:8px;margin-top:5px;font-size:11px;color:var(--ink-faint);}
+  .load-progress-meta b{color:var(--ink-soft);font-weight:600;}
+  .field-row-wrap{display:flex;align-items:center;gap:4px;width:100%;}
+  .field-row-wrap > .fielditem{flex:1;min-width:0;}
+  .field-load{
+    flex-shrink:0;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);
+    font-size:10px;font-weight:700;letter-spacing:.03em;padding:3px 7px;border-radius:5px;cursor:pointer;
+  }
+  .field-load:hover{border-color:var(--target);color:var(--target);background:var(--target-bg);}
+  .field-load:disabled{opacity:.5;cursor:wait;}
+  .edit-schema-btn{
+    display:block;width:calc(100% - 8px);margin:0 4px 10px;border:1px solid var(--line);
+    background:var(--bg);color:var(--ink);font-size:12.5px;font-weight:600;
+    padding:8px 12px;border-radius:8px;cursor:pointer;text-align:center;
+  }
+  .edit-schema-btn:hover{border-color:var(--op);color:var(--op);background:var(--op-bg);}
   .schema-drawer{
     position:fixed;inset:0;z-index:40;display:none;background:rgba(23,32,28,.45);
   }
@@ -223,12 +251,13 @@
   <div class="layout" id="layout">
     <aside class="fieldlist" id="fieldlist">
       <h2>Target fields</h2>
+      <button type="button" class="edit-schema-btn" id="editSchemaBtn" data-edit-schema>← Edit schema</button>
       <div id="flReview"></div>
       <div id="flBulk" style="margin:0 4px 8px"></div>
       <div id="fieldItems"><p style="font-size:12px;color:var(--ink-faint);padding:6px">Loading checklist…</p></div>
       <div id="flTriage"></div>
       <div id="flDiag"></div>
-      <div class="fl-legend">Badge: analyzer state.&nbsp; Dot: store/cache.&nbsp; Tag: how labeled — slice · escalation · tool-loop · cross-check · verified.</div>
+      <div class="fl-legend">Load = fetch pipeline for one field.&nbsp; Load all = progress bar over pending fields.&nbsp; Dot: store/cache.&nbsp; Badge: analyzer state.</div>
     </aside>
     <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
   </div>
@@ -974,12 +1003,16 @@ function openSchemaEditor(){
     return;
   }
   try { localStorage.setItem('kodiak.mapper', currentMapper); } catch { /* ignore */ }
+  // Inside /kodiak shell → full-page schema setup (go back).
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ type: 'kodiak-need-schema', mapperId: currentMapper }, '*');
+    return;
+  }
+  // Standalone fallback: side drawer.
   try { sessionStorage.setItem('kodiak.ui.embed', '1'); } catch { /* ignore */ }
   const drawer = document.getElementById('schemaDrawer');
   const frame = document.getElementById('schemaFrame');
-  const url = '/kodiak/frame/schema';
-  // Reload so embed mode + mapper are picked up from storage.
-  frame.setAttribute('src', url);
+  frame.setAttribute('src', '/kodiak/frame/schema');
   drawer.classList.add('open');
   drawer.setAttribute('aria-hidden', 'false');
 }
@@ -1040,13 +1073,17 @@ function renderTreeNodes(node) {
     const isLeaf = !!child.field && child.children.size === 0;
     if (isLeaf) {
       const f = child.field;
-      return `<button type="button" class="fielditem${activeField === f.field ? ' active' : ''}" data-field="${esc(f.field)}" title="${esc(f.field)}${f.note ? ' — ' + f.note : ''}${f.provenance ? ' · ' + f.provenance : ''}">
-        <span class="tree-spacer"></span>
-        <span class="avail-dot avail-${f.labelAvailability}"></span>
-        <span class="tree-label">${esc(child.name)}</span>
-        ${provenanceBadge(f.provenance)}
-        ${stateBadge(f.state)}
-      </button>`;
+      const needsLoad = f.state !== 'unmapped' && f.labelAvailability === 'none';
+      return `<div class="field-row-wrap">
+        <button type="button" class="fielditem${activeField === f.field ? ' active' : ''}" data-field="${esc(f.field)}" title="${esc(f.field)}${f.note ? ' — ' + f.note : ''}${f.provenance ? ' · ' + f.provenance : ''}">
+          <span class="tree-spacer"></span>
+          <span class="avail-dot avail-${f.labelAvailability}"></span>
+          <span class="tree-label">${esc(child.name)}</span>
+          ${provenanceBadge(f.provenance)}
+          ${stateBadge(f.state)}
+        </button>
+        ${needsLoad ? `<button type="button" class="field-load" data-load-field="${esc(f.field)}" title="Load pipeline for this field">Load</button>` : ''}
+      </div>`;
     }
     const open = !collapsedGroups.has(child.path);
     const leaves = countLeaves(child);
@@ -1082,6 +1119,12 @@ function renderFieldList(){
   document.querySelectorAll('.fielditem[data-field]').forEach(btn => {
     btn.addEventListener('click', () => openField(btn.getAttribute('data-field')));
   });
+  document.querySelectorAll('.field-load[data-load-field]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      loadOneField(btn.getAttribute('data-load-field'), btn);
+    });
+  });
   document.querySelectorAll('.tree-toggle').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1107,18 +1150,8 @@ function renderFieldList(){
     } else reviewEl.innerHTML = '';
   }
 
-  // Bulk-label: parallel online, or one multi-field offline job.
-  const bulkEl = document.getElementById('flBulk');
-  const mappedFields = checklist.fields.filter(f=>f.state==='mapped');
-  const unlabeled = mappedFields.filter(f=>f.labelAvailability==='none');
-  if(bulkEl){
-    bulkEl.innerHTML = unlabeled.length
-      ? `<button id="bulkBtn" class="fielditem" style="justify-content:center;border-color:var(--line);background:var(--bg)">Label all mapped (${unlabeled.length} pending)</button>
-         <div id="bulkStatus" style="font-size:11px;color:var(--ink-faint);margin-top:4px"></div>`
-      : '';
-    const btn = document.getElementById('bulkBtn');
-    if(btn) btn.addEventListener('click', () => bulkLabel(unlabeled.map(f=>f.field)));
-  }
+  // Load all / stop + progress (mapped + unresolved schema fields that are not cached yet).
+  renderLoadBar();
 
   // Triage: group UNRESOLVED fields by the opaque call that caused them,
   // so one decision settles a whole group.
@@ -1240,6 +1273,82 @@ async function openField(field, noCache){
 
 const BULK_CONCURRENCY = 4;
 let bulkStop = false;
+let bulkRunning = false;
+let lastLoadSummary = '';
+let loadProgressSnapshot = { done: 0, total: 0, current: '' };
+
+function pendingLoadFields(){
+  return (checklist?.fields || []).filter(
+    (f) => f.state !== 'unmapped' && f.labelAvailability === 'none',
+  );
+}
+
+function setLoadProgress(done, total, currentField){
+  loadProgressSnapshot = { done, total, current: currentField || '' };
+  const fill = document.getElementById('loadProgressFill');
+  const meta = document.getElementById('loadProgressMeta');
+  const cur = document.getElementById('loadProgressCurrent');
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  if(fill) fill.style.width = `${pct}%`;
+  if(meta){
+    meta.dataset.total = String(total);
+    meta.innerHTML = `<span><b>${done}</b> / ${total}</span><span>${pct}%</span>`;
+  }
+  if(cur){
+    cur.textContent = currentField
+      ? `Loading ${currentField}…`
+      : (lastLoadSummary || (done >= total && total ? 'Done' : ''));
+  }
+}
+
+function renderLoadBar(){
+  const bulkEl = document.getElementById('flBulk');
+  if(!bulkEl) return;
+  const pending = pendingLoadFields();
+  if(!pending.length && !bulkRunning){
+    bulkEl.innerHTML = `<div class="load-bar" style="padding:8px 10px">
+      <div style="font-size:11.5px;color:var(--ink-faint)">All loadable fields have pipelines (or are cached).</div>
+      ${lastLoadSummary ? `<div style="font-size:11px;color:var(--source);margin-top:4px">${esc(lastLoadSummary)}</div>` : ''}
+    </div>`;
+    return;
+  }
+  const total = bulkRunning ? (loadProgressSnapshot.total || pending.length) : pending.length;
+  const done = bulkRunning ? loadProgressSnapshot.done : 0;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  bulkEl.innerHTML = `<div class="load-bar">
+    <div class="load-bar-actions">
+      <button type="button" class="primary" id="loadAllBtn" ${bulkRunning ? 'disabled' : ''}>
+        Load all (${pending.length})
+      </button>
+      <button type="button" id="loadStopBtn" ${bulkRunning ? '' : 'disabled'}>Stop</button>
+    </div>
+    <div class="load-progress" id="loadProgress">
+      <div class="load-progress-track"><div class="load-progress-fill" id="loadProgressFill" style="width:${pct}%"></div></div>
+      <div class="load-progress-meta" id="loadProgressMeta" data-total="${total}"><span><b>${done}</b> / ${total}</span><span>${pct}%</span></div>
+      <div id="loadProgressCurrent" style="font-size:11px;color:var(--ink-faint);margin-top:4px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(loadProgressSnapshot.current ? `Loading ${loadProgressSnapshot.current}…` : (lastLoadSummary || ''))}</div>
+    </div>
+  </div>`;
+  document.getElementById('loadAllBtn')?.addEventListener('click', () => {
+    lastLoadSummary = '';
+    bulkLabel(pendingLoadFields().map((f) => f.field));
+  });
+  document.getElementById('loadStopBtn')?.addEventListener('click', () => { bulkStop = true; });
+}
+
+async function loadOneField(field, btn){
+  if(!field) return;
+  if(btn){ btn.disabled = true; btn.textContent = '…'; }
+  try{
+    await openField(field, false);
+    const row = fieldRow(field);
+    if(row && row.labelAvailability === 'none' && fieldPipelines[pipelineKey(field)]){
+      row.labelAvailability = 'cached';
+    }
+    renderFieldList();
+  } finally {
+    if(btn && btn.isConnected){ btn.disabled = false; btn.textContent = 'Load'; }
+  }
+}
 
 async function approveStore(){
   const btn = document.getElementById('approveBtn');
@@ -1260,36 +1369,42 @@ async function approveStore(){
 }
 
 async function bulkLabel(fields){
-  const btn = document.getElementById('bulkBtn');
-  const status = document.getElementById('bulkStatus');
-  if(btn.dataset.running){ bulkStop = true; return; }
-  btn.dataset.running = '1'; bulkStop = false;
-  btn.textContent = 'Stop';
+  if(!fields.length){ renderLoadBar(); return; }
+  if(bulkRunning){ bulkStop = true; return; }
+  bulkRunning = true;
+  bulkStop = false;
+  renderLoadBar();
+  setLoadProgress(0, fields.length, fields[0]);
+  document.getElementById('loadAllBtn') && (document.getElementById('loadAllBtn').disabled = true);
+  document.getElementById('loadStopBtn') && (document.getElementById('loadStopBtn').disabled = false);
 
   // Offline parity: one multi-field job instead of N single-field exports.
   try{
     const health = await fetch('/api/health').then((r) => r.json());
     if(!health.modelConfigured){
-      status.textContent = `Offline — exporting one job for ${fields.length} field(s)…`;
+      setLoadProgress(0, fields.length, 'offline export…');
       const res = await fetch('/api/export-label-job',{
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ mapperId: currentMapper, fields }),
       });
       const data = await res.json();
       if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      status.textContent = `Exported ${data.fieldCount} field(s) → ${data.jobFile}`;
+      setLoadProgress(fields.length, fields.length, '');
+      const cur = document.getElementById('loadProgressCurrent');
+      if(cur) cur.textContent = `Exported ${data.fieldCount} field(s) → ${data.jobFile}`;
       const canvas = document.getElementById('canvas');
       canvas.innerHTML = `<span class="target-name">Offline bulk job</span>
         <p style="color:var(--ink-soft);font-size:13.5px">Complete this job in your editor agent, then import.</p>
         <div class="code-block" style="margin-top:10px;white-space:pre-wrap">${esc((data.steps||[]).join('\n'))}</div>`;
-      delete btn.dataset.running;
-      btn.textContent = 'Label all mapped';
+      bulkRunning = false;
+      renderLoadBar();
       return;
     }
   }catch(e){
-    status.textContent = e.message || String(e);
-    delete btn.dataset.running;
-    btn.textContent = 'Label all mapped';
+    const cur = document.getElementById('loadProgressCurrent');
+    if(cur) cur.textContent = e.message || String(e);
+    bulkRunning = false;
+    renderLoadBar();
     return;
   }
 
@@ -1300,7 +1415,7 @@ async function bulkLabel(fields){
       const i = next++;
       if(i >= fields.length) return;
       const field = fields[i];
-      status.textContent = `${done+failed+1}/${fields.length}: ${field}…`;
+      setLoadProgress(done + failed, fields.length, field);
       try{
         const res = await fetch('/api/label-field',{method:'POST',
           headers:{'Content-Type':'application/json'},
@@ -1315,26 +1430,27 @@ async function bulkLabel(fields){
           }
           done++;
         } else if(res.ok && data.outcome==='offline-exported'){
-          // Race: model became unavailable — fall back to multi-field export.
           bulkStop = true;
-          status.textContent = 'Switched to offline multi-field export…';
+          setLoadProgress(done + failed, fields.length, 'switching to offline export…');
           const exp = await fetch('/api/export-label-job',{
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ mapperId: currentMapper, fields }),
           });
           const ed = await exp.json();
           if(exp.ok){
-            status.textContent = `Exported ${ed.fieldCount} field(s) → ${ed.jobFile}`;
+            const cur = document.getElementById('loadProgressCurrent');
+            if(cur) cur.textContent = `Exported ${ed.fieldCount} field(s) → ${ed.jobFile}`;
           }
           return;
         } else failed++;
       }catch{ failed++; }
+      setLoadProgress(done + failed, fields.length, bulkStop ? '' : fields[next] || '');
     }
   }
   await Promise.all(Array.from({length: Math.min(BULK_CONCURRENCY, fields.length)}, () => worker()));
-  delete btn.dataset.running;
-  status.textContent = `Done: ${done} labeled${failed?`, ${failed} failed`:''}${bulkStop?' (stopped)':''}.`;
-  btn.textContent = 'Label all mapped';
+  lastLoadSummary = `Done: ${done} loaded${failed ? `, ${failed} failed` : ''}${bulkStop ? ' (stopped)' : ''}.`;
+  bulkRunning = false;
+  setLoadProgress(done + failed, fields.length, '');
   renderFieldList();
   loadScorecard();
 }
@@ -1483,6 +1599,8 @@ window.addEventListener('message', (e) => {
   closeSchemaEditor();
   loadChecklist().then(loadScorecard);
 });
+
+document.getElementById('editSchemaBtn')?.addEventListener('click', () => openSchemaEditor());
 
 load().then(() => Promise.all([loadChecklist(), loadScorecard()]));
 </script>
