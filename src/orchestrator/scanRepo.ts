@@ -131,11 +131,14 @@ async function main(): Promise<void> {
   let mapperIds = registry.mappers.map((m) => m.id);
   if (values.mapper) mapperIds = [values.mapper];
 
-  const useRemote =
-    values.remote || (!values.local && (!!process.env.GITHUB_TOKEN || true));
+  // Network policy: GitHub only with explicit --remote (never implied by token).
+  if (values.remote && values.local) {
+    throw new Error("Pass only one of --remote or --local");
+  }
+  const useRemote = Boolean(values.remote) && !values.local;
   const results = await scanFiles(mapperIds, {
-    local: values.local,
-    remote: useRemote && !values.local,
+    local: !useRemote,
+    remote: useRemote,
     registryPath: values.registry,
   });
 
