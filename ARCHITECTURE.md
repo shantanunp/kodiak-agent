@@ -105,6 +105,8 @@ Some environments block outbound calls to model APIs; there, the agent seat is f
 - The job export bundles everything the agent role needs — the checklist, the per-field slices, the allowed schema paths, and the exact result format. The editor agent additionally has its own workspace search/read tools, which line up with the toolbox's investigation tools.
 - The gate and the store run locally at import time, exactly as online: an import that leaves fields unaccounted re-exports a gap job listing only the missing fields, and a passing import is promoted to the verified store.
 
+Online, the write-site checklist itself comes from two independent legs — the deterministic CST scan and an AI write-site miner making its own HTTP call over the full source — reconciled by `analyzer/reconcile.ts` (see `AI-MINER-PLAN.md`). Offline, that second leg has no HTTP call to make, so the editor agent plays it directly: it produces its own independent candidate list over the full checklist, then runs `translator/agent/reconcileOffline.ts`, which calls the *same* `reconcile()`/`verifyCitations()` functions the online loop uses. The merge rule — CST wins on agreement, the AI leg can only add fields CST missed entirely, never override a CST find — is therefore identical code in both modes, not a re-derived approximation.
+
 Online and offline are therefore the same pipeline with a different driver in the seat; guarantees (completeness, reproducibility, sticky corrections) are identical in both modes.
 
 ## Threat model — source as untrusted prompt input
@@ -131,6 +133,8 @@ Out of scope for this tool: preventing a malicious mapper author from making the
 | Verified store + precedence in the labeler — `translator/verified/`, `npm run label -- --promote`, `npm run test:verified` | Built |
 | Judge endpoint + on-demand checklist UI + correction box + mock defects — `translator/judge/`, `/api/checklist`, `/api/label-field`, `/api/verify-suggestion` | Built |
 | Slice-enriched offline jobs + gap-job re-export on import | Built |
+| AI write-site miner + deterministic reconciler (CST vs. AI, online) — `translator/agentloop/aiWriteSiteMiner.ts`, `analyzer/reconcile.ts`, `--no-cst`/`--no-ai-miner` flags | Built (see `AI-MINER-PLAN.md`) |
+| Offline two-leg parity — `translator/agent/reconcileOffline.ts` runs the identical reconcile/citation code against the editor agent's own second opinion | Built |
 | Additional language adapters | Later |
 
 Plan, decision log, and detailed progress: [PROJECT.md](./PROJECT.md). Continuation guide for the next agent: [HANDOFF.md](./HANDOFF.md).

@@ -197,6 +197,12 @@ npm run label:export -- --mapper demo-ai-recognition-mapper \
 #    .github/instructions/kodiak-agent-label.instructions.md auto-attaches for
 #    any file under .cache/agent-jobs/**, so the agent knows the exact
 #    result.json shape (recognized/targetField/pipeline/reason per field).
+#    It also plays a second, independent "AI leg" role over job.json's full
+#    checklist (fields[] + audit.unmappedFields) and reconciles it against the
+#    CST leg via `npx tsx translator/agent/reconcileOffline.ts` — the same
+#    reconcile()/verifyCitations() functions the online --analyzer path uses
+#    (see AI-MINER-PLAN.md). Use the dedicated .github/agents/kodiak-label.agent.md
+#    agent (or paste its prompt) to run this whole thing end to end.
 
 # 3. Import the agent's result.json into the field cache
 npm run label:import -- --mapper demo-ai-recognition-mapper \

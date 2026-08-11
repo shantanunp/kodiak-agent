@@ -11,10 +11,14 @@ When the user asks you to complete an offline label job (or you have `.cache/age
 1. Read `job.json` — **everything is in the file** (`sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`, `audit.unmappedFields`).
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
 3. For **each** `fields[]` entry, find the Java write in `sourceJava` and produce a `FieldMappingResponse`.
-3b. Also act as the AI write-site miner for `audit.unmappedFields` (fields the deterministic CST
-    scan found no write for): re-scan `sourceJava` for each; if you find a real write and can
-    cite its exact line, add a new entry for it to `result.json` even though it wasn't in
-    `job.fields[]`. No citation, no entry.
+3b. Also act as the AI leg for the full declared checklist (`fields[].javaTargetField` +
+    `audit.unmappedFields`), independently of what CST already concluded: re-scan `sourceJava`
+    for a real write; if you can cite its exact line, it's a candidate. No citation, no candidate.
+    If you can run commands here, write candidates to a JSON file and run
+    `npx tsx translator/agent/reconcileOffline.ts --job <job.json> --candidates <file>` — same
+    `reconcile()`/`verifyCitations()` the online path uses — and only add a `result.json` entry
+    for its `aiOnly` bucket. Otherwise apply the citation rule yourself and note in your summary
+    that the script wasn't run.
 4. Write **only** `result.json` next to `job.json` (see shape in `.github/instructions/kodiak-agent-label.instructions.md`).
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
 6. Do **not** run npm commands yourself.

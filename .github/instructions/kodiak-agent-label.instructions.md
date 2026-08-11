@@ -20,14 +20,22 @@ When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` 
    - `pipeline` (array of steps: read / filter / transform / constant / …)
    - `reason` (short string)
    - If the slice has `// control flow:` headers, each header **must** become a `filter` step (even for plain getter→setter).
-3b. Also act as the AI write-site miner for `job.audit.unmappedFields` (the deterministic CST
-   scan found no write for these at all — this is the same role
-   `translator/agentloop/aiWriteSiteMiner.ts` plays online, except offline you can resolve the
-   field directly instead of only flagging it). Re-scan the full `sourceJava` for each field in
-   that list; if you find a real write the CST patterns missed (reflection, bulk-copy utility,
-   lambda, method reference, unusual builder/collection call) **and can cite its exact line**,
-   add a new entry for it to `result.json`'s `fields[]` even though it wasn't in `job.fields[]`.
-   No citation, no entry — leave it unmapped rather than guess.
+3b. Also act as the AI leg for the **full** declared checklist (`fields[].javaTargetField` +
+   `audit.unmappedFields`), independently of what `fields[]`/`auditState` already say — the
+   same role `translator/agentloop/aiWriteSiteMiner.ts` plays online, except offline you produce
+   the second opinion yourself instead of a second HTTP call. For any write you find, note the
+   field, exact line, and a one-line evidence snippet — only if you can cite a real line; no
+   citation, no candidate.
+   - If you can execute commands in this context: write your candidates to a JSON file next to
+     `job.json` (`{ "candidates": [{ "field": "…", "line": 12, "evidence": "…" }] }`) and run
+     `npx tsx translator/agent/reconcileOffline.ts --job <job.json> --candidates <candidates.json>`
+     — it calls the *same* `reconcile()` / `verifyCitations()` functions the online path uses, so
+     the merge rule is identical, not re-derived from a prompt. Only add a `result.json` entry
+     for a field its `aiOnly` bucket confirms.
+   - If you cannot execute commands here (plain chat, no terminal access): apply the same rule
+     yourself — add an entry only for a candidate you can cite a real line for — and tell the
+     user in your summary that `reconcileOffline.ts` was not run, so they can re-verify with it
+     later if they want the same guarantee the script gives.
 4. Write **only** `result.json` next to `job.json`:
 
 ```json

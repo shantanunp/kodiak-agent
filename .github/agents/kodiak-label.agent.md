@@ -1,6 +1,6 @@
 ---
 name: kodiak-label
-description: "Offline field labeling end to end: label:export → fill result.json (CST fields + independent AI-miner-equivalent review of CST-unmapped fields) → label:import → from-cache-only → optional UI load. Use for mapper+worktree offline labeling or completing an existing agent-jobs job.json."
+description: "Offline field labeling end to end: label:export (CST leg) → your own independent full-checklist pass (AI leg) → reconcileOffline.ts (same reconcile()/verifyCitations() the online path uses) → fill result.json → label:import → from-cache-only → optional UI load. Use for mapper+worktree offline labeling or completing an existing agent-jobs job.json."
 argument-hint: "Label order-request-mapper offline with worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform"
 tools: [read, edit, search, execute, todo]
 ---
@@ -10,23 +10,35 @@ including the field-labeling analysis (writing `result.json`).
 
 ## The two-leg pipeline, offline
 
-Online, `npm run label -- --analyzer` runs two independent write-site legs in
-parallel and reconciles them deterministically: the CST scan
-(`analyzer/scanWriteSites.ts`) and an AI write-site miner
+Online, `npm run label -- --analyzer` runs two independent write-site legs —
+the CST scan (`analyzer/scanWriteSites.ts`) and an AI write-site miner
 (`translator/agentloop/aiWriteSiteMiner.ts`) that makes its own HTTP call over
-the full source. CST wins on agreement; the miner can only demote a
-CST-`unmapped` field to `unresolved`, never assert one `mapped` on its own.
+the full source — then reconciles them deterministically
+(`analyzer/reconcile.ts`): CST wins on agreement or when it's the only leg
+with a find; the miner's candidates can only add fields CST missed entirely
+(logged as `aiOnly`), never override a CST find.
 
-Offline, there is no second HTTP call — **you are both legs**. `job.json`'s
-`fields[]` is the CST leg's output (each entry already has a `slice` when CST
-found a write, or `auditState: "unresolved"` with a note when it didn't).
-`job.json`'s `audit.unmappedFields` is the list CST found **no** write for at
-all — this is exactly the AI miner's input set. Step 2 below has you label the
-CST fields first, then independently re-read the full `sourceJava` for that
-unmapped list, the same way the online miner does, citing evidence before
-claiming anything. This makes the offline path strictly *more* thorough than
-online for that list, since you can resolve a field directly instead of only
-demoting it for a further escalation call.
+Offline there is no second HTTP call, so there's no real concurrency to "wait"
+on either — but the two legs and the reconciliation step are still genuinely
+separate, not just narrated:
+
+1. **Leg 1 (CST)** is `job.json`'s `fields[]` — already computed
+   deterministically by `label:export`, before you (the agent) are even
+   invoked.
+2. **Leg 2 (AI)** is *you*, producing your own independent candidate list over
+   the full checklist (not just CST's gaps) — written to a small JSON file,
+   the offline stand-in for the miner's HTTP response.
+3. **Reconciliation** is `translator/agent/reconcileOffline.ts` — a real
+   script you execute, not a step you eyeball. It imports and calls the
+   *exact same* `reconcile()` and `verifyCitations()` functions the online
+   loop uses (`analyzer/reconcile.ts`, `translator/judge/judge.ts`), so the
+   merge rule (CST wins; AI leg only adds citation-verified misses) is
+   identical online and offline, computed by identical code, not by you
+   re-deriving the rule from a prompt each time.
+
+Because you (leg 2) can resolve a field directly instead of only demoting it
+to `unresolved` for a further escalation call, the offline path ends up
+*more* thorough than online for `aiOnly` fields, not less.
 
 ## Entry modes
 
@@ -62,12 +74,15 @@ Do not guess a mapper id.
 - DO NOT invent schema field paths, target fields, or pipeline steps — only use
   what is present in `job.json`'s `sourceJava` / `schemaJson` / `schemaContext`
   (and analyzer slices embedded in `fields[]`).
-- DO NOT reorder or skip steps (except skipping export in mode B).
-- When acting as the AI-miner leg (step 2b), the same discipline as the online
-  miner applies: a field only gets an entry in `result.json` if you can cite
-  the exact line number of a real write. No citation, no entry — leave it
-  unmapped rather than guess. This mirrors "candidates only, never assert
-  without citation" from `translator/agentloop/aiWriteSiteMiner.ts`.
+- DO NOT reorder or skip steps (except skipping export in mode B) — in
+  particular, do not skip step 2c's `reconcileOffline.ts` run and hand-wave
+  the reconciliation yourself; it must be the script's output that decides
+  which `aiOnly` fields make it into `result.json`.
+- When producing leg 2's candidates (step 2b), the same discipline as the
+  online miner applies: only note a field if you can cite the exact line
+  number of a real write. No citation, no candidate — `reconcileOffline.ts`
+  drops uncited claims anyway, but don't rely on it as a backstop for
+  guessing.
 - DO NOT run `npm run ui:serve` unless the user explicitly asks — mention it as
   an optional final step in your summary otherwise.
 - Run all npm commands from the `kodiak-agent` repo root.
@@ -97,31 +112,60 @@ Do not guess a mapper id.
    (Do **not** use `npm run label -- …` for export here — use `label:export`
    so the offline job is explicit and no model key is required.)
 
-2. **Fill in `result.json` yourself** (do not ask the user to paste into chat):
+2. **Run both legs, then reconcile with the same code the online path uses**
+   (not just prose parity — `translator/agent/reconcileOffline.ts` literally
+   calls `analyzer/reconcile.ts`'s `reconcile()` and
+   `translator/judge/judge.ts`'s `verifyCitations()`, the identical functions
+   `runAgentLoop` uses online):
 
-   **2a — Label the CST leg's fields.** Read `job.json` at the path from
-   step 1 (or the path the user gave in mode B). Everything needed is in this
-   file: `sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`
-   (each with optional `slice` / `auditState`), and `audit.unmappedFields`.
-   - Follow `systemPrompt` and `schemaContext` in the job exactly.
-   - For each entry in `fields[]`, locate the corresponding Java write (prefer
-     `slice` when present; else `sourceJava`) and produce a
-     `FieldMappingResponse` with `recognized`, `targetField` (real schema
-     path), `pipeline` (ordered steps), and a short `reason`.
-   - If a deep helper chain is not fully in the slice, read helper `.java`
-     files from the worktree (local) to trace accurately — do not guess.
+   **2a — Leg 1 (CST), already computed.** Read `job.json` at the path from
+   step 1 (or the path the user gave in mode B): `sourceJava`, `schemaJson`,
+   `schemaContext`, `mapper`, `fields[]` (each with optional `slice` /
+   `auditState`), and `audit.unmappedFields`. This *is* leg 1's output —
+   nothing to run, it was produced deterministically by `label:export`.
 
-   **2b — Act as the AI-miner leg for CST's blind spots.** For every field
-   listed in `job.audit.unmappedFields` (CST found no write at all — this
-   list is empty when `--no-cst` was used, since then every field is already
-   in `fields[]`), independently re-scan the full `sourceJava` for a real
-   write the CST scan's known patterns missed (reflection, bulk-copy
-   utilities, lambdas, method references, unusual builder/collection
-   patterns). If you find one and can cite its exact line, add a **new**
-   entry to `result.json`'s `fields[]` for it (`javaTargetField` = that field
-   name, `recognized: true`, real `pipeline`, `reason` citing the line). If
-   you find nothing, do not add an entry — it stays unmapped, same as the
-   online miner producing zero candidates is a good, honest result.
+   **2b — Leg 2 (AI), your own independent pass.** Before you look at what
+   leg 1 concluded for any given field, re-read the full `sourceJava` against
+   the **entire** declared checklist (`fields[].javaTargetField` +
+   `audit.unmappedFields` — not just the unmapped ones; a genuinely
+   independent second opinion checks everything, the same way the online
+   miner's one call covers the whole checklist, not just CST's gaps). For
+   every field you find a real write for, note the field name, line number,
+   and a one-line evidence snippet. Write these to a candidates file next to
+   `job.json`:
+   ```json
+   // .cache/agent-jobs/<mapper>/<fingerprint>/ai-leg-candidates.json
+   { "candidates": [ { "field": "remarks", "line": 42, "evidence": "line 42: BulkCopy.apply(src, target) writes it" } ] }
+   ```
+   Only include a candidate if you can cite its exact line — no citation, no
+   entry, same rule the online miner follows.
+
+   **2c — Reconcile (execute, don't eyeball it).** Run:
+   ```bash
+   npx tsx translator/agent/reconcileOffline.ts \
+     --job <job.json path> \
+     --candidates <ai-leg-candidates.json path>
+   ```
+   This prints `{ agreed, aiOnly, cstOnly, dropped }` and writes
+   `reconciliation.json` next to `job.json`. Use the result exactly like the
+   online gate does:
+   - `agreed` / `cstOnly` fields — leg 1 (CST slice) wins; label these fields
+     from their `slice` as usual, ignore your leg-2 note for them.
+   - `aiOnly` fields — leg 2 found a citation-verified write leg 1 missed
+     entirely; add a **new** entry for each to `result.json`'s `fields[]`
+     (`javaTargetField` = that field, `recognized: true`, real `pipeline`
+     built from the cited line, `reason` citing it).
+   - `dropped` — leg-2 claims the script itself rejected (unverifiable
+     citation or unknown field); do not add entries for these.
+
+   **2d — Label the rest.** For each `fields[]` entry (leg 1's declared
+   fields), locate the corresponding Java write (prefer `slice` when
+   present; else `sourceJava`) and produce a `FieldMappingResponse` with
+   `recognized`, `targetField` (real schema path), `pipeline` (ordered
+   steps), and a short `reason`. Follow `systemPrompt` and `schemaContext` in
+   the job exactly. If a deep helper chain is not fully in the slice, read
+   helper `.java` files from the worktree (local) to trace accurately — do
+   not guess.
 
    Write **only** `result.json` next to `job.json`:
    ```json
@@ -131,7 +175,7 @@ Do not guess a mapper id.
      "labelModel": "agent:offline",
      "fields": [
        {
-         "javaTargetField": "<from job.fields[i].javaTargetField, or a field from audit.unmappedFields you resolved in 2b>",
+         "javaTargetField": "<from job.fields[i].javaTargetField, or an aiOnly field from step 2c's reconcile output>",
          "response": {
            "recognized": true,
            "targetField": "…",
@@ -148,10 +192,10 @@ Do not guess a mapper id.
    ```bash
    npm run label:import -- --result <path-to-result.json>
    ```
-   If the user had `--fields`, you may append `--fields <fields>`. Fields you
-   added in step 2b that weren't in `job.fields[]` import fine — `label:import`
-   accepts any `javaTargetField` present in `result.json`, not just the ones
-   the original job listed.
+   If the user had `--fields`, you may append `--fields <fields>`. `aiOnly`
+   fields you added in step 2c that weren't in `job.fields[]` import fine —
+   `label:import` accepts any `javaTargetField` present in `result.json`, not
+   just the ones the original job listed.
 
 4. **Verify from cache.** Run:
    ```bash
@@ -174,14 +218,16 @@ Do not guess a mapper id.
 
 After all steps complete, report concisely:
 - Mapper id and field(s) labeled.
-- `targetField` + short pipeline summary per field, split into two groups so
-  the two-leg provenance is visible:
-  - **From CST slice** — fields labeled in step 2a.
-  - **From independent review (AI-miner-equivalent, step 2b)** — fields you
-    found yourself beyond `job.fields[]`, with the cited line for each. Say
-    explicitly if this group is empty ("CST's checklist was complete — no
-    additional writes found").
-- Exact commands run (export / import / from-cache-only) and pass/fail.
+- `targetField` + short pipeline summary per field, split by
+  `reconcileOffline.ts`'s own buckets so the two-leg provenance is the
+  script's verdict, not your narration:
+  - **agreed / cstOnly** — fields labeled from the CST slice in step 2d.
+  - **aiOnly** — fields leg 2 found and the script citation-verified, with
+    the cited line for each. Say explicitly if this group is empty ("leg 2
+    found nothing CST missed — checklist was complete").
+  - **dropped** — leg-2 claims the script rejected (unverifiable citation or
+    unknown field), if any — worth surfacing so the user can sanity-check.
+- Exact commands run (export / reconcile / import / from-cache-only) and pass/fail.
 - Mention `npm run ui:serve` as optional; do not run it unless asked.
 
 ## Manual test recipe for this workflow
@@ -199,7 +245,13 @@ npm run label:export -- --mapper order-request-mapper \
 # 2. Inspect job.json — confirm sourceJava, schemaContext, fields[], and audit.unmappedFields
 cat .cache/agent-jobs/order-request-mapper/*/job.json | less
 
-# 3. Fill result.json per steps 2a/2b above (by hand, or by running this agent)
+# 3. Write ai-leg-candidates.json (step 2b) then reconcile against job.json (step 2c):
+npx tsx translator/agent/reconcileOffline.ts \
+  --job .cache/agent-jobs/order-request-mapper/<fingerprint>/job.json \
+  --candidates .cache/agent-jobs/order-request-mapper/<fingerprint>/ai-leg-candidates.json
+# -> prints {agreed, aiOnly, cstOnly, dropped}; writes reconciliation.json next to job.json
+
+# 3b. Fill result.json per steps 2a/2c/2d above (by hand, or by running this agent)
 
 # 4. Import
 npm run label:import -- --mapper order-request-mapper \
@@ -232,7 +284,7 @@ MODEL_API_KEY= npm run label -- --mapper order-request-mapper \
 Automated coverage (no network, safe to run anytime):
 
 ```bash
-npx tsx --test translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts
+npx tsx --test translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts translator/agent/reconcileOffline.test.ts
 npm run test:agentloop   # includes aiWriteSiteMiner.test.ts (mocked provider, no real calls)
 npm run test:analyzer    # includes reconcile.test.ts
 ```

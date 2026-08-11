@@ -345,16 +345,29 @@ circuits both legs, zero calls).
 - **KOD-10 / KOD-11**: not implemented. `reconciliationDiagnostics` (KOD-9) is on
   `AgentLoopResult` and logged to stderr per run, which is enough to eyeball disagreement rate
   manually; wiring it into `drift.ts`/the golden harness is still open.
-- **Offline mode**: the AI miner never runs offline — `exportAgentJob` only calls
-  `buildLabelTasks` (the CST leg), never `mineWriteSites` (that would be an HTTP call, which
-  offline mode forbids by construction). The editor agent completing `job.json` already reads
-  the full `sourceJava`, so it plays the miner's role for free without needing a second pass.
-  `--no-cst` was extended to `exportAgentJob`/`label:export` and the CLI's offline auto-fallback
-  for parity with the online escape hatch — same "requires a saved schema" guard, same fallback
-  to a selector-only job if the guard fails. `job.fields` still only includes CST `mapped`/
-  `unresolved` fields (not `unmapped`) — unchanged from before this plan. Widening that to let
-  the offline agent double-check CST-`unmapped` fields too (the offline equivalent of the online
-  miner's `aiOnly` flip) was considered but skipped here: it interacts with `importJob.ts`'s gap
-  detection (any job field the agent doesn't mark `recognized` is currently treated as an
-  unresolved gap and re-exported), which would need its own fix first — left as a follow-up
-  ticket rather than bundled into this change.
+- **Offline mode (KOD-13, added after the plan above shipped)**: the AI miner still never makes
+  an HTTP call offline — `exportAgentJob` only calls `buildLabelTasks` (the CST leg). But instead
+  of leaving the second opinion as unstructured prose ("the editor agent plays that role for
+  free"), it's now a real two-leg-plus-reconcile pipeline, same as online:
+  - **Leg 1** = `job.json`'s `fields[]`, computed deterministically by `label:export` (unchanged).
+  - **Leg 2** = the editor agent's own independent pass over the *full* checklist
+    (`fields[].javaTargetField` + `audit.unmappedFields`, not just the unmapped subset — genuine
+    parity with `mineWriteSites`'s scope), written to a small `candidates.json`.
+  - **Reconciliation** = `translator/agent/reconcileOffline.ts` — imports and calls the exact
+    same `reconcile()` (`analyzer/reconcile.ts`) and `verifyCitations()` (`translator/judge/judge.ts`)
+    the online loop uses. Zero duplicated merge logic between the two paths.
+  - `job.fields[]` itself is still only CST `mapped`/`unresolved` (unchanged) — leg 2's `aiOnly`
+    finds become **new, separate entries** in `result.json` instead, which `importJob.ts` already
+    accepts for any `javaTargetField` regardless of whether it was in the original job. This is
+    what sidesteps the gap-detection interaction flagged below as a blocker: gap detection only
+    ever iterates `job.fields[]`, so an extra `aiOnly` entry can't be mis-flagged as a gap — it
+    was never a gap in the first place, it's additive.
+  - `--no-cst` parity (`exportAgentJob`/`label:export` + the CLI's offline auto-fallback) is
+    unchanged from what shipped with KOD-1..9.
+  - Driven end to end by `.github/agents/kodiak-label.agent.md` (has `execute`, runs the script
+    itself); `.github/instructions/kodiak-agent-label.instructions.md` and
+    `.cursor/rules/kodiak-agent-label.mdc` cover the same steps for chat contexts without
+    command-execution access — they apply the citation rule by hand and say so in their summary
+    instead of assuming they can shell out.
+  - Tests: `translator/agent/reconcileOffline.test.ts` (6 cases, pure — no filesystem, no
+    network), added to `test:translator`.
