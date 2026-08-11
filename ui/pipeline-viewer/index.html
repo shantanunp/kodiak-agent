@@ -265,7 +265,7 @@
         <div>Fresh start — clears caches, verified store, viewer dump, and offline jobs for this mapper. Schema is kept.</div>
         <button type="button" id="resetMappingsBtn">Reset mappings</button>
       </div>
-      <div class="fl-legend">Load = fetch pipeline for one field.&nbsp; Load all = progress bar over pending fields.&nbsp; Dot: store/cache.&nbsp; Badge: analyzer state.</div>
+      <div class="fl-legend">Select = view only.&nbsp; Load = label one field.&nbsp; Load all = progress bar over pending fields.&nbsp; Dot: store/cache.&nbsp; Badge: analyzer state.</div>
     </aside>
     <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
   </div>
@@ -688,7 +688,7 @@ async function load(forcedMapper) {
   ].filter(Boolean).join('');
   wireEditSchemaButtons();
   renderMapperPicker();
-  hint('Select a target field on the left to load its pipeline. Use Edit schema to define which fields the agent maps.');
+  hint('Select a target field to view its pipeline (no API call). Use Load / Load all to label. Edit schema to define which fields the agent maps.');
 
   // Warm the per-field cache from any prior full view — never paint the whole
   // dump on the canvas. Pipelines still only appear after a LHS click.
@@ -946,7 +946,7 @@ function renderScorecard(){
       if(!field || !checklist?.fields) return;
       const match = checklist.fields.find((f) => f.field === field)
         || checklist.fields.find((f) => f.field.endsWith('.' + field) || fieldLeaf(f.field) === fieldLeaf(field));
-      if(match) openField(match.field);
+      if(match) selectField(match.field);
     });
   });
   applyScorePills();
@@ -1125,7 +1125,7 @@ function renderFieldList(){
   document.getElementById('fieldItems').innerHTML = renderTreeNodes(tree);
 
   document.querySelectorAll('.fielditem[data-field]').forEach(btn => {
-    btn.addEventListener('click', () => openField(btn.getAttribute('data-field')));
+    btn.addEventListener('click', () => selectField(btn.getAttribute('data-field')));
   });
   document.querySelectorAll('.field-load[data-load-field]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -1198,9 +1198,12 @@ function renderFieldSteps(field, steps, sourceNote, provenance){
     ? `<div class="ai-banner"><span>◇</span><span>Provenance: <b>${esc(PROVENANCE_NOTE[provenance]||provenance)}</b></span></div>`
     : '';
   if(!steps || !steps.length){
+    const noteHtml = sourceNote
+      ? `<p style="color:var(--ink-soft);font-size:13.5px">${esc(sourceNote)}</p>`
+      : '';
     canvas.innerHTML = `<span class="target-name">${esc(field)}</span>
       ${provLine}
-      <p style="color:var(--ink-soft);font-size:13.5px">${esc(sourceNote||'No pipeline for this field.')}</p>
+      ${noteHtml}
       <button type="button" class="re-label" id="reLabelBtn">Re-label (bypass cache)</button>
       ${correctionBoxHtml(field)}`;
   } else {
@@ -1215,7 +1218,7 @@ function renderFieldSteps(field, steps, sourceNote, provenance){
   }
   wireCorrectionBox(field, steps||[]);
   const re = document.getElementById('reLabelBtn');
-  if(re) re.addEventListener('click', () => openField(field, true));
+  if(re) re.addEventListener('click', () => labelField(field, true));
 }
 
 function fieldRow(field){
@@ -1231,13 +1234,38 @@ function shouldPreferStore(field){
     || prov === 'corrected' || prov === 'verified' || prov === 'pending-review';
 }
 
-async function openField(field, noCache){
+/** Fields fetched via Load / Re-label this session (safe to show vs stale .view.json). */
+const fieldsFetched = new Set();
+
+/** View only — never calls the model. Use Load / Re-label to label. */
+function selectField(field){
   const key = pipelineKey(field);
   const row = fieldRow(field);
-  // Stale .view.json is warmed into fieldPipelines on page load. If the checklist
-  // says this field is in the verified store, always hit /api/label-field so the
-  // corrected constant (e.g. "Shopify") is not shadowed by the old view dump.
-  if(!noCache && fieldPipelines[key] && !shouldPreferStore(field)){
+  if(row?.state === 'unmapped'){
+    renderFieldSteps(field, null, `Explicitly unmapped — ${row.note||'no write in the source'}.`);
+    return;
+  }
+  // Don't paint a warmed .view.json dump over a verified/corrected store answer.
+  if(shouldPreferStore(field) && !fieldsFetched.has(key)){
+    renderFieldSteps(field, null,
+      'Answer available in the verified store — click Load to show it (select is view-only).',
+      row?.provenance);
+    return;
+  }
+  const steps = fieldPipelines[key];
+  if(steps && steps.length){
+    renderFieldSteps(field, steps, null, row?.provenance);
+    return;
+  }
+  renderFieldSteps(field, null,
+    'No pipeline loaded yet. Click Load (or Load all) to label this field');
+}
+
+/** Label / fetch pipeline for one field (Load, Re-label, Load all). */
+async function labelField(field, noCache){
+  const key = pipelineKey(field);
+  const row = fieldRow(field);
+  if(!noCache && fieldPipelines[key] && fieldsFetched.has(key) && !shouldPreferStore(field)){
     renderFieldSteps(field, fieldPipelines[key], null, row?.provenance);
     return;
   }
@@ -1250,6 +1278,7 @@ async function openField(field, noCache){
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
     if(data.outcome==='offline-exported'){
+      fieldsFetched.add(key);
       renderFieldSteps(field, null,
         'Offline mode — a single-field job was exported for your editor agent:');
       document.getElementById('canvas').insertAdjacentHTML('beforeend',
@@ -1257,10 +1286,12 @@ async function openField(field, noCache){
       return;
     }
     if(data.state==='unmapped'){
+      fieldsFetched.add(key);
       renderFieldSteps(field, null, `Explicitly unmapped — ${data.note||'no write in the source'}.`);
       return;
     }
     fieldPipelines[key] = data.viewSteps||[];
+    fieldsFetched.add(key);
     if(checklist?.fields){
       const hit = fieldRow(field);
       if(hit && data.provenance){
@@ -1347,7 +1378,7 @@ async function loadOneField(field, btn){
   if(!field) return;
   if(btn){ btn.disabled = true; btn.textContent = '…'; }
   try{
-    await openField(field, false);
+    await labelField(field, false);
     const row = fieldRow(field);
     if(row && row.labelAvailability === 'none' && fieldPipelines[pipelineKey(field)]){
       row.labelAvailability = 'cached';
@@ -1399,6 +1430,7 @@ async function resetMappings(){
     if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     activeField = null;
     for(const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
+    fieldsFetched.clear();
     viewData = null;
     aiGenerated = false;
     lastChangeSummary = '';
@@ -1468,7 +1500,9 @@ async function bulkLabel(fields){
           body:JSON.stringify({mapperId:currentMapper, field})});
         const data = await res.json();
         if(res.ok && data.viewSteps){
-          fieldPipelines[pipelineKey(field)] = data.viewSteps;
+          const key = pipelineKey(field);
+          fieldPipelines[key] = data.viewSteps;
+          fieldsFetched.add(key);
           const row = checklist?.fields?.find(x => x.field === field);
           if(row){
             if(data.provenance) row.provenance = data.provenance;

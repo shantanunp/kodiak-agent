@@ -9,7 +9,8 @@ loadDotenv();
  * No vendor SDKs anywhere — plain fetch for every provider.
  */
 export type ModelApiStyle = "openai" | "claude" | "copilot";
-export type ModelVendorHint = ModelApiStyle | "gemini";
+/** Vendor aliases that share an OpenAI-compatible wire format. */
+export type ModelVendorHint = ModelApiStyle | "gemini" | "deepseek";
 
 export interface ModelConfig {
   apiKey: string;
@@ -33,12 +34,13 @@ function parseVendorHint(raw: string | undefined): ModelVendorHint {
   if (v === "claude" || v === "anthropic") return "claude";
   if (v === "copilot" || v === "github-copilot" || v === "github_copilot") return "copilot";
   if (v === "gemini" || v === "google") return "gemini";
+  if (v === "deepseek") return "deepseek";
   return "openai";
 }
 
 function parseApiStyle(raw: string | undefined): ModelApiStyle {
   const hint = parseVendorHint(raw);
-  return hint === "gemini" ? "openai" : hint;
+  return hint === "gemini" || hint === "deepseek" ? "openai" : hint;
 }
 
 function defaultsForStyle(hint: ModelVendorHint): { baseUrl: string; model: string } {
@@ -52,6 +54,8 @@ function defaultsForStyle(hint: ModelVendorHint): { baseUrl: string; model: stri
         baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
         model: "gemini-2.5-flash",
       };
+    case "deepseek":
+      return { baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" };
     default:
       return { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" };
   }
@@ -72,12 +76,18 @@ export function loadModelConfig(): ModelConfig {
   const apiStyle = parseApiStyle(rawStyle);
   const defaults = defaultsForStyle(parseVendorHint(rawStyle));
 
+  const vendor = parseVendorHint(rawStyle);
   const apiKey =
     apiStyle === "copilot"
       ? firstEnv("MODEL_API_KEY", "COPILOT_TOKEN", "GITHUB_TOKEN")
       : apiStyle === "claude"
         ? firstEnv("MODEL_API_KEY", "ANTHROPIC_API_KEY")
-        : firstEnv("MODEL_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY");
+        : firstEnv(
+            "MODEL_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "GEMINI_API_KEY",
+            "OPENAI_API_KEY",
+          );
 
   if (!apiKey) {
     const hint =
@@ -85,10 +95,12 @@ export function loadModelConfig(): ModelConfig {
         ? "MODEL_API_KEY, COPILOT_TOKEN, or GITHUB_TOKEN"
         : apiStyle === "claude"
           ? "MODEL_API_KEY or ANTHROPIC_API_KEY"
-          : "MODEL_API_KEY";
+          : vendor === "deepseek"
+            ? "MODEL_API_KEY or DEEPSEEK_API_KEY"
+            : "MODEL_API_KEY";
     throw new Error(
       `${hint} is required. ` +
-        "Set endpoint via MODEL_BASE_URL and style via MODEL_API_STYLE=openai|claude|copilot",
+        "Set endpoint via MODEL_BASE_URL and style via MODEL_API_STYLE=openai|claude|copilot|deepseek|gemini",
     );
   }
 
@@ -114,5 +126,10 @@ function isConfiguredForStyle(style: ModelApiStyle): boolean {
   if (style === "claude") {
     return !!firstEnv("MODEL_API_KEY", "ANTHROPIC_API_KEY");
   }
-  return !!firstEnv("MODEL_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY");
+  return !!firstEnv(
+    "MODEL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
+  );
 }
