@@ -309,44 +309,44 @@ test("same-file nested classes flatten without a separate .java per type", async
   const mapDir = join(wt, "src/main/java/com/acme/mapper");
   mkdirSync(dtoDir, { recursive: true });
   mkdirSync(mapDir, { recursive: true });
-  // Real-world shape: Message/Deal are static nested classes in one file — no Message.java.
-  writeFileSync(join(dtoDir, "LpaMappedResponse.java"), `package com.acme.dto;
-public class LpaMappedResponse {
-  private Message message;
-  public void setMessage(Message v) { this.message = v; }
+  // Real-world shape: Envelope/Order are static nested classes in one file — no Envelope.java.
+  writeFileSync(join(dtoDir, "ShipmentResponse.java"), `package com.acme.dto;
+public class ShipmentResponse {
+  private Envelope envelope;
+  public void setEnvelope(Envelope v) { this.envelope = v; }
 
-  public static class Message {
+  public static class Envelope {
     private String dataVersionIdentifier;
-    private Deal deal;
+    private Order order;
     public void setDataVersionIdentifier(String v) { this.dataVersionIdentifier = v; }
-    public void setDeal(Deal v) { this.deal = v; }
+    public void setOrder(Order v) { this.order = v; }
   }
-  public static class Deal {
-    private String loanId;
-    public void setLoanId(String v) { this.loanId = v; }
+  public static class Order {
+    private String orderId;
+    public void setOrderId(String v) { this.orderId = v; }
   }
 }`);
-  const mapperFile = join(mapDir, "LpaMapper.java");
+  const mapperFile = join(mapDir, "ShipmentMapper.java");
   writeFileSync(mapperFile, `package com.acme.mapper;
-import com.acme.dto.LpaMappedResponse;
-public class LpaMapper {
-  public LpaMappedResponse map(In in) {
-    LpaMappedResponse out = new LpaMappedResponse();
-    LpaMappedResponse.Message msg = new LpaMappedResponse.Message();
-    msg.setDataVersionIdentifier("6.1.00");
-    LpaMappedResponse.Deal deal = new LpaMappedResponse.Deal();
-    deal.setLoanId(in.getId());
-    msg.setDeal(deal);
-    out.setMessage(msg);
+import com.acme.dto.ShipmentResponse;
+public class ShipmentMapper {
+  public ShipmentResponse map(In in) {
+    ShipmentResponse out = new ShipmentResponse();
+    ShipmentResponse.Envelope env = new ShipmentResponse.Envelope();
+    env.setDataVersionIdentifier("6.1.00");
+    ShipmentResponse.Order order = new ShipmentResponse.Order();
+    order.setOrderId(in.getId());
+    env.setOrder(order);
+    out.setEnvelope(env);
     return out;
   }
 }`);
 
   const tasks = buildLabelTasks({
     mapper: {
-      id: "inner", sourceFile: mapperFile, class: "com.acme.mapper.LpaMapper",
+      id: "inner", sourceFile: mapperFile, class: "com.acme.mapper.ShipmentMapper",
       entryMethod: "map", sourceType: "com.acme.dto.In",
-      targetType: "com.acme.dto.LpaMappedResponse",
+      targetType: "com.acme.dto.ShipmentResponse",
     } as any,
     sourceJava: readFileSync(mapperFile, "utf8"),
     worktree: wt,
@@ -355,8 +355,8 @@ public class LpaMapper {
   const names = tasks.tasks.map((t) => t.field).sort();
   assert.deepEqual(
     names,
-    ["message.dataVersionIdentifier", "message.deal.loanId"],
-    "same-file nested Message/Deal must flatten; bare 'message' must not remain a leaf",
+    ["envelope.dataVersionIdentifier", "envelope.order.orderId"],
+    "same-file nested Envelope/Order must flatten; bare 'envelope' must not remain a leaf",
   );
   assert.ok(
     !tasks.diagnostics.some((d) => d.includes("no .java file")),
@@ -372,57 +372,57 @@ test("collections: List<Element> flattened to path[].field, element writes attri
   const mapDir = join(wt, "src/main/java/com/acme/mapper");
   mkdirSync(dtoDir, { recursive: true });
   mkdirSync(mapDir, { recursive: true });
-  writeFileSync(join(dtoDir, "Deal.java"), `package com.acme.dto;
+  writeFileSync(join(dtoDir, "Order.java"), `package com.acme.dto;
 import java.util.List;
-public class Deal {
-  private String dealId;
-  private List<com.acme.dto.Party> parties;
+public class Order {
+  private String orderId;
+  private List<com.acme.dto.Contact> contacts;
   private List<String> tags;
-  public void setDealId(String v) { this.dealId = v; }
-  public void setParties(List<com.acme.dto.Party> v) { this.parties = v; }
+  public void setOrderId(String v) { this.orderId = v; }
+  public void setContacts(List<com.acme.dto.Contact> v) { this.contacts = v; }
   public void setTags(List<String> v) { this.tags = v; }
 }`);
-  writeFileSync(join(dtoDir, "Party.java"), `package com.acme.dto;
-public class Party {
-  private String partyName;
+  writeFileSync(join(dtoDir, "Contact.java"), `package com.acme.dto;
+public class Contact {
+  private String contactName;
   private String roleCode;
-  public void setPartyName(String v) { this.partyName = v; }
+  public void setContactName(String v) { this.contactName = v; }
   public void setRoleCode(String v) { this.roleCode = v; }
 }`);
-  const mapperFile = join(mapDir, "DealMapper.java");
+  const mapperFile = join(mapDir, "OrderMapper.java");
   writeFileSync(mapperFile, `package com.acme.mapper;
-import com.acme.dto.Deal;
-import com.acme.dto.Party;
-public class DealMapper {
-  public Deal map(In in) {
-    Deal deal = new Deal();
-    deal.setDealId(in.getId());
-    deal.setParties(java.util.List.of(buildParty(in)));
-    return deal;
+import com.acme.dto.Order;
+import com.acme.dto.Contact;
+public class OrderMapper {
+  public Order map(In in) {
+    Order order = new Order();
+    order.setOrderId(in.getId());
+    order.setContacts(java.util.List.of(buildContact(in)));
+    return order;
   }
-  private Party buildParty(In in) {
-    Party party = new Party();
-    party.setPartyName(in.getName().trim());
-    party.setRoleCode("BORROWER");
-    return party;
+  private Contact buildContact(In in) {
+    Contact contact = new Contact();
+    contact.setContactName(in.getName().trim());
+    contact.setRoleCode("CUSTOMER");
+    return contact;
   }
 }`);
 
   const tasks = buildLabelTasks({
     mapper: {
-      id: "coll", sourceFile: mapperFile, class: "com.acme.mapper.DealMapper",
-      entryMethod: "map", sourceType: "com.acme.dto.In", targetType: "com.acme.dto.Deal",
+      id: "coll", sourceFile: mapperFile, class: "com.acme.mapper.OrderMapper",
+      entryMethod: "map", sourceType: "com.acme.dto.In", targetType: "com.acme.dto.Order",
     } as any,
     sourceJava: readFileSync(mapperFile, "utf8"),
     worktree: wt,
   });
 
   const names = tasks.tasks.map((t) => t.field).sort();
-  assert.deepEqual(names, ["dealId", "parties[].partyName", "parties[].roleCode", "tags"],
+  assert.deepEqual(names, ["contacts[].contactName", "contacts[].roleCode", "orderId", "tags"],
     "project-class element expanded under path[]; scalar-element list stays a leaf");
-  const role = tasks.tasks.find((t) => t.field === "parties[].roleCode")!;
-  assert.equal(role.state, "mapped", "writes inside buildParty attributed to parties[].*");
-  assert.ok(role.sliceText.includes('setRoleCode("BORROWER")'));
+  const role = tasks.tasks.find((t) => t.field === "contacts[].roleCode")!;
+  assert.equal(role.state, "mapped", "writes inside buildContact attributed to contacts[].*");
+  assert.ok(role.sliceText.includes('setRoleCode("CUSTOMER")'));
   rmSync(wt, { recursive: true, force: true });
 });
 

@@ -95,7 +95,7 @@ export function writeSiteBelongsToType(
   return decl.test(body) || constructed.test(body) || built.test(body);
 }
 
-/** Deep enough for typical nested DTO graphs (Message → Deal → Loan → …). */
+/** Deep enough for typical nested DTO graphs (Envelope → Order → LineItem → …). */
 const MAX_NEST_DEPTH = 6;
 const SCALAR_TYPES = new Set([
   "string", "int", "integer", "long", "double", "float", "boolean", "char",
@@ -123,7 +123,7 @@ function collectionElementType(type?: string): string | null {
 /**
  * Resolve a nested/project type to a source file. Prefers a dedicated file via
  * findTypeFile; falls back to the current file when the type is a static/inner
- * class declared there (e.g. LpaMappedResponse.Message — no Message.java).
+ * class declared there (e.g. ShipmentResponse.Envelope — no Envelope.java).
  */
 function resolveNestedTypeSource(options: {
   adapter: ReturnType<typeof adapterFor>;

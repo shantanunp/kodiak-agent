@@ -1049,7 +1049,7 @@ const collapsedGroups = new Set();
 
 /**
  * Build a tree from dotted leaf paths:
- *   message.deal.loan.noteAmount → message → deal → loan → noteAmount (leaf)
+ *   envelope.order.line.quantity → envelope → order → line → quantity (leaf)
  */
 function buildFieldTree(fields) {
   const root = { name: '', path: '', children: new Map(), field: null };
