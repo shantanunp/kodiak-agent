@@ -285,6 +285,22 @@ npm run ui:serve
 
 ---
 
+## UI URLs
+
+After `npm run ui:serve` (port `4173`):
+
+| URL | Purpose |
+| --- | --- |
+| `http://localhost:4173/kodiak` | Main entry (schema → pipeline when ready) |
+| `http://localhost:4173/kodiak/frame/schema` | Schema builder without the `/kodiak` iframe shell |
+| `http://localhost:4173/kodiak/frame/pipeline` | Pipeline viewer without the `/kodiak` iframe shell |
+| `http://localhost:4173/schema-builder/index.html` | Same schema page via static path |
+| `http://localhost:4173/pipeline-viewer/index.html` | Same pipeline page via static path |
+
+Use a frame or `index.html` URL for Cursor **Select Element** (Design Mode cannot pick inside the `/kodiak` iframe). Bare `/schema-builder` and `/pipeline-viewer` redirect to `/kodiak`.
+
+---
+
 ## Stale data checklist
 
 | Symptom | Likely cause |
@@ -293,6 +309,7 @@ npm run ui:serve
 | Field still labeled after wipe | New label after wipe, verified store not deleted, or leftover `ui/pipeline-viewer/data/*.view.json` |
 | “Labeled from model” while intending offline | `MODEL_API_KEY` still set |
 | UI looks unchanged | Old `ui:serve` / browser cache / uncleared `.view.json` |
+| Select Element only gets outer iframe / “Not found” | Open a `/kodiak/frame/…` or `…/index.html` URL (see UI URLs) |
 
 ---
 

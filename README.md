@@ -216,8 +216,17 @@ npm run ui:serve
 # → http://localhost:4173/kodiak
 ```
 
-One URL: schema setup until source+target are saved, then pipeline viewer. Mapper id is
-chosen in the UI (stored in `localStorage`).
+| URL | Purpose |
+| --- | --- |
+| `http://localhost:4173/kodiak` | Main entry — schema until source+target are saved, then pipeline viewer |
+| `http://localhost:4173/kodiak/frame/schema` | Schema builder alone (no shell iframe) |
+| `http://localhost:4173/kodiak/frame/pipeline` | Pipeline viewer alone (no shell iframe) |
+| `http://localhost:4173/schema-builder/index.html` | Same schema page via static path |
+| `http://localhost:4173/pipeline-viewer/index.html` | Same pipeline page via static path |
+
+`/kodiak` loads schema/pipeline inside an iframe shell. For Cursor Design Mode **Select Element**, open a `/kodiak/frame/…` or `…/index.html` URL instead — the picker cannot reach into iframes. `/schema-builder` and `/pipeline-viewer` (without `index.html`) redirect back to `/kodiak`.
+
+Mapper id is chosen in the UI (stored in `localStorage`).
 
 Schemas save to `registry/schemas/{mapperId}.schema.json`. Export/import uses Kodiak JSON;
 import also accepts JSON/XML sample payloads.
