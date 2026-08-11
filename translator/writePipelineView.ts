@@ -61,6 +61,25 @@ function fieldLeaf(path: string): string {
   return (path.split(".").pop() ?? path).replace(/\[\]$/, "").toLowerCase();
 }
 
+/** Read+parse existing viewer dump, or null if missing/invalid. */
+export function readPipelineView(mapperId: string): PipelineViewModel | null {
+  const file = pipelineViewFile(mapperId);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as PipelineViewModel;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the dump has a field whose leaf matches `fieldPath`. */
+export function viewHasField(mapperId: string, fieldPath: string): boolean {
+  const view = readPipelineView(mapperId);
+  if (!view?.fields?.length) return false;
+  const want = fieldLeaf(fieldPath);
+  return view.fields.some((f) => fieldLeaf(f.targetField) === want);
+}
+
 /**
  * Merge one field's pipeline into the existing viewer dump.
  * Used when the judge writes a user-corrected answer — otherwise .view.json

@@ -26,6 +26,8 @@ import {
   PIPELINE_CACHE_VERSION,
   setFieldPipelineCache,
 } from "../cache/index.js";
+import { patchPipelineViewField } from "../writePipelineView.js";
+import { loadRegistry } from "../../src/registry/loadRegistry.js";
 import { AGENT_OFFLINE_MODEL, type AgentJob, type AgentResult } from "./types.js";
 import { agentJobFile, agentJobsRoot, agentResultFile } from "./paths.js";
 import { exportAgentJob } from "./exportJob.js";
@@ -174,6 +176,16 @@ async function main(): Promise<void> {
   const groupByJava = new Map(groups.map((g) => [g.targetField, g]));
   let imported = 0;
   const mappingOut: ReturnType<typeof applyFieldMappingResponse>[] = [];
+  let mapperTypes: { sourceType?: string; targetType?: string } | undefined;
+  try {
+    const mapperEntry = loadRegistry(values.registry!).mappers.find((m) => m.id === mapperId);
+    mapperTypes = {
+      sourceType: mapperEntry?.sourceType,
+      targetType: mapperEntry?.targetType,
+    };
+  } catch {
+    mapperTypes = undefined;
+  }
 
   for (const field of result.fields) {
     if (
@@ -222,6 +234,20 @@ async function main(): Promise<void> {
       labelModel: result.labelModel || AGENT_OFFLINE_MODEL,
       cachedAt: now,
     });
+    // UI paints only from view.json — keep the dump in sync on import.
+    try {
+      patchPipelineViewField({
+        mapperId,
+        targetField: labeled.targetField,
+        pipeline: labeled.pipeline,
+        sourceType: mapperTypes?.sourceType,
+        targetType: mapperTypes?.targetType,
+      });
+    } catch (err) {
+      console.error(
+        `warn: could not patch view.json for ${labeled.targetField}: ${(err as Error).message}`,
+      );
+    }
     mappingOut.push(labeled);
     imported++;
   }

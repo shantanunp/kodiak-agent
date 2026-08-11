@@ -24,7 +24,11 @@ import {
 } from "../translator/model/index.js";
 import { resolveMapperAst } from "../translator/resolvePipeline.js";
 import { filterMappingByFields, parseFieldSelectors } from "../translator/filterByFields.js";
-import { writePipelineView } from "../translator/writePipelineView.js";
+import {
+  patchPipelineViewField,
+  readPipelineView,
+  writePipelineView,
+} from "../translator/writePipelineView.js";
 import {
   applyChangeToMapper,
   resolveMapperWorktree,
@@ -393,6 +397,13 @@ createServer(async (req, res) => {
         .map((t) => `${t.field}: ${t.note}`);
       const diagnostics = [...(tasks.diagnostics ?? []), ...crossCheckNotes];
 
+      const view = readPipelineView(mapperId);
+      const viewLeaves = new Set(
+        (view?.fields ?? []).map((f) =>
+          (f.targetField.split(".").pop() ?? f.targetField).replace(/\[\]$/, "").toLowerCase(),
+        ),
+      );
+
       sendJson(res, 200, {
         mapperId,
         checklistSource: tasks.checklistSource,
@@ -424,6 +435,8 @@ createServer(async (req, res) => {
             state: t.state,
             note: t.note,
             provenance,
+            // Load button uses inView (view.json). labelAvailability is for dots only.
+            inView: viewLeaves.has(leaf),
             labelAvailability: v
               ? (v.status === "user-corrected"
                 ? "corrected"
@@ -492,6 +505,16 @@ createServer(async (req, res) => {
             : vHit.status === "pending-review"
               ? "pending-review"
               : "verified";
+        // Persist viewer dump so a browser refresh can warm the pipeline.
+        try {
+          patchPipelineViewField({
+            mapperId,
+            targetField: vHit.targetField,
+            pipeline: vHit.pipeline,
+            sourceType: mapperEntry.sourceType,
+            targetType: mapperEntry.targetType,
+          });
+        } catch { /* viewer dump is best-effort */ }
         sendJson(res, 200, { mapperId, field: task.field, state: task.state,
           resultSource: src,
           provenance: src,
@@ -546,6 +569,19 @@ createServer(async (req, res) => {
       const provenance =
         result.fieldProvenance?.[task.field] ??
         (result.fieldsFromCache > 0 ? "cache" : "slice");
+      if (labeled?.pipeline) {
+        // Persist viewer dump so a browser refresh can warm the pipeline.
+        // Field cache alone made Load disappear while select stayed empty.
+        try {
+          patchPipelineViewField({
+            mapperId,
+            targetField: labeled.targetField,
+            pipeline: labeled.pipeline,
+            sourceType: mapperEntry.sourceType,
+            targetType: mapperEntry.targetType,
+          });
+        } catch { /* viewer dump is best-effort */ }
+      }
       sendJson(res, 200, {
         mapperId, field: task.field, state: task.state,
         resultSource: result.fieldsFromCache > 0 ? "cache" : "model",
@@ -652,6 +688,29 @@ createServer(async (req, res) => {
         return;
       }
       const entry = getVerified(mapperId, fingerprint);
+      // Sync verified fields into the dump the UI reads for paint.
+      if (entry?.fields?.length) {
+        let sourceType: string | undefined;
+        let targetType: string | undefined;
+        try {
+          const registry = loadRegistry(paths.registry);
+          const mapperEntry = registry.mappers.find((m) => m.id === mapperId);
+          sourceType = mapperEntry?.sourceType;
+          targetType = mapperEntry?.targetType;
+        } catch { /* optional */ }
+        for (const f of entry.fields) {
+          if (!f.pipeline?.length) continue;
+          try {
+            patchPipelineViewField({
+              mapperId,
+              targetField: f.targetField,
+              pipeline: f.pipeline,
+              sourceType,
+              targetType,
+            });
+          } catch { /* viewer dump is best-effort */ }
+        }
+      }
       sendJson(res, 200, {
         mapperId,
         fingerprint,
@@ -762,6 +821,17 @@ createServer(async (req, res) => {
           sourceJava: resolved.sourceJava,
           schemaContext: schemaContextForLabeler(mapperId),
         });
+        if (outcome.outcome === "corrected") {
+          try {
+            patchPipelineViewField({
+              mapperId,
+              targetField: resolvedField,
+              pipeline: outcome.pipeline,
+              sourceType: mapperEntry.sourceType,
+              targetType: mapperEntry.targetType,
+            });
+          } catch { /* viewer dump is best-effort */ }
+        }
         sendJson(res, 200, {
           ...outcome,
           activityLog: formatExploreTrace(outcome.trace),

@@ -265,7 +265,7 @@
         <div>Fresh start — clears caches, verified store, viewer dump, and offline jobs for this mapper. Schema is kept.</div>
         <button type="button" id="resetMappingsBtn">Reset mappings</button>
       </div>
-      <div class="fl-legend">Select = view only.&nbsp; Load = label one field.&nbsp; Load all = progress bar over pending fields.&nbsp; Dot: store/cache.&nbsp; Badge: analyzer state.</div>
+      <div class="fl-legend">Pipelines paint only from <span class="mono">data/{mapper}.view.json</span>.&nbsp; Select = view only.&nbsp; Load / Verify / Approve write that file.&nbsp; Dot: present in view.json.&nbsp; Badge: analyzer state.</div>
     </aside>
     <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
   </div>
@@ -285,7 +285,7 @@ let lastChangedFiles = [];
 let checklist = null;
 let scorecard = null;
 let activeField = null;
-/** Full dotted target path → viewSteps. Shown only after a LHS click. */
+/** Lowercased target path → view steps from .view.json (sole paint source). */
 const fieldPipelines = {};
 
 function badge(step) {
@@ -498,6 +498,19 @@ function pipelineKey(field) {
   return String(field || '').toLowerCase();
 }
 
+/** Lookup steps from view.json fill — full path, then leaf match. */
+function stepsForField(field) {
+  const key = pipelineKey(field);
+  if (fieldPipelines[key]?.length) return fieldPipelines[key];
+  const leaf = fieldLeaf(field).toLowerCase().replace(/\[\]$/, '');
+  if (!leaf) return [];
+  for (const [k, steps] of Object.entries(fieldPipelines)) {
+    if (!steps?.length) continue;
+    if (fieldLeaf(k).toLowerCase().replace(/\[\]$/, '') === leaf) return steps;
+  }
+  return [];
+}
+
 function currentFocusField() {
   if (activeField) return activeField;
   const fields = viewData?.fields;
@@ -633,8 +646,8 @@ function renderMapperPicker() {
   }
   sel.addEventListener('change', () => {
     activeField = null;
-    for (const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
     viewData = null;
+    for (const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
     try { localStorage.setItem('kodiak.mapper', sel.value); } catch { /* ignore */ }
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'kodiak-mapper', mapperId: sel.value }, '*');
@@ -688,35 +701,40 @@ async function load(forcedMapper) {
   ].filter(Boolean).join('');
   wireEditSchemaButtons();
   renderMapperPicker();
-  hint('Select a target field to view its pipeline (no API call). Use Load / Load all to label. Edit schema to define which fields the agent maps.');
+  hint('Select a target field to view its pipeline (from view.json). Use Load / Load all to label. Edit schema to define which fields the agent maps.');
 
-  // Warm the per-field cache from any prior full view — never paint the whole
-  // dump on the canvas. Pipelines still only appear after a LHS click.
+  await reloadViewPipelines();
+}
+
+/** Re-read `/data/{mapper}.view.json` — the only paint source for field pipelines. */
+async function reloadViewPipelines() {
+  for (const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
+  viewData = null;
+  if (!currentMapper) return;
   try {
     const viewRes = await fetch(`/data/${currentMapper}.view.json?t=${Date.now()}`);
-    if (viewRes.ok) {
-      const data = await viewRes.json();
-      viewData = data;
-      if (data.className || data.labeledAt || data.labelModel) {
-        document.getElementById('metaBar').innerHTML = [
-          availableMappers.length <= 1 ? `<span class="pill">${esc(data.mapperId || currentMapper)}</span>` : '',
-          data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
-          data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
-          data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
-          `<button type="button" class="pill" data-edit-schema style="cursor:pointer">Edit schema</button>`,
-        ].filter(Boolean).join('');
-        wireEditSchemaButtons();
-        renderMapperPicker();
-      }
-      if (Array.isArray(data.fields)) {
-        for (const f of data.fields) {
-          const key = pipelineKey(f.targetField);
-          if (key) fieldPipelines[key] = f.steps || [];
-        }
+    if (!viewRes.ok) return;
+    const data = await viewRes.json();
+    viewData = data;
+    if (data.className || data.labeledAt || data.labelModel) {
+      document.getElementById('metaBar').innerHTML = [
+        availableMappers.length <= 1 ? `<span class="pill">${esc(data.mapperId || currentMapper)}</span>` : '',
+        data.className ? `<span class="pill">${esc(data.className)}</span>` : '',
+        data.labeledAt ? `<span class="pill">labeled ${esc(data.labeledAt.slice(0,19))}</span>` : '',
+        data.labelModel ? `<span class="pill">${esc(data.labelModel)}</span>` : '',
+        `<button type="button" class="pill" data-edit-schema style="cursor:pointer">Edit schema</button>`,
+      ].filter(Boolean).join('');
+      wireEditSchemaButtons();
+      renderMapperPicker();
+    }
+    if (Array.isArray(data.fields)) {
+      for (const f of data.fields) {
+        const key = pipelineKey(f.targetField);
+        if (key) fieldPipelines[key] = f.steps || [];
       }
     }
   } catch {
-    // optional warm cache — checklist path still works
+    viewData = null;
   }
 }
 
@@ -779,19 +797,14 @@ async function buildWithAi() {
     statusEl.innerHTML = parts.join(' · ') || 'Done.';
 
     if (data.view && (data.view.steps?.length || data.view.fields?.length)) {
-      viewData = data.view;
-      const fields = Array.isArray(data.view.fields) ? data.view.fields : null;
+      await reloadViewPipelines();
+      const fields = Array.isArray(viewData?.fields) ? viewData.fields : null;
       if (fields?.length) {
-        for (const f of fields) {
-          const key = pipelineKey(f.targetField);
-          if (key) fieldPipelines[key] = f.steps || [];
-        }
-        const idx = indexForFieldsParam(data.view, focusField);
+        const idx = indexForFieldsParam(viewData, focusField);
         const chosen = fields[idx]?.targetField || focusField;
-        renderFieldSteps(chosen, fieldPipelines[pipelineKey(chosen)] || [], 'Re-labeled after Build with AI.');
-      } else if (data.view.steps?.length) {
-        fieldPipelines[pipelineKey(focusField)] = data.view.steps;
-        renderFieldSteps(focusField, data.view.steps, 'Re-labeled after Build with AI.');
+        renderFieldSteps(chosen, stepsForField(chosen), 'Re-labeled after Build with AI.');
+      } else {
+        renderFieldSteps(focusField, stepsForField(focusField), 'Re-labeled after Build with AI.');
       }
     } else {
       document.getElementById('canvas').innerHTML =
@@ -1081,13 +1094,13 @@ function renderTreeNodes(node) {
     const isLeaf = !!child.field && child.children.size === 0;
     if (isLeaf) {
       const f = child.field;
-      const needsLoad = f.state !== 'unmapped' && f.labelAvailability === 'none';
+      const inView = stepsForField(f.field).length > 0 || f.inView === true;
+      const needsLoad = f.state !== 'unmapped' && !inView;
       return `<div class="field-row-wrap">
         <button type="button" class="fielditem${activeField === f.field ? ' active' : ''}" data-field="${esc(f.field)}" title="${esc(f.field)}${f.note ? ' — ' + f.note : ''}${f.provenance ? ' · ' + f.provenance : ''}">
           <span class="tree-spacer"></span>
-          <span class="avail-dot avail-${f.labelAvailability}"></span>
+          <span class="avail-dot avail-${inView ? 'cached' : 'none'}" title="${inView ? 'In view.json' : 'Not in view.json'}"></span>
           <span class="tree-label">${esc(child.name)}</span>
-          ${provenanceBadge(f.provenance)}
           ${stateBadge(f.state)}
         </button>
         ${needsLoad ? `<button type="button" class="field-load" data-load-field="${esc(f.field)}" title="Load pipeline for this field">Load</button>` : ''}
@@ -1225,35 +1238,15 @@ function fieldRow(field){
   return checklist?.fields?.find(x => x.field === field || pipelineKey(x.field) === pipelineKey(field));
 }
 
-/** Verified-store answers must win over the warm .view.json cache after refresh. */
-function shouldPreferStore(field){
-  const row = fieldRow(field);
-  const avail = row?.labelAvailability;
-  const prov = row?.provenance;
-  return avail === 'corrected' || avail === 'verified' || avail === 'pending'
-    || prov === 'corrected' || prov === 'verified' || prov === 'pending-review';
-}
-
-/** Fields fetched via Load / Re-label this session (safe to show vs stale .view.json). */
-const fieldsFetched = new Set();
-
-/** View only — never calls the model. Use Load / Re-label to label. */
+/** View only — paint from fieldPipelines (view.json). Use Load / Re-label to label. */
 function selectField(field){
-  const key = pipelineKey(field);
   const row = fieldRow(field);
   if(row?.state === 'unmapped'){
     renderFieldSteps(field, null, `Explicitly unmapped — ${row.note||'no write in the source'}.`);
     return;
   }
-  // Don't paint a warmed .view.json dump over a verified/corrected store answer.
-  if(shouldPreferStore(field) && !fieldsFetched.has(key)){
-    renderFieldSteps(field, null,
-      'Answer available in the verified store — click Load to show it (select is view-only).',
-      row?.provenance);
-    return;
-  }
-  const steps = fieldPipelines[key];
-  if(steps && steps.length){
+  const steps = stepsForField(field);
+  if(steps.length){
     renderFieldSteps(field, steps, null, row?.provenance);
     return;
   }
@@ -1263,13 +1256,11 @@ function selectField(field){
 
 /** Label / fetch pipeline for one field (Load, Re-label, Load all). */
 async function labelField(field, noCache){
-  const key = pipelineKey(field);
   const row = fieldRow(field);
-  if(!noCache && fieldPipelines[key] && fieldsFetched.has(key) && !shouldPreferStore(field)){
-    renderFieldSteps(field, fieldPipelines[key], null, row?.provenance);
+  if(!noCache && stepsForField(field).length){
+    renderFieldSteps(field, stepsForField(field), null, row?.provenance);
     return;
   }
-  if(noCache || shouldPreferStore(field)) delete fieldPipelines[key];
   renderFieldSteps(field, null, 'Labeling this field on demand…');
   try{
     const res = await fetch('/api/label-field',{method:'POST',
@@ -1278,7 +1269,6 @@ async function labelField(field, noCache){
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
     if(data.outcome==='offline-exported'){
-      fieldsFetched.add(key);
       renderFieldSteps(field, null,
         'Offline mode — a single-field job was exported for your editor agent:');
       document.getElementById('canvas').insertAdjacentHTML('beforeend',
@@ -1286,12 +1276,10 @@ async function labelField(field, noCache){
       return;
     }
     if(data.state==='unmapped'){
-      fieldsFetched.add(key);
       renderFieldSteps(field, null, `Explicitly unmapped — ${data.note||'no write in the source'}.`);
       return;
     }
-    fieldPipelines[key] = data.viewSteps||[];
-    fieldsFetched.add(key);
+    await reloadViewPipelines();
     if(checklist?.fields){
       const hit = fieldRow(field);
       if(hit && data.provenance){
@@ -1301,10 +1289,11 @@ async function labelField(field, noCache){
           : data.resultSource === 'cache' ? 'cached' : 'cached';
       }
     }
-    renderFieldSteps(field, fieldPipelines[key],
+    renderFieldSteps(field, stepsForField(field),
       `Labeled from ${data.resultSource}${data.unresolved?.length?` — unresolved: ${data.unresolved.join(', ')}`:''}`,
       data.provenance);
     loadScorecard();
+    loadChecklist();
   }catch(e){
     renderFieldSteps(field, null, e.message);
   }
@@ -1317,9 +1306,10 @@ let lastLoadSummary = '';
 let loadProgressSnapshot = { done: 0, total: 0, current: '' };
 
 function pendingLoadFields(){
-  return (checklist?.fields || []).filter(
-    (f) => f.state !== 'unmapped' && f.labelAvailability === 'none',
-  );
+  return (checklist?.fields || []).filter((f) => {
+    if (f.state === 'unmapped') return false;
+    return !stepsForField(f.field).length;
+  });
 }
 
 function setLoadProgress(done, total, currentField){
@@ -1346,7 +1336,7 @@ function renderLoadBar(){
   const pending = pendingLoadFields();
   if(!pending.length && !bulkRunning){
     bulkEl.innerHTML = `<div class="load-bar" style="padding:8px 10px">
-      <div style="font-size:11.5px;color:var(--ink-faint)">All loadable fields have pipelines (or are cached).</div>
+      <div style="font-size:11.5px;color:var(--ink-faint)">All loadable fields have pipelines in view.json.</div>
       ${lastLoadSummary ? `<div style="font-size:11px;color:var(--source);margin-top:4px">${esc(lastLoadSummary)}</div>` : ''}
     </div>`;
     return;
@@ -1380,7 +1370,7 @@ async function loadOneField(field, btn){
   try{
     await labelField(field, false);
     const row = fieldRow(field);
-    if(row && row.labelAvailability === 'none' && fieldPipelines[pipelineKey(field)]){
+    if(row && row.labelAvailability === 'none' && stepsForField(field).length){
       row.labelAvailability = 'cached';
     }
     renderFieldList();
@@ -1399,6 +1389,7 @@ async function approveStore(){
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    await reloadViewPipelines();
     await loadChecklist();
     await loadScorecard();
   }catch(e){
@@ -1429,12 +1420,10 @@ async function resetMappings(){
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     activeField = null;
-    for(const k of Object.keys(fieldPipelines)) delete fieldPipelines[k];
-    fieldsFetched.clear();
-    viewData = null;
     aiGenerated = false;
     lastChangeSummary = '';
     lastChangedFiles = [];
+    await reloadViewPipelines();
     document.getElementById('canvas').innerHTML =
       `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Mappings cleared for <b>${esc(currentMapper)}</b>. The field list will reload from your <b>schema</b> — <span style="font-family:var(--font-mono)">MAPPED</span> badges mean the analyzer found a Java write site, not a saved pipeline. Use <b>Load</b> / <b>Load all</b> only when you want to label again.</p>`;
     await loadChecklist();
@@ -1499,10 +1488,8 @@ async function bulkLabel(fields){
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({mapperId:currentMapper, field})});
         const data = await res.json();
-        if(res.ok && data.viewSteps){
-          const key = pipelineKey(field);
-          fieldPipelines[key] = data.viewSteps;
-          fieldsFetched.add(key);
+        if(res.ok && data.outcome !== 'offline-exported' && data.state !== 'unmapped'
+            && (data.pipeline?.length || data.viewSteps?.length)){
           const row = checklist?.fields?.find(x => x.field === field);
           if(row){
             if(data.provenance) row.provenance = data.provenance;
@@ -1528,11 +1515,13 @@ async function bulkLabel(fields){
     }
   }
   await Promise.all(Array.from({length: Math.min(BULK_CONCURRENCY, fields.length)}, () => worker()));
+  await reloadViewPipelines();
   lastLoadSummary = `Done: ${done} loaded${failed ? `, ${failed} failed` : ''}${bulkStop ? ' (stopped)' : ''}.`;
   bulkRunning = false;
   setLoadProgress(done + failed, fields.length, '');
   renderFieldList();
   loadScorecard();
+  loadChecklist();
 }
 
 function correctionBoxHtml(field){
@@ -1572,21 +1561,21 @@ async function postVerifySuggestion({ field, claim, currentSteps, mode }){
   return data;
 }
 
-function showVerifyOutcome(box, field, claim, currentSteps, data){
+async function showVerifyOutcome(box, field, claim, currentSteps, data){
   if(data.outcome==='offline-exported'){
     box.innerHTML = `<div class="verdict"><b>Offline mode — judge job exported.</b><br>
       <span style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11.5px">${esc((data.steps||[]).join('\n'))}</span></div>`;
     return;
   }
   if(data.outcome==='corrected'){
-    fieldPipelines[pipelineKey(field)] = data.viewSteps||[];
+    await reloadViewPipelines();
     const row = fieldRow(field);
     if(row){
       row.provenance = 'corrected';
       row.labelAvailability = 'corrected';
     }
     renderFieldList();
-    renderFieldSteps(field, data.viewSteps||[],
+    renderFieldSteps(field, stepsForField(field),
       'Correction confirmed and saved to the verified store — it will survive cache clears and re-labels.',
       'corrected');
     const vb = document.getElementById('verdictBox');
@@ -1623,7 +1612,7 @@ function wireConfirmedFollowUps(field, claim, currentSteps){
       if(exploreBtn) exploreBtn.disabled = true;
       try{
         const data = await postVerifySuggestion({ field, claim, currentSteps, mode:'force-defect' });
-        showVerifyOutcome(box, field, claim, currentSteps, data);
+        await showVerifyOutcome(box, field, claim, currentSteps, data);
       }catch(e){
         box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
       }
@@ -1636,7 +1625,7 @@ function wireConfirmedFollowUps(field, claim, currentSteps){
       box.innerHTML = '<div class="verdict">Independent scan — searching worktree…</div>';
       try{
         const data = await postVerifySuggestion({ field, claim, currentSteps, mode:'explore' });
-        showVerifyOutcome(box, field, claim, currentSteps, data);
+        await showVerifyOutcome(box, field, claim, currentSteps, data);
       }catch(e){
         box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
       }
@@ -1655,7 +1644,7 @@ function wireCorrectionBox(field, currentSteps){
     btn.disabled = true;
     try{
       const data = await postVerifySuggestion({ field, claim, currentSteps, mode:'judge' });
-      showVerifyOutcome(box, field, claim, currentSteps, data);
+      await showVerifyOutcome(box, field, claim, currentSteps, data);
     }catch(e){
       box.innerHTML = `<div class="verdict defect">${esc(e.message)}</div>`;
     }finally{ btn.disabled = false; }

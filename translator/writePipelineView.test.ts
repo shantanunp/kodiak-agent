@@ -7,12 +7,40 @@ import { join } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "kodiak-view-"));
 process.env.KODIAK_VIEW_DIR = dir;
 
-const { writePipelineView, patchPipelineViewField, pipelineViewFile } = await import(
-  "./writePipelineView.js"
-);
+const {
+  writePipelineView,
+  patchPipelineViewField,
+  pipelineViewFile,
+  readPipelineView,
+  viewHasField,
+} = await import("./writePipelineView.js");
 
 after(() => {
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("readPipelineView / viewHasField", () => {
+  it("reads dump and leaf-matches fields", () => {
+    writePipelineView({
+      mapperId: "read-demo",
+      sourceType: "com.acme.Source",
+      targetType: "com.acme.Target",
+      mapping: [
+        {
+          targetField: "Order.platformIdentifier",
+          pipeline: [{ kind: "CONSTANT", meta: { value: "X" } }],
+        },
+      ],
+    });
+    const view = readPipelineView("read-demo");
+    assert.ok(view);
+    assert.equal(view.mapperId, "read-demo");
+    assert.equal(viewHasField("read-demo", "platformIdentifier"), true);
+    assert.equal(viewHasField("read-demo", "Order.platformIdentifier"), true);
+    assert.equal(viewHasField("read-demo", "missingField"), false);
+    assert.equal(readPipelineView("no-such-mapper"), null);
+    assert.equal(viewHasField("no-such-mapper", "x"), false);
+  });
 });
 
 describe("patchPipelineViewField", () => {
