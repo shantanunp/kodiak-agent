@@ -1,6 +1,6 @@
 ---
 name: kodiak-label
-description: "Offline field labeling end to end: label:export → fill result.json → label:import → from-cache-only. Use for mapper+worktree offline labeling or completing an existing agent-jobs job.json."
+description: "Offline field labeling end to end: label:export → fill result.json (CST fields + independent AI-miner-equivalent review of CST-unmapped fields) → label:import → from-cache-only → optional UI load. Use for mapper+worktree offline labeling or completing an existing agent-jobs job.json."
 argument-hint: "Label order-request-mapper offline with worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform"
 tools: [read, edit, search, execute, todo]
 ---
@@ -8,11 +8,31 @@ You are the kodiak-agent labeling workflow runner. Execute the ENTIRE offline
 labeling pipeline yourself, in order, without skipping or reordering steps —
 including the field-labeling analysis (writing `result.json`).
 
+## The two-leg pipeline, offline
+
+Online, `npm run label -- --analyzer` runs two independent write-site legs in
+parallel and reconciles them deterministically: the CST scan
+(`analyzer/scanWriteSites.ts`) and an AI write-site miner
+(`translator/agentloop/aiWriteSiteMiner.ts`) that makes its own HTTP call over
+the full source. CST wins on agreement; the miner can only demote a
+CST-`unmapped` field to `unresolved`, never assert one `mapped` on its own.
+
+Offline, there is no second HTTP call — **you are both legs**. `job.json`'s
+`fields[]` is the CST leg's output (each entry already has a `slice` when CST
+found a write, or `auditState: "unresolved"` with a note when it didn't).
+`job.json`'s `audit.unmappedFields` is the list CST found **no** write for at
+all — this is exactly the AI miner's input set. Step 2 below has you label the
+CST fields first, then independently re-read the full `sourceJava` for that
+unmapped list, the same way the online miner does, citing evidence before
+claiming anything. This makes the offline path strictly *more* thorough than
+online for that list, since you can resolve a field directly instead of only
+demoting it for a further escalation call.
+
 ## Entry modes
 
 **A — Full workflow (preferred).** User gives mapper + worktree (and optional
 fields), e.g. “label order-request-mapper offline” or a command with
-`--mapper` / `--worktree`. Run steps **1 → 4**.
+`--mapper` / `--worktree`. Run steps **1 → 4**, then offer step **5**.
 
 **B — Job already exported.** User pastes only
 `Complete the offline label job in …/job.json` (or opens that path). Skip
@@ -26,6 +46,11 @@ Parse from the user request:
   from `.env` in the repo root and use that)
 - `--fields <selector[,selector...]>` (optional — omit to export/label all
   checklist fields the analyzer produces)
+- `--no-cst` (optional — skip the CST scan when it's the thing that's broken
+  on this source; requires a saved schema for the mapper. When present, every
+  field in `job.fields[]` starts with `auditState: "unresolved"` and no
+  `slice` — you are now the *sole* leg, not just the miner, so read
+  `sourceJava` directly for every field)
 - Or a full path to an existing `job.json` (mode B)
 
 If mode A is missing mapper (and it cannot be inferred), ask before proceeding.
@@ -38,6 +63,11 @@ Do not guess a mapper id.
   what is present in `job.json`'s `sourceJava` / `schemaJson` / `schemaContext`
   (and analyzer slices embedded in `fields[]`).
 - DO NOT reorder or skip steps (except skipping export in mode B).
+- When acting as the AI-miner leg (step 2b), the same discipline as the online
+  miner applies: a field only gets an entry in `result.json` if you can cite
+  the exact line number of a real write. No citation, no entry — leave it
+  unmapped rather than guess. This mirrors "candidates only, never assert
+  without citation" from `translator/agentloop/aiWriteSiteMiner.ts`.
 - DO NOT run `npm run ui:serve` unless the user explicitly asks — mention it as
   an optional final step in your summary otherwise.
 - Run all npm commands from the `kodiak-agent` repo root.
@@ -51,10 +81,11 @@ Do not guess a mapper id.
      --mapper <mapper> \
      --worktree <path>
    ```
-   If the user supplied `--fields`, append:
-   ```bash
-   --fields <fields>
-   ```
+   If the user supplied `--fields`, append `--fields <fields>`.
+   If the user supplied `--no-cst` (CST leg is broken on this source), append
+   `--no-cst` — requires the mapper to have a saved schema
+   (`registry/schemas/<mapper>.schema.json`); if it doesn't, the export falls
+   back to a selector-only job automatically.
    Example:
    ```bash
    npm run label:export -- \
@@ -67,10 +98,11 @@ Do not guess a mapper id.
    so the offline job is explicit and no model key is required.)
 
 2. **Fill in `result.json` yourself** (do not ask the user to paste into chat):
-   - Read `job.json` at the path from step 1 (or the path the user gave in mode B).
-     Everything needed is in this file: `sourceJava`, `schemaJson`,
-     `schemaContext`, `mapper`, `fields[]` (each with optional `slice` /
-     `auditState`).
+
+   **2a — Label the CST leg's fields.** Read `job.json` at the path from
+   step 1 (or the path the user gave in mode B). Everything needed is in this
+   file: `sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`
+   (each with optional `slice` / `auditState`), and `audit.unmappedFields`.
    - Follow `systemPrompt` and `schemaContext` in the job exactly.
    - For each entry in `fields[]`, locate the corresponding Java write (prefer
      `slice` when present; else `sourceJava`) and produce a
@@ -78,33 +110,48 @@ Do not guess a mapper id.
      path), `pipeline` (ordered steps), and a short `reason`.
    - If a deep helper chain is not fully in the slice, read helper `.java`
      files from the worktree (local) to trace accurately — do not guess.
-   - Write **only** `result.json` next to `job.json`:
-     ```json
-     {
-       "mapperId": "<same as job>",
-       "fingerprint": "<same as job>",
-       "labelModel": "agent:offline",
-       "fields": [
-         {
-           "javaTargetField": "<from job.fields[i].javaTargetField>",
-           "response": {
-             "recognized": true,
-             "targetField": "…",
-             "pipeline": [{ "kind": "read", "sourceField": "…", "summary": "…" }],
-             "reason": "…"
-           }
+
+   **2b — Act as the AI-miner leg for CST's blind spots.** For every field
+   listed in `job.audit.unmappedFields` (CST found no write at all — this
+   list is empty when `--no-cst` was used, since then every field is already
+   in `fields[]`), independently re-scan the full `sourceJava` for a real
+   write the CST scan's known patterns missed (reflection, bulk-copy
+   utilities, lambdas, method references, unusual builder/collection
+   patterns). If you find one and can cite its exact line, add a **new**
+   entry to `result.json`'s `fields[]` for it (`javaTargetField` = that field
+   name, `recognized: true`, real `pipeline`, `reason` citing the line). If
+   you find nothing, do not add an entry — it stays unmapped, same as the
+   online miner producing zero candidates is a good, honest result.
+
+   Write **only** `result.json` next to `job.json`:
+   ```json
+   {
+     "mapperId": "<same as job>",
+     "fingerprint": "<same as job>",
+     "labelModel": "agent:offline",
+     "fields": [
+       {
+         "javaTargetField": "<from job.fields[i].javaTargetField, or a field from audit.unmappedFields you resolved in 2b>",
+         "response": {
+           "recognized": true,
+           "targetField": "…",
+           "pipeline": [{ "kind": "read", "sourceField": "…", "summary": "…" }],
+           "reason": "…"
          }
-       ]
-     }
-     ```
-   - For edge cases, consult
-     `.github/instructions/kodiak-agent-label.instructions.md`.
+       }
+     ]
+   }
+   ```
+   For edge cases, consult `.github/instructions/kodiak-agent-label.instructions.md`.
 
 3. **Import the result.** Run:
    ```bash
    npm run label:import -- --result <path-to-result.json>
    ```
-   If the user had `--fields`, you may append `--fields <fields>`.
+   If the user had `--fields`, you may append `--fields <fields>`. Fields you
+   added in step 2b that weren't in `job.fields[]` import fine — `label:import`
+   accepts any `javaTargetField` present in `result.json`, not just the ones
+   the original job listed.
 
 4. **Verify from cache.** Run:
    ```bash
@@ -114,10 +161,78 @@ Do not guess a mapper id.
    without re-exporting a job. If import printed a gap job, complete that job
    (steps 2–4) before finishing.
 
+5. **Optional — load the result in the pipeline viewer.** Only if the user
+   asks (or after finishing, offer it rather than run it):
+   ```bash
+   npm run ui:serve
+   ```
+   Then open `http://localhost:4173/kodiak` — the mapper id is remembered
+   from `localStorage`/the export above, so the viewer shows the just-imported
+   pipeline directly (no query params needed).
+
 ## Output Format
 
 After all steps complete, report concisely:
 - Mapper id and field(s) labeled.
-- `targetField` + short pipeline summary per field.
+- `targetField` + short pipeline summary per field, split into two groups so
+  the two-leg provenance is visible:
+  - **From CST slice** — fields labeled in step 2a.
+  - **From independent review (AI-miner-equivalent, step 2b)** — fields you
+    found yourself beyond `job.fields[]`, with the cited line for each. Say
+    explicitly if this group is empty ("CST's checklist was complete — no
+    additional writes found").
 - Exact commands run (export / import / from-cache-only) and pass/fail.
 - Mention `npm run ui:serve` as optional; do not run it unless asked.
+
+## Manual test recipe for this workflow
+
+Use this to sanity-check the agent end to end against the registered
+`order-request-mapper` (worktree already checked out at
+`/home/shantanu/Workspace/VS_CODE_V2/ktransform`, schema already saved) — or
+substitute any other registered mapper + worktree.
+
+```bash
+# 1. Export — writes .cache/agent-jobs/order-request-mapper/<fingerprint>/job.json
+npm run label:export -- --mapper order-request-mapper \
+  --worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform --fields <path>
+
+# 2. Inspect job.json — confirm sourceJava, schemaContext, fields[], and audit.unmappedFields
+cat .cache/agent-jobs/order-request-mapper/*/job.json | less
+
+# 3. Fill result.json per steps 2a/2b above (by hand, or by running this agent)
+
+# 4. Import
+npm run label:import -- --mapper order-request-mapper \
+  --worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform --fields <path>
+
+# 5. Confirm it now serves purely from cache (zero HTTP calls)
+npm run label -- --mapper order-request-mapper --from-cache-only --fields <path>
+```
+
+To specifically test the `--no-cst` offline escape hatch:
+
+```bash
+npm run label:export -- --mapper order-request-mapper \
+  --worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform \
+  --fields <path> --no-cst
+```
+Check the printed `job.json`: with a saved schema it should still export
+normally (every field starts `unresolved`, no CST slice); for a mapper with
+no saved schema it should degrade to the selector-only fallback job instead
+of failing.
+
+To trigger the real online-model auto-fallback into this same offline path
+(rather than calling `label:export` directly):
+
+```bash
+MODEL_API_KEY= npm run label -- --mapper order-request-mapper \
+  --worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform --analyzer
+```
+
+Automated coverage (no network, safe to run anytime):
+
+```bash
+npx tsx --test translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts
+npm run test:agentloop   # includes aiWriteSiteMiner.test.ts (mocked provider, no real calls)
+npm run test:analyzer    # includes reconcile.test.ts
+```

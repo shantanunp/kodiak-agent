@@ -8,9 +8,13 @@ alwaysApply: false
 
 When the user asks you to complete an offline label job (or you have `.cache/agent-jobs/**/job.json` open):
 
-1. Read `job.json` — **everything is in the file** (`sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`).
+1. Read `job.json` — **everything is in the file** (`sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`, `audit.unmappedFields`).
 2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
 3. For **each** `fields[]` entry, find the Java write in `sourceJava` and produce a `FieldMappingResponse`.
+3b. Also act as the AI write-site miner for `audit.unmappedFields` (fields the deterministic CST
+    scan found no write for): re-scan `sourceJava` for each; if you find a real write and can
+    cite its exact line, add a new entry for it to `result.json` even though it wasn't in
+    `job.fields[]`. No citation, no entry.
 4. Write **only** `result.json` next to `job.json` (see shape in `.github/instructions/kodiak-agent-label.instructions.md`).
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
 6. Do **not** run npm commands yourself.
