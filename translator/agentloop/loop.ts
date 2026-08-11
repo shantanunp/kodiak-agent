@@ -22,7 +22,9 @@ import {
 } from "../cache/index.js";
 import type { FieldTask, LabelTasks } from "./tasks.js";
 import { investigateField } from "./toolLoop.js";
-import { crossCheckUnmapped } from "./crossCheck.js";
+import { mineWriteSites } from "./aiWriteSiteMiner.js";
+import { reconcile } from "../../analyzer/reconcile.js";
+import { normalizeFieldName } from "../../analyzer/fieldNames.js";
 import { appendRunMetrics } from "../report/metrics.js";
 import { appendRun, sourceSha } from "../telemetry/journal.js";
 import { groundingDiagnostics } from "./grounding.js";
@@ -51,8 +53,16 @@ export interface AgentLoopOptions {
   /** Enables the investigation tool loop for still-unresolved fields. */
   modelConfig?: ModelConfig;
   schemaContextText?: string;
-  /** Disable the cross-check pass (tests / cost control). */
+  /** @deprecated use `useAiMiner: false` instead. Still honored if useAiMiner is unset. */
   skipCrossCheck?: boolean;
+  /**
+   * AI write-site miner (KOD-1/2/7/8) — an independent AI pass over the full
+   * declared-field checklist, reconciled against the CST scan with the
+   * deterministic reconciler in analyzer/reconcile.ts. Default true. CST
+   * still wins on any agreement or CST-only find; the miner can only demote
+   * an unmapped field to unresolved, never assert a field mapped on its own.
+   */
+  useAiMiner?: boolean;
   /** AGT-3 — second label at temp 0; report divergences (cost-aware). */
   verify?: boolean;
   /** Provider forced to temperature 0 for the verify second pass. */
@@ -86,6 +96,8 @@ export interface AgentLoopResult {
   criticFindings?: CriticFinding[];
   /** Per-field provenance for viewer confidence badges. */
   fieldProvenance?: Record<string, LabelProvenance>;
+  /** KOD-9 — CST/AI-miner reconciliation notes (dropped claims, disagreements). */
+  reconciliationDiagnostics?: string[];
 }
 
 function escalationOps(
@@ -122,32 +134,53 @@ export async function runAgentLoop(
   const mapperId = ast.mapperId ?? "unknown";
   const started = Date.now();
 
-  // Cross-check pass: one call, only when the scan produced UNMAPPED fields.
-  // Verified claims demote unmapped -> unresolved (never mapped directly), so
-  // the normal escalation / tool-loop path settles them with full rigor.
+  // AI write-site miner (KOD-1/2/7/8): one call over the FULL declared-field
+  // checklist, reconciled deterministically (analyzer/reconcile.ts) against
+  // the CST scan. CST still wins on agreement or when it's the only leg with
+  // a find; the miner can only demote a CST "unmapped" field to "unresolved"
+  // — or, in --no-cst runs where every field already starts unresolved,
+  // attach a hint note — it never asserts a field mapped on its own.
   let crossCheckFlips = 0;
   let toolLoopRuns = 0;
   let toolLoopResolved = 0;
-  const unmappedTasks = tasks.tasks.filter((t) => t.state === "unmapped");
-  if (unmappedTasks.length > 0 && !options.skipCrossCheck) {
+  const reconciliationDiagnostics: string[] = [];
+  const aiMinerEnabled = options.useAiMiner ?? !options.skipCrossCheck;
+  if (aiMinerEnabled && tasks.tasks.length > 0) {
     try {
-      const { flips, dropped } = await crossCheckUnmapped({
+      const cstSites = tasks.tasks.flatMap((t) => t.slices);
+      const declaredFieldNames = tasks.tasks.map((t) => t.field);
+      const { candidates, dropped } = await mineWriteSites({
         provider,
         sourceJava: options.sourceJava,
-        unmappedFields: unmappedTasks.map((t) => t.field),
+        declaredFields: declaredFieldNames,
       });
-      for (const note of dropped) console.error(`[cross-check] ${note}`);
-      for (const flip of flips) {
-        const task = tasks.tasks.find((t) => t.field === flip.field);
-        if (task) {
+      for (const note of dropped) {
+        reconciliationDiagnostics.push(note);
+        console.error(`[ai-miner] ${note}`);
+      }
+      const { agreed, aiOnly, cstOnly } = reconcile(cstSites, candidates, declaredFieldNames);
+      for (const cand of aiOnly) {
+        const task = tasks.tasks.find(
+          (t) => normalizeFieldName(t.field.split(".").pop()!) === normalizeFieldName(cand.field),
+        );
+        if (!task) continue;
+        if (task.state === "unmapped") {
           crossCheckFlips++;
           task.state = "unresolved";
-          task.note = `cross-check: possible missed write at line ${flip.line} — ${flip.evidence}`;
-          console.error(`[cross-check] ${flip.field}: unmapped -> unresolved (${flip.evidence})`);
+          task.note = `ai-miner: possible missed write at line ${cand.line} — ${cand.evidence}`;
+          console.error(`[ai-miner] ${task.field}: unmapped -> unresolved (${cand.evidence})`);
+        } else if (task.state === "unresolved" && !task.note) {
+          // --no-cst runs: every field starts unresolved with no slice; attach
+          // the miner's line as a hint for the escalation pass.
+          task.note = `ai-miner: possible write at line ${cand.line} — ${cand.evidence}`;
         }
       }
+      const summary =
+        `ai-miner reconciled: ${agreed.length} agreed, ${aiOnly.length} ai-only, ${cstOnly.length} cst-only`;
+      reconciliationDiagnostics.push(summary);
+      console.error(`[ai-miner] ${summary}`);
     } catch (err) {
-      console.error(`[cross-check] skipped: ${(err as Error).message}`);
+      console.error(`[ai-miner] skipped: ${(err as Error).message}`);
     }
   }
 
@@ -459,7 +492,8 @@ export async function runAgentLoop(
       groundingWarnings.length +
       smells.length +
       verifyDivergences.length +
-      criticFindings.length,
+      criticFindings.length +
+      reconciliationDiagnostics.length,
     tokens: pm
       ? {
           prompt: pm.promptTokens,
@@ -495,6 +529,7 @@ export async function runAgentLoop(
     verifyDivergences,
     criticFindings,
     fieldProvenance,
+    reconciliationDiagnostics,
   };
 }
 

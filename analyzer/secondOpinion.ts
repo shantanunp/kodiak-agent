@@ -6,6 +6,7 @@
  */
 
 import type { WriteSite } from "./types.js";
+import { normalizeFieldName } from "./fieldNames.js";
 
 export interface PossibleMissedWrite {
   kind: "possible-missed-write";
@@ -125,9 +126,7 @@ export function findPossibleMissedWrites(
   cstSites: WriteSite[],
 ): PossibleMissedWrite[] {
   const cstLines = new Set(cstSites.map((s) => s.line));
-  const cstFields = new Set(
-    cstSites.map((s) => s.targetField.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()),
-  );
+  const cstFields = new Set(cstSites.map((s) => normalizeFieldName(s.targetField)));
 
   const misses: PossibleMissedWrite[] = [];
   for (const c of looseWriteCandidates(source)) {
@@ -135,7 +134,7 @@ export function findPossibleMissedWrites(
     // If the evidence clearly names a field the CST already attributed elsewhere, skip.
     const named = /\.(?:set|with)([A-Z]\w*)/.exec(c.evidence);
     if (named) {
-      const leaf = named[1]!.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      const leaf = normalizeFieldName(named[1]!);
       // decap: setFoo -> foo
       const decap = leaf.charAt(0).toLowerCase() + leaf.slice(1);
       if (cstFields.has(leaf) || cstFields.has(decap)) continue;

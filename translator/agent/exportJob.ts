@@ -44,6 +44,14 @@ export interface ExportAgentJobOptions {
   remote?: boolean;
   registry: string;
   selectors: string[];
+  /**
+   * --no-cst parity for offline jobs (KOD-1): skip the deterministic CST scan
+   * when it's the thing that's broken (new syntax). Requires a saved schema —
+   * see buildLabelTasks's skipCstFallback. The AI write-site miner itself
+   * never runs offline (no HTTP calls); the human/editor agent completing the
+   * job plays that role for free by reading the full sourceJava already in it.
+   */
+  skipCst?: boolean;
 }
 
 export interface ExportAgentJobResult {
@@ -64,7 +72,7 @@ export interface ExportAgentJobResult {
 export async function exportAgentJob(
   opts: ExportAgentJobOptions,
 ): Promise<ExportAgentJobResult> {
-  const { mapper, worktree, local, remote, registry, selectors } = opts;
+  const { mapper, worktree, local, remote, registry, selectors, skipCst } = opts;
 
   const registryDoc = loadRegistry(registry);
   const mapperEntry = registryDoc.mappers.find((m) => m.id === mapper);
@@ -104,6 +112,7 @@ export async function exportAgentJob(
       mapper: mapperEntry,
       sourceJava,
       worktree: worktree ?? inferWorktree(resolved.sourcePath, mapperEntry.sourceFile) ?? undefined,
+      skipCst,
     });
   } catch (err) {
     console.error(
@@ -296,6 +305,8 @@ if (isDirectRun) {
       registry: { type: "string", default: paths.registry },
       field: { type: "string", multiple: true },
       fields: { type: "string" },
+      cst: { type: "boolean", default: true },
+      "no-cst": { type: "boolean", default: false },
     },
   });
 
@@ -319,6 +330,7 @@ if (isDirectRun) {
       remote: values.remote,
       registry: values.registry!,
       selectors,
+      skipCst: Boolean(values.cst === false || values["no-cst"]),
     });
 
     console.log(

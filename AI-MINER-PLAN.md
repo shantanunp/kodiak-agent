@@ -1,6 +1,10 @@
 # AI write-site miner — implementation plan
 
-Status: **planned, not started.** Captured 2026-08-11.
+Status: **KOD-1 through KOD-9 implemented** (2026-08-11) — flags, the miner, the deterministic
+reconciler, gate wiring, and diagnostics are live and tested. **KOD-10 (golden-harness
+regression coverage), KOD-11 (drift telemetry), and KOD-12 (docs) are not done** — KOD-12 got a
+short interim note in `CLAUDE.md` instead of the full write-up. See "Implementation notes"
+at the bottom for the few places the shipped code deviates from the ticket text below.
 
 Adds a second, AI-driven write-site miner that runs in **parallel** with the deterministic
 `analyzer/scanWriteSites.ts` CST scan, reconciles the two lists with plain code (not a third
@@ -319,3 +323,38 @@ circuits both legs, zero calls).
 - A cost/rate-limit guard on the extra default model call (e.g. skipping the miner leg above
   some field-count threshold) — flag it if run cost becomes a problem in practice, but it's
   not blocking this plan since `--no-ai-miner` is always available as a manual override.
+
+## Implementation notes (where the shipped code deviates from the tickets above)
+
+- **KOD-3**: one `mineWriteSites()` call covers the *entire* declared-field checklist in a
+  single request (not just currently-unmapped fields) — cheaper (one call either way) and lets
+  the reconciler compute `agreed`/`cstOnly` too, not just `aiOnly`. `crossCheckUnmapped` /
+  `crossCheck.ts` is untouched and still has its own tests; it's just no longer called from
+  `runAgentLoop` (superseded there by the miner).
+- **KOD-2 / "AgentLoopOptions"**: `useAiMiner` lives on `AgentLoopOptions` as planned. `useCst`
+  does **not** — it's a task-*building*-time decision, so it surfaced as `skipCst?: boolean` on
+  `buildLabelTasks()` (`translator/agentloop/tasks.ts`) instead, wired from the CLI's `--no-cst`.
+  `AgentLoopOptions.skipCrossCheck` is kept as a deprecated alias (`useAiMiner ?? !skipCrossCheck`).
+- **KOD-1**: `parseArgs` booleans don't auto-negate, so the CLI exposes both `--cst`/`--ai-miner`
+  (default true) and explicit `--no-cst`/`--no-ai-miner` off-switches, resolved together.
+- **KOD-7 / "--no-cst" fields**: rather than skipping reconciliation outright, an AI candidate
+  for an already-`unresolved` field (the state every field starts in under `--no-cst`) is
+  attached as a hint note for the escalation pass, since `reconcile()` still runs — this was
+  simpler than special-casing "only one leg ran" and has the same effect (AI never asserts
+  `mapped` on its own either way).
+- **KOD-10 / KOD-11**: not implemented. `reconciliationDiagnostics` (KOD-9) is on
+  `AgentLoopResult` and logged to stderr per run, which is enough to eyeball disagreement rate
+  manually; wiring it into `drift.ts`/the golden harness is still open.
+- **Offline mode**: the AI miner never runs offline — `exportAgentJob` only calls
+  `buildLabelTasks` (the CST leg), never `mineWriteSites` (that would be an HTTP call, which
+  offline mode forbids by construction). The editor agent completing `job.json` already reads
+  the full `sourceJava`, so it plays the miner's role for free without needing a second pass.
+  `--no-cst` was extended to `exportAgentJob`/`label:export` and the CLI's offline auto-fallback
+  for parity with the online escape hatch — same "requires a saved schema" guard, same fallback
+  to a selector-only job if the guard fails. `job.fields` still only includes CST `mapped`/
+  `unresolved` fields (not `unmapped`) — unchanged from before this plan. Widening that to let
+  the offline agent double-check CST-`unmapped` fields too (the offline equivalent of the online
+  miner's `aiOnly` flip) was considered but skipped here: it interacts with `importJob.ts`'s gap
+  detection (any job field the agent doesn't mark `recognized` is currently treated as an
+  unresolved gap and re-exported), which would need its own fix first — left as a follow-up
+  ticket rather than bundled into this change.

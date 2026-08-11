@@ -411,6 +411,44 @@ function schemaOnlyFallback(
 }
 
 /**
+ * --no-cst (KOD-1/2/7/8): skip the deterministic CST write-site scan entirely
+ * and hand every schema field to the agent as "unresolved" (no slice), so the
+ * AI write-site miner + escalation path become the sole source of the
+ * checklist. This is the escape hatch for a CST parser bug on new syntax —
+ * requires a saved schema, since without one there is no other source for the
+ * checklist universe at all.
+ */
+function skipCstFallback(
+  options: { mapper: MapperEntry; sourceJava: string },
+  schemaPaths: string[],
+): LabelTasks {
+  const mapperClass = simpleTypeName(options.mapper.class);
+  const targetClass = simpleTypeName(options.mapper.targetType);
+  if (schemaPaths.length === 0) {
+    throw new Error(
+      `--no-cst requires a saved schema (registry/schemas/${options.mapper.id}.schema.json) — ` +
+        "the CST scan is skipped, so there is no other source for the checklist universe. " +
+        "Save a schema in the pipeline viewer (Edit schema) first, or drop --no-cst.",
+    );
+  }
+  const diagnostics = [
+    "--no-cst: CST scan skipped; checklist from saved schema only — every field starts " +
+      "unresolved and is settled by the AI write-site miner / escalation path",
+  ];
+  const { report, tasks, checklistSource } = applySchemaChecklist(
+    schemaPaths,
+    targetClass,
+    [], // no slices — the CST scan did not run
+    options.sourceJava,
+    diagnostics,
+  );
+  diagnostics.push(
+    ...injectionDiagnostics(tasks.map((t) => ({ field: t.field, sliceText: t.sliceText }))),
+  );
+  return { report, tasks, mapperClass, targetClass, checklistSource, diagnostics };
+}
+
+/**
  * Deterministic pre-pass. Throws if the source cannot be parsed and no saved
  * schema supplies field paths — callers may fall back to selector-only export.
  */
@@ -420,11 +458,17 @@ export function buildLabelTasks(options: {
   language?: string;
   /** Worktree root — used to resolve the target type when it lives in another file. */
   worktree?: string;
+  /** --no-cst — skip the CST scan; see skipCstFallback. Default false. */
+  skipCst?: boolean;
 }): LabelTasks {
   const schemaPaths = schemaTargetLeafPaths(options.mapper.id);
   const language = options.language ?? "java";
   const mapperClass = simpleTypeName(options.mapper.class);
   const targetClass = simpleTypeName(options.mapper.targetType);
+
+  if (options.skipCst) {
+    return skipCstFallback(options, schemaPaths);
+  }
 
   let parsed: ReturnType<typeof scanWriteSites>["parsed"];
   let slices: WriteSlice[];

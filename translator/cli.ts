@@ -74,6 +74,14 @@ const { values } = parseArgs({
     critic: { type: "boolean", default: false },
     /** Max concurrent field label calls (default 4). */
     concurrency: { type: "string" },
+    /** Deterministic CST write-site scan (analyzer/scanWriteSites.ts). Default on. */
+    cst: { type: "boolean", default: true },
+    /** Escape hatch: skip the CST scan (requires a saved schema). */
+    "no-cst": { type: "boolean", default: false },
+    /** AI write-site miner, reconciled against the CST scan (KOD-1/2/7/8). Default on. */
+    "ai-miner": { type: "boolean", default: true },
+    /** Escape hatch: skip the AI miner (cost control / miner misbehaving). */
+    "no-ai-miner": { type: "boolean", default: false },
   },
 });
 
@@ -281,6 +289,7 @@ async function offlineAgentFallback(reason: string, selectors: string[]): Promis
       remote: values.remote,
       registry: values.registry!,
       selectors,
+      skipCst: Boolean(values.cst === false || values["no-cst"]),
     });
     console.error(
       [
@@ -360,6 +369,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (values.analyzer && (values.cst === false || values["no-cst"]) &&
+      (values["ai-miner"] === false || values["no-ai-miner"])) {
+    console.error("At least one of --cst / --ai-miner must stay enabled — both legs were disabled.");
+    process.exit(1);
+  }
+
   if (values.analyzer && values.mapper && sourceJava) {
     const registry = loadRegistry(values.registry!);
     const mapperEntry = registry.mappers.find((m) => m.id === values.mapper)!;
@@ -368,6 +383,7 @@ async function main(): Promise<void> {
       tasks = buildLabelTasks({
         mapper: mapperEntry, sourceJava,
         worktree: values.worktree, // CLI always resolves via explicit worktree/local/remote
+        skipCst: Boolean(values.cst === false || values["no-cst"]),
       });
     } catch (err) {
       console.error(
@@ -428,6 +444,7 @@ async function main(): Promise<void> {
           verify: Boolean(values.verify),
           verifyProvider,
           critic: Boolean(values.critic),
+          useAiMiner: Boolean(values["ai-miner"] !== false && !values["no-ai-miner"]),
           concurrency: values.concurrency
             ? Math.max(1, Number(values.concurrency) || 4)
             : undefined,
