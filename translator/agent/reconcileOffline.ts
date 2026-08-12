@@ -12,11 +12,17 @@
  * online path uses. Zero duplicated logic, zero risk to the online path —
  * this file is new and imported by nothing online.
  *
+ * After reconcile, writes `label-plan.json` with online-matching demotion:
+ * `aiOnly` fields become `demotedUnresolved` (labeler escalation), never
+ * asserted mapped from the miner alone.
+ *
  *   npx tsx translator/agent/reconcileOffline.ts \
  *     --job .cache/agent-jobs/<mapper>/<fp>/job.json \
  *     --candidates .cache/agent-jobs/<mapper>/<fp>/ai-leg-candidates.json
  *
- * candidates.json shape: { "candidates": [{ "field": "…", "line": 12, "evidence": "…" }, …] }
+ * candidates.json shape (either):
+ *   { "candidates": [{ "field": "…", "line": 12, "evidence": "…" }, …] }
+ *   { "writes": [{ "field": "…", "line": 12, "evidence": "…" }, …] }  // online miner shape
  */
 
 import { parseArgs } from "node:util";
@@ -27,15 +33,42 @@ import { reconcile, type AiWriteCandidateLike } from "../../analyzer/reconcile.j
 import { verifyCitations } from "../judge/judge.js";
 import type { WriteSite } from "../../analyzer/types.js";
 import type { AgentJob } from "./types.js";
+import { declaredFieldsFromJob, parseMinerWrites } from "./offlineMiner.js";
 
 export interface OfflineReconcileResult {
   /** Declared fields both legs found (CST slice wins — unchanged in result.json). */
   agreed: string[];
-  /** AI-leg-only candidates, citation-verified — the offline agent may add these to result.json. */
+  /**
+   * AI-leg-only candidates, citation-verified.
+   * Online: demote CST `unmapped` → `unresolved` for the labeler — never assert mapped alone.
+   * Offline: same — see `buildOfflineLabelPlan` / `demotedUnresolved`.
+   */
   aiOnly: AiWriteCandidateLike[];
   /** CST-only finds — CST still wins, nothing for the AI leg to add here. */
   cstOnly: WriteSite[];
   /** AI-leg claims dropped for an unknown field or an unverifiable citation. */
+  dropped: string[];
+}
+
+/** Online-matching label plan derived from reconcile buckets. */
+export interface OfflineLabelPlan {
+  /** Label from CST slice (`agreed` / `cstOnly` with a slice in the job). */
+  fromSlice: string[];
+  /** Already `auditState: unresolved` in the job — escalate from sourceJava. */
+  unresolved: string[];
+  /**
+   * `aiOnly` demoted to unresolved (same as online loop). Label via systemPrompt
+   * from sourceJava using the miner hint — do not stamp recognized=true from the
+   * miner claim alone.
+   */
+  demotedUnresolved: Array<{
+    field: string;
+    line: number;
+    evidence: string;
+    note: string;
+  }>;
+  /** Hard unmapped, not demoted — no mapped entry (recognized=false only if asked). */
+  unmapped: string[];
   dropped: string[];
 }
 
@@ -75,6 +108,16 @@ function verifyCandidates(
   sourceJava: string,
   declaredFields: string[],
 ): { verified: AiWriteCandidateLike[]; dropped: string[] } {
+  // Prefer online miner shape `{ writes: [...] }` when present.
+  if (
+    rawCandidates &&
+    typeof rawCandidates === "object" &&
+    Array.isArray((rawCandidates as { writes?: unknown }).writes)
+  ) {
+    const parsed = parseMinerWrites(rawCandidates, sourceJava, declaredFields);
+    return { verified: parsed.candidates, dropped: parsed.dropped };
+  }
+
   const list = Array.isArray((rawCandidates as { candidates?: unknown[] })?.candidates)
     ? (rawCandidates as { candidates: unknown[] }).candidates
     : [];
@@ -103,12 +146,55 @@ function verifyCandidates(
   return { verified, dropped };
 }
 
+/**
+ * Mirror online `runAgentLoop` post-reconcile routing: miner can only demote
+ * unmapped → unresolved; labeler still owns recognized/pipeline.
+ */
+export function buildOfflineLabelPlan(
+  job: AgentJob,
+  reconcileResult: OfflineReconcileResult,
+): OfflineLabelPlan {
+  const demotedFields = new Set(
+    reconcileResult.aiOnly.map((c) => c.field.toLowerCase()),
+  );
+  const fromSlice: string[] = [];
+  const unresolved: string[] = [];
+
+  for (const f of job.fields) {
+    const key = f.javaTargetField.toLowerCase();
+    if (demotedFields.has(key)) continue;
+    if (f.slice && f.auditState !== "unresolved") {
+      fromSlice.push(f.javaTargetField);
+    } else if (f.auditState === "unresolved" || !f.slice) {
+      unresolved.push(f.javaTargetField);
+    } else {
+      fromSlice.push(f.javaTargetField);
+    }
+  }
+
+  const demotedUnresolved = reconcileResult.aiOnly.map((c) => ({
+    field: c.field,
+    line: c.line,
+    evidence: c.evidence,
+    note: `ai-miner: possible missed write at line ${c.line} — ${c.evidence}`,
+  }));
+
+  const unmapped = (job.audit?.unmappedFields ?? []).filter(
+    (f) => !demotedFields.has(f.toLowerCase()),
+  );
+
+  return {
+    fromSlice,
+    unresolved,
+    demotedUnresolved,
+    unmapped,
+    dropped: reconcileResult.dropped,
+  };
+}
+
 /** Pure — testable without touching the filesystem. */
 export function runOfflineReconcile(job: AgentJob, rawCandidates: unknown): OfflineReconcileResult {
-  const declaredFields = [
-    ...job.fields.map((f) => f.javaTargetField),
-    ...(job.audit?.unmappedFields ?? []),
-  ];
+  const declaredFields = declaredFieldsFromJob(job);
   const cstSites = cstSitesFromJob(job);
   const { verified, dropped } = verifyCandidates(rawCandidates, job.sourceJava, declaredFields);
   const { agreed, aiOnly, cstOnly } = reconcile(cstSites, verified, declaredFields);
@@ -123,28 +209,41 @@ if (isDirectRun) {
     options: {
       job: { type: "string" },
       candidates: { type: "string" },
+      writes: { type: "string" },
       out: { type: "string" },
     },
   });
 
-  if (!values.job || !values.candidates) {
+  const candPath = values.candidates ?? values.writes;
+  if (!values.job || !candPath) {
     console.error(
-      "Usage: reconcileOffline -- --job <job.json> --candidates <ai-leg-candidates.json> [--out <path>]",
+      "Usage: reconcileOffline -- --job <job.json> --candidates <ai-leg-candidates.json> [--out <path>]\n" +
+        "   or: reconcileOffline -- --job <job.json> --writes <ai-leg-writes.json>",
     );
     process.exit(1);
   }
 
   const job = JSON.parse(readFileSync(values.job, "utf8")) as AgentJob;
-  const rawCandidates = JSON.parse(readFileSync(values.candidates, "utf8"));
+  const rawCandidates = JSON.parse(readFileSync(candPath, "utf8"));
   const result = runOfflineReconcile(job, rawCandidates);
+  const labelPlan = buildOfflineLabelPlan(job, result);
 
   for (const d of result.dropped) console.error(`[ai-leg] ${d}`);
   console.error(
     `[ai-leg] reconciled: ${result.agreed.length} agreed, ${result.aiOnly.length} ai-only, ` +
       `${result.cstOnly.length} cst-only`,
   );
+  console.error(
+    `[ai-leg] label-plan: ${labelPlan.fromSlice.length} fromSlice, ` +
+      `${labelPlan.unresolved.length} unresolved, ` +
+      `${labelPlan.demotedUnresolved.length} demotedUnresolved, ` +
+      `${labelPlan.unmapped.length} unmapped`,
+  );
 
-  const outPath = values.out ?? join(dirname(values.job), "reconciliation.json");
+  const dir = dirname(values.job);
+  const outPath = values.out ?? join(dir, "reconciliation.json");
   writeFileSync(outPath, JSON.stringify(result, null, 2));
-  console.log(JSON.stringify({ ...result, outPath }, null, 2));
+  const planPath = join(dir, "label-plan.json");
+  writeFileSync(planPath, JSON.stringify(labelPlan, null, 2));
+  console.log(JSON.stringify({ ...result, labelPlan, outPath, planPath }, null, 2));
 }

@@ -45,6 +45,11 @@ export interface AgentJob {
   /** Registry mapper metadata. */
   mapper: AgentJobMapper;
   systemPrompt: string;
+  /**
+   * Exact online AI write-site miner prompt (`AI_MINER_PROMPT`). Offline agent
+   * fills `{ "writes": [...] }` against this; no freestyle miner prompt.
+   */
+  minerPrompt?: string;
   schemaContext?: string;
   instructions: string;
   /** Exact npm commands to run in VS Code after the agent writes result.json. */

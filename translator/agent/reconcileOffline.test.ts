@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runOfflineReconcile } from "./reconcileOffline.js";
+import { parseMinerWrites, declaredFieldsFromJob } from "./offlineMiner.js";
+import {
+  runOfflineReconcile,
+  buildOfflineLabelPlan,
+} from "./reconcileOffline.js";
 import type { AgentJob } from "./types.js";
 
 const SOURCE = Array.from({ length: 50 }, (_, i) =>
@@ -25,10 +29,16 @@ function baseJob(overrides: Partial<AgentJob> = {}): AgentJob {
       targetType: "Out",
     },
     systemPrompt: "",
+    minerPrompt: "test",
     instructions: "",
     vscodeSteps: [],
     fields: [
-      { businessFieldSelector: "firstName", javaTargetField: "firstName", slice: "// write site (line 3, in map, via setter)\ntarget.setFirstName(x);" },
+      {
+        businessFieldSelector: "firstName",
+        javaTargetField: "firstName",
+        slice: "// write site (line 3, in map, via setter)\ntarget.setFirstName(x);",
+        auditState: "mapped",
+      },
     ],
     audit: {
       declaredFields: 2,
@@ -92,4 +102,54 @@ test("malformed candidates payload -> empty, no throw", () => {
   const result = runOfflineReconcile(job, {});
   assert.deepEqual(result.aiOnly, []);
   assert.deepEqual(result.dropped, []);
+});
+
+test("online miner writes[] shape is accepted by reconcileOffline", () => {
+  const job = baseJob();
+  const result = runOfflineReconcile(job, {
+    writes: [{ field: "remarks", line: 28, evidence: "line 28: BulkCopy.apply writes it" }],
+  });
+  assert.equal(result.aiOnly.length, 1);
+  assert.equal(result.aiOnly[0]!.field, "remarks");
+});
+
+test("parseMinerWrites mirrors online miner verification", () => {
+  const job = baseJob();
+  const declared = declaredFieldsFromJob(job);
+  const { candidates, dropped } = parseMinerWrites(
+    { writes: [{ field: "remarks", line: 28, evidence: "line 28: BulkCopy.apply" }] },
+    job.sourceJava,
+    declared,
+  );
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(dropped, []);
+
+  const bad = parseMinerWrites(
+    { writes: [{ field: "remarks", line: 9999, evidence: "nope" }] },
+    job.sourceJava,
+    declared,
+  );
+  assert.equal(bad.candidates.length, 0);
+  assert.equal(bad.dropped.length, 1);
+});
+
+test("label plan demotes aiOnly to demotedUnresolved (online parity)", () => {
+  const job = baseJob();
+  const result = runOfflineReconcile(job, {
+    writes: [{ field: "remarks", line: 28, evidence: "line 28: BulkCopy.apply writes it" }],
+  });
+  const plan = buildOfflineLabelPlan(job, result);
+  assert.deepEqual(plan.fromSlice, ["firstName"]);
+  assert.equal(plan.demotedUnresolved.length, 1);
+  assert.equal(plan.demotedUnresolved[0]!.field, "remarks");
+  assert.match(plan.demotedUnresolved[0]!.note, /ai-miner: possible missed write/);
+  assert.deepEqual(plan.unmapped, []);
+});
+
+test("label plan keeps hard-unmapped when miner silent", () => {
+  const job = baseJob();
+  const result = runOfflineReconcile(job, { writes: [] });
+  const plan = buildOfflineLabelPlan(job, result);
+  assert.deepEqual(plan.unmapped, ["remarks"]);
+  assert.deepEqual(plan.demotedUnresolved, []);
 });

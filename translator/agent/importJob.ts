@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // ── Gap detection: job checklist fields with no recognized result ─────────
+  // ── Gap detection: job checklist + demotedUnresolved from label-plan ──────
   const recognizedFields = new Set(
     result.fields
       .filter((f) => f.response.recognized)
@@ -266,6 +266,29 @@ async function main(): Promise<void> {
   const gaps = (job?.fields ?? [])
     .map((f) => f.javaTargetField)
     .filter((name) => !recognizedFields.has(name.toLowerCase()));
+
+  // Online parity: aiOnly demotions must get a successful labeler pass.
+  // Missing or recognized=false → unresolved gap (same as online demote→escalate).
+  const planPath = jobPath.replace(/job\.json$/, "label-plan.json");
+  if (existsSync(planPath)) {
+    try {
+      const plan = JSON.parse(readFileSync(planPath, "utf8")) as {
+        demotedUnresolved?: Array<{ field?: string }>;
+      };
+      for (const d of plan.demotedUnresolved ?? []) {
+        const name = String(d.field ?? "");
+        if (!name) continue;
+        if (
+          !recognizedFields.has(name.toLowerCase()) &&
+          !gaps.some((g) => g.toLowerCase() === name.toLowerCase())
+        ) {
+          gaps.push(name);
+        }
+      }
+    } catch {
+      /* ignore malformed plan */
+    }
+  }
 
   if (gaps.length > 0 && job) {
     console.error(

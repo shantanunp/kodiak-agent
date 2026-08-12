@@ -36,6 +36,7 @@ import {
   agentResultFile,
 } from "./paths.js";
 import { formatOfflineVscodePrompt, offlineVscodeSteps } from "./vscodeSteps.js";
+import { AI_MINER_PROMPT } from "./offlineMiner.js";
 
 export interface ExportAgentJobOptions {
   mapper: string;
@@ -47,9 +48,10 @@ export interface ExportAgentJobOptions {
   /**
    * --no-cst parity for offline jobs (KOD-1): skip the deterministic CST scan
    * when it's the thing that's broken (new syntax). Requires a saved schema —
-   * see buildLabelTasks's skipCstFallback. The AI write-site miner itself
-   * never runs offline (no HTTP calls); the human/editor agent completing the
-   * job plays that role for free by reading the full sourceJava already in it.
+   * see buildLabelTasks's skipCstFallback. The AI write-site miner never makes
+   * HTTP calls offline; the editor agent fills `ai-leg-writes.json` using the
+   * same `AI_MINER_PROMPT` embedded in job.json, then `offlineMiner` /
+   * `reconcileOffline` apply the identical citation + reconcile code.
    */
   skipCst?: boolean;
 }
@@ -202,33 +204,43 @@ export async function exportAgentJob(
     schemaJson,
     mapper: mapperMeta,
     systemPrompt: FIELD_MAPPING_PROMPT,
+    minerPrompt: AI_MINER_PROMPT,
     schemaContext,
     instructions: [
-      "You are labeling Java mapper fields into business pipelines.",
+      "You are labeling Java mapper fields into business pipelines (offline parity",
+      "with online --analyzer: CST + AI miner + reconcile + labeler).",
       "Everything you need is in this job.json — do not open external files.",
       "",
       "- sourceJava: full mapper class source",
       "- schemaJson + schemaContext: allowed business field paths",
       "- mapper: registry metadata (class, entryMethod, sourceType, targetType)",
-      "- fields[].businessFieldSelector: the field the user asked to label",
+      "- fields[]: CST leg (slice / auditState) — same buildLabelTasks as online",
+      "- minerPrompt: EXACT online AI_MINER_PROMPT — use for leg 2, not freestyle",
+      "- systemPrompt: EXACT online FIELD_MAPPING_PROMPT — use for labeling",
       "",
-      "For EACH entry in fields[]:",
-      "1. If the entry has a 'slice', it is self-contained (write statement + local",
-      "   dataflow + every helper body + // control flow: headers) — label from the",
-      "   slice; sourceJava is backup. Every control-flow header MUST become a filter",
-      "   step (even for plain getter→setter under an if).",
-      "2. If auditState is 'unresolved', the analyzer could not settle it (see auditNote,",
-      "   usually an opaque call). Inspect sourceJava; if the field is genuinely never",
-      "   written, return recognized=false with the reason.",
-      "3. Apply systemPrompt + schemaContext to produce a FieldMappingResponse.",
+      "Pipeline (do not skip reconcile):",
+      "1. Leg 2 miner — follow minerPrompt against the FULL checklist",
+      "   (fields[].javaTargetField + audit.unmappedFields). Write ai-leg-writes.json",
+      "   next to this job as { \"writes\": [{ \"field\", \"line\", \"evidence\" }, ...] }",
+      "   (same JSON shape the online miner returns). No citation, no claim.",
+      "2. Run: npx tsx translator/agent/offlineMiner.ts --job <this> --writes <writes>",
+      "   then: npx tsx translator/agent/reconcileOffline.ts --job <this> --candidates <candidates>",
+      "   (or pass --writes to reconcileOffline directly). Reads label-plan.json.",
+      "3. Label using systemPrompt + schemaContext per label-plan.json:",
+      "   - fromSlice: label from fields[].slice (CST wins)",
+      "   - unresolved: escalate from sourceJava (auditNote / opaque call)",
+      "   - demotedUnresolved: aiOnly demoted like online — label from sourceJava",
+      "     using the note as a HINT; never stamp recognized=true from the miner alone",
+      "   - unmapped: leave out (or recognized=false) — not demoted",
+      "4. Every control-flow header in a slice MUST become a filter step.",
       "",
       `Write the complete result to: ${resultFile}`,
       "Do not call external model HTTP APIs.",
       "",
       "result.json shape:",
       '{ "mapperId", "fingerprint", "labelModel": "agent:offline", "fields": [',
-      '  { "javaTargetField": "<from job.fields[i].javaTargetField>",',
-      '    "response": { "recognized": true, "targetField": "Order.…",',
+      '  { "javaTargetField": "<fromSlice | unresolved | demotedUnresolved field>",',
+      '    "response": { "recognized": true|false, "targetField": "Order.…",',
       '      "pipeline": [{"kind":"read","sourceField":"…","summary":"…"},…], "reason": "…" } }',
       "] }",
       "",

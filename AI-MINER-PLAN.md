@@ -346,28 +346,14 @@ circuits both legs, zero calls).
   `AgentLoopResult` and logged to stderr per run, which is enough to eyeball disagreement rate
   manually; wiring it into `drift.ts`/the golden harness is still open.
 - **Offline mode (KOD-13, added after the plan above shipped)**: the AI miner still never makes
-  an HTTP call offline — `exportAgentJob` only calls `buildLabelTasks` (the CST leg). But instead
-  of leaving the second opinion as unstructured prose ("the editor agent plays that role for
-  free"), it's now a real two-leg-plus-reconcile pipeline, same as online:
-  - **Leg 1** = `job.json`'s `fields[]`, computed deterministically by `label:export` (unchanged).
-  - **Leg 2** = the editor agent's own independent pass over the *full* checklist
-    (`fields[].javaTargetField` + `audit.unmappedFields`, not just the unmapped subset — genuine
-    parity with `mineWriteSites`'s scope), written to a small `candidates.json`.
-  - **Reconciliation** = `translator/agent/reconcileOffline.ts` — imports and calls the exact
-    same `reconcile()` (`analyzer/reconcile.ts`) and `verifyCitations()` (`translator/judge/judge.ts`)
-    the online loop uses. Zero duplicated merge logic between the two paths.
-  - `job.fields[]` itself is still only CST `mapped`/`unresolved` (unchanged) — leg 2's `aiOnly`
-    finds become **new, separate entries** in `result.json` instead, which `importJob.ts` already
-    accepts for any `javaTargetField` regardless of whether it was in the original job. This is
-    what sidesteps the gap-detection interaction flagged below as a blocker: gap detection only
-    ever iterates `job.fields[]`, so an extra `aiOnly` entry can't be mis-flagged as a gap — it
-    was never a gap in the first place, it's additive.
-  - `--no-cst` parity (`exportAgentJob`/`label:export` + the CLI's offline auto-fallback) is
-    unchanged from what shipped with KOD-1..9.
-  - Driven end to end by `.github/agents/kodiak-label.agent.md` (has `execute`, runs the script
-    itself); `.github/instructions/kodiak-agent-label.instructions.md` and
-    `.cursor/rules/kodiak-agent-label.mdc` cover the same steps for chat contexts without
-    command-execution access — they apply the citation rule by hand and say so in their summary
-    instead of assuming they can shell out.
-  - Tests: `translator/agent/reconcileOffline.test.ts` (6 cases, pure — no filesystem, no
-    network), added to `test:translator`.
+  an HTTP call offline — `exportAgentJob` only calls `buildLabelTasks` (the CST leg). Leg 2 is
+  the editor agent filling `ai-leg-writes.json` using embedded `job.minerPrompt` (exact online
+  `AI_MINER_PROMPT`, same `{ writes: [...] }` shape). Then:
+  - `translator/agent/offlineMiner.ts` citation-verifies writes → `ai-leg-candidates.json`
+  - `translator/agent/reconcileOffline.ts` calls the same `reconcile()` / `verifyCitations()` and
+    writes `label-plan.json` where **`aiOnly` → `demotedUnresolved`** (online demote parity —
+    miner never asserts mapped alone; labeler uses `systemPrompt` / escalation)
+  - Import gap-checks demoted fields via `label-plan.json`
+  - `--no-cst` parity on export/auto-fallback unchanged
+  - Driven by `.github/agents/kodiak-label.agent.md` / instructions / `.cursor/rules`
+  - Tests: `translator/agent/reconcileOffline.test.ts` (pure — no filesystem, no network).

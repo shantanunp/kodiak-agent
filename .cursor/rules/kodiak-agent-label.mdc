@@ -8,24 +8,21 @@ alwaysApply: false
 
 When the user asks you to complete an offline label job (or you have `.cache/agent-jobs/**/job.json` open):
 
-1. Read `job.json` — **everything is in the file** (`sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`, `audit.unmappedFields`).
-2. Follow `systemPrompt` and `schemaContext` exactly — same rules as the live model API.
-3. For **each** `fields[]` entry, find the Java write in `sourceJava` and produce a `FieldMappingResponse`.
-3b. Also act as the AI leg for the full declared checklist (`fields[].javaTargetField` +
-    `audit.unmappedFields`), independently of what CST already concluded: re-scan `sourceJava`
-    for a real write; if you can cite its exact line, it's a candidate. No citation, no candidate.
-    If you can run commands here, write candidates to a JSON file and run
-    `npx tsx translator/agent/reconcileOffline.ts --job <job.json> --candidates <file>` — same
-    `reconcile()`/`verifyCitations()` the online path uses — and only add a `result.json` entry
-    for its `aiOnly` bucket. Otherwise apply the citation rule yourself and note in your summary
-    that the script wasn't run.
-4. Write **only** `result.json` next to `job.json` (see shape in `.github/instructions/kodiak-agent-label.instructions.md`).
+1. Read `job.json` — **everything is in the file** (`sourceJava`, `schemaJson`, `schemaContext`, `mapper`, `fields[]`, `audit.unmappedFields`, `minerPrompt`, `systemPrompt`).
+2. **Leg 2 (AI miner)** — follow `minerPrompt` exactly (same as online `AI_MINER_PROMPT`). Write `ai-leg-writes.json` next to the job:
+   `{ "writes": [{ "field": "…", "line": 12, "evidence": "…" }] }`
+   Full checklist = `fields[].javaTargetField` + `audit.unmappedFields`. No citation, no claim.
+3. Run (print these if you cannot execute):
+   ```
+   npx tsx translator/agent/offlineMiner.ts --job <job.json> --writes <ai-leg-writes.json>
+   npx tsx translator/agent/reconcileOffline.ts --job <job.json> --candidates <ai-leg-candidates.json>
+   ```
+   Read `label-plan.json`. Use it exactly:
+   - `fromSlice` — label from CST `slice` via `systemPrompt`
+   - `unresolved` — escalate from `sourceJava`
+   - `demotedUnresolved` — online aiOnly demote: label from `sourceJava` using the note as a **hint**; never stamp `recognized: true` from the miner alone
+   - `unmapped` — leave out (or `recognized: false`)
+4. Write **only** `result.json` next to `job.json` using `systemPrompt` + `schemaContext`.
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
-6. Do **not** run npm commands yourself.
-7. After writing `result.json`, print `job.vscodeSteps` for the user to run in the **VS Code terminal**:
-
-```
-npm run label:import -- --result <result.json> [--fields ...]
-npm run label -- --mapper <id> --from-cache-only [--fields ...]
-npm run ui:serve
-```
+6. Do **not** run npm commands yourself (except the two `npx tsx` scripts above when you have execute).
+7. After writing `result.json`, print `job.vscodeSteps` for the user.
