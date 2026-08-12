@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { SourceField, WriteSite } from "../../analyzer/types.js";
+import type { SourceField, WriteSite, WriteSlice, AuditReport } from "../../analyzer/types.js";
 import { scanWriteSites, adapterFor } from "../../analyzer/scanWriteSites.js";
 import { runAuditGate } from "../../analyzer/auditGate.js";
 import { findTypeFile } from "../../analyzer/resolveType.js";
@@ -15,7 +15,6 @@ import { missDiagnostics } from "../../analyzer/secondOpinion.js";
 import { schemaTargetLeafPaths } from "../../schema/io.js";
 import { injectionDiagnostics } from "./promptInjection.js";
 import { attributeMultiInstanceWrites, type NestedTypeRef } from "./multiInstance.js";
-import type { AuditReport, WriteSlice } from "../../analyzer/types.js";
 import type { MapperEntry } from "../../src/registry/loadRegistry.js";
 
 export type { NestedTypeRef };
@@ -535,21 +534,34 @@ export function buildLabelTasks(options: {
   // mapper source and prefix them with the nested path.
   // Multi-instance: setX(var) / setX(helper) / builder .x(var) / withX(var),
   // plus reassignment-aware var segments and nested Type.builder() chains.
-  const extraSites: WriteSite[] = [];
+  // Use scanWriteSites (not bare findWriteSites) so helper-closure slice text
+  // is preserved — labelers/offline jobs need the helper body, not just the setter line.
+  const extraSites: WriteSlice[] = [];
   const byType = new Map<string, NestedTypeRef[]>();
   for (const ref of nestedTypes) {
     if (!byType.has(ref.typeName)) byType.set(ref.typeName, []);
     byType.get(ref.typeName)!.push(ref);
   }
   for (const [typeName, refs] of byType) {
-    const sites = adapter
-      .findWriteSites(parsed, options.sourceJava, typeName)
-      .filter((site) => writeSiteBelongsToType(parsed, site, typeName));
+    const { slices: typedSlices } = scanWriteSites({
+      filePath: options.mapper.sourceFile,
+      language,
+      mapperClass,
+      targetClass: typeName,
+      source: options.sourceJava,
+      worktree: options.worktree,
+    });
+    const sites = typedSlices.filter((site) =>
+      writeSiteBelongsToType(parsed, site, typeName),
+    );
     if (sites.length === 0) continue;
 
     if (refs.length === 1) {
       for (const site of sites) {
-        extraSites.push({ ...site, targetField: `${refs[0]!.pathPrefix}.${site.targetField}` });
+        extraSites.push({
+          ...site,
+          targetField: `${refs[0]!.pathPrefix}.${site.targetField}`,
+        });
       }
       continue;
     }
@@ -561,8 +573,10 @@ export function buildLabelTasks(options: {
       sites,
     });
     for (const { site, pathPrefix } of attributed) {
+      // site is the same WriteSlice object from typedSlices (passed through).
+      const full = site as WriteSlice;
       extraSites.push({
-        ...site,
+        ...full,
         targetField: `${pathPrefix}.${site.targetField}`,
       });
     }
@@ -590,19 +604,16 @@ export function buildLabelTasks(options: {
         const existing = slices[existingIdx]!;
         if (norm(existing.targetField) === norm(site.targetField)) continue;
         if (!existing.targetField.includes(".")) {
-          slices[existingIdx] = { ...existing, targetField: site.targetField };
+          // Prefer whichever slice carries the richer helper closure.
+          const preferNested =
+            (site.helperClosure?.length ?? 0) > (existing.helperClosure?.length ?? 0);
+          slices[existingIdx] = preferNested
+            ? { ...site, targetField: site.targetField }
+            : { ...existing, targetField: site.targetField };
         }
         continue;
       }
-      const helperClosure: Array<{ name: string; text: string }> = [];
-      slices.push({
-        ...site,
-        helperClosure,
-        sliceText: [
-          `// write site (line ${site.line}, in ${site.inMethod}, via ${site.via})`,
-          site.statement,
-        ].join("\n"),
-      });
+      slices.push(site);
     }
     slices.sort((a, b) => a.line - b.line);
   }

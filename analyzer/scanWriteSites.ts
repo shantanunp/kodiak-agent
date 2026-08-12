@@ -406,9 +406,16 @@ function parseFileCached(adapter: LanguageAdapter, file: string): ParsedSource |
   }
 }
 
+/** "com.acme.mapper.Foo" / "Outer$Inner" → simple class name the parser stores. */
+function simpleClassName(name: string): string {
+  const afterDot = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
+  return afterDot.includes("$") ? afterDot.slice(afterDot.lastIndexOf("$") + 1) : afterDot;
+}
+
 /**
  * Helper pool: methods callable by bare name from the mapper — its own class
  * plus superclass chain (resolved cross-file via extends, depth-capped).
+ * Accepts FQCN or simple name; parser method.className is always the simple form.
  */
 function buildHelperPool(
   adapter: LanguageAdapter,
@@ -417,9 +424,10 @@ function buildHelperPool(
   mapperClass: string,
   worktree?: string,
 ): SourceMethod[] {
-  const pool = parsed.methods.filter((m) => m.className === mapperClass);
+  const mapperSimple = simpleClassName(mapperClass);
+  const pool = parsed.methods.filter((m) => m.className === mapperSimple);
   if (!worktree) return pool;
-  let cls = mapperClass;
+  let cls = mapperSimple;
   let src = source;
   for (let hop = 0; hop < 3; hop++) {
     const ext = new RegExp(`class\\s+${cls}\\s+extends\\s+([\\w.]+)`).exec(src);

@@ -123,3 +123,41 @@ class CustomerInfo { String getEmail() { return null; } }
   );
 });
 
+test("helper closure works when mapperClass is an FQCN", () => {
+  const source = `
+public class OrderRequestMapper {
+  void buildSummary(OrderRequest input, Summary summary) {
+    summary.setOrderNumber(normalizeOrderNumber(input.getOrderNumber()));
+  }
+  private String normalizeOrderNumber(String raw) {
+    if (raw == null) return null;
+    String trimmed = stripEdges(raw);
+    if (trimmed.isEmpty()) return null;
+    if (trimmed.length() < 3) return null;
+    return trimmed;
+  }
+  private String stripEdges(String raw) {
+    return raw.trim();
+  }
+}
+class Summary { void setOrderNumber(String v) {} }
+class OrderRequest { String getOrderNumber() { return null; } }
+`;
+  const { slices } = scanWriteSites({
+    filePath: "fqcn-helpers.java",
+    language: "java",
+    mapperClass: "com.kodiakservice.mapper.OrderRequestMapper",
+    targetClass: "Summary",
+    source,
+  });
+  const order = slices.find((s) => s.targetField === "orderNumber");
+  assert.ok(order, "orderNumber write site found");
+  const helpers = order!.helperClosure.map((h) => h.name);
+  assert.ok(helpers.includes("normalizeOrderNumber"), `helpers=${helpers}`);
+  assert.ok(helpers.includes("stripEdges"), `helpers=${helpers}`);
+  assert.ok(
+    order!.sliceText.includes("stripEdges"),
+    `slice must inline helpers, got:\n${order!.sliceText}`,
+  );
+});
+

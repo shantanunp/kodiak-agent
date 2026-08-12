@@ -79,6 +79,12 @@
   .reset-bar button{margin-top:6px;border:1px solid var(--cond);background:var(--bg);color:var(--cond);font-weight:600;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;}
   .reset-bar button:hover{background:var(--cond-bg);}
   .reset-bar button:disabled{opacity:.55;cursor:default;}
+  .reset-bar .reset-confirm{margin-top:8px;padding-top:8px;border-top:1px dashed var(--ink-faint);}
+  .reset-bar .reset-confirm[hidden]{display:none;}
+  .reset-bar .reset-confirm-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+  .reset-bar .reset-confirm-actions .danger{border-color:var(--cond);background:var(--cond);color:#fff;}
+  .reset-bar .reset-confirm-actions .danger:hover{filter:brightness(0.95);}
+  .reset-bar .reset-confirm-actions .ghost{border-color:var(--ink-faint);color:var(--ink-soft);}
   .fl-legend{font-size:11px;color:var(--ink-faint);margin:10px 6px 2px;line-height:1.8;}
   .re-label{margin-top:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;}
   .re-label:hover{border-color:var(--ink-faint);color:var(--ink);}
@@ -264,6 +270,13 @@
       <div id="flReset" class="reset-bar">
         <div>Fresh start — clears caches, verified store, viewer dump, and offline jobs for this mapper. Schema is kept.</div>
         <button type="button" id="resetMappingsBtn">Reset mappings</button>
+        <div id="resetConfirm" class="reset-confirm" hidden>
+          <div id="resetConfirmMsg">This deletes translator caches, the verified store, viewer dump, offline agent jobs, and scorecard history for this mapper. Schema fields are kept. This cannot be undone.</div>
+          <div class="reset-confirm-actions">
+            <button type="button" class="danger" id="resetConfirmYes">Yes, wipe mappings</button>
+            <button type="button" class="ghost" id="resetConfirmNo">Cancel</button>
+          </div>
+        </div>
       </div>
       <div class="fl-legend">Pipelines paint only from <span class="mono">data/{mapper}.view.json</span>.&nbsp; Select = view only.&nbsp; Load / Verify / Approve write that file.&nbsp; Dot: present in view.json.&nbsp; Badge: analyzer state.</div>
     </aside>
@@ -1399,40 +1412,74 @@ async function approveStore(){
 }
 
 async function resetMappings(){
-  if(!currentMapper){ alert('No mapper selected.'); return; }
-  const ok = confirm(
-    `Reset all field mappings for "${currentMapper}"?\n\n` +
-    'This deletes translator caches, the verified store, viewer dump, offline agent jobs, and scorecard history for this mapper. Schema fields are kept.\n\n' +
-    'This cannot be undone.'
-  );
-  if(!ok) return;
+  if(!currentMapper){
+    const msg = document.getElementById('resetConfirmMsg');
+    if(msg) msg.textContent = 'No mapper selected.';
+    showResetConfirm(true);
+    return;
+  }
   // Stop any in-flight Load all so it cannot rewrite caches after the wipe.
   bulkStop = true;
   bulkRunning = false;
   lastLoadSummary = '';
   const btn = document.getElementById('resetMappingsBtn');
+  const yes = document.getElementById('resetConfirmYes');
+  const no = document.getElementById('resetConfirmNo');
   if(btn){ btn.disabled = true; btn.textContent = 'Resetting…'; }
+  if(yes) yes.disabled = true;
+  if(no) no.disabled = true;
   try{
     const res = await fetch('/api/reset-mappings',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ mapperId: currentMapper, confirm: true }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     activeField = null;
     aiGenerated = false;
     lastChangeSummary = '';
     lastChangedFiles = [];
+    showResetConfirm(false);
     await reloadViewPipelines();
     document.getElementById('canvas').innerHTML =
       `<p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Mappings cleared for <b>${esc(currentMapper)}</b>. The field list will reload from your <b>schema</b> — <span style="font-family:var(--font-mono)">MAPPED</span> badges mean the analyzer found a Java write site, not a saved pipeline. Use <b>Load</b> / <b>Load all</b> only when you want to label again.</p>`;
     await loadChecklist();
     await loadScorecard();
   }catch(e){
-    alert(e.message || String(e));
+    const errText = e.message || String(e);
+    showResetConfirm(true);
+    const msg = document.getElementById('resetConfirmMsg');
+    if(msg) msg.textContent = errText;
+    else console.error(e);
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = 'Reset mappings'; }
+    if(yes) yes.disabled = false;
+    if(no) no.disabled = false;
   }
+}
+
+function showResetConfirm(show){
+  const panel = document.getElementById('resetConfirm');
+  const btn = document.getElementById('resetMappingsBtn');
+  if(panel) panel.hidden = !show;
+  if(btn) btn.hidden = !!show;
+  if(show){
+    const msg = document.getElementById('resetConfirmMsg');
+    if(msg && currentMapper){
+      msg.textContent =
+        `Reset all field mappings for "${currentMapper}"? This deletes translator caches, the verified store, viewer dump, offline agent jobs, and scorecard history. Schema fields are kept. This cannot be undone.`;
+    }
+  }
+}
+
+function armResetMappings(){
+  if(!currentMapper){
+    const msg = document.getElementById('resetConfirmMsg');
+    if(msg) msg.textContent = 'No mapper selected.';
+    showResetConfirm(true);
+    return;
+  }
+  showResetConfirm(true);
 }
 
 async function bulkLabel(fields){
@@ -1670,7 +1717,9 @@ window.addEventListener('message', (e) => {
 });
 
 document.getElementById('editSchemaBtn')?.addEventListener('click', () => openSchemaEditor());
-document.getElementById('resetMappingsBtn')?.addEventListener('click', resetMappings);
+document.getElementById('resetMappingsBtn')?.addEventListener('click', armResetMappings);
+document.getElementById('resetConfirmYes')?.addEventListener('click', resetMappings);
+document.getElementById('resetConfirmNo')?.addEventListener('click', () => showResetConfirm(false));
 
 load().then(() => Promise.all([loadChecklist(), loadScorecard()]));
 </script>

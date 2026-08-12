@@ -302,6 +302,94 @@ public class EnvMapper {
   rmSync(wt, { recursive: true, force: true });
 });
 
+test("nested field slices keep helper closure (not write-site-only)", async () => {
+  // OrderNumber-style: nested DTO leaf written via normalizeX(helper) — offline/online
+  // labelers must see the helper body in sliceText, not just setOrderNumber(...).
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const wt = mkdtempSync(join(tmpdir(), "kodiak-nested-helpers-"));
+  const dtoDir = join(wt, "src/main/java/com/acme/dto");
+  const mapDir = join(wt, "src/main/java/com/acme/mapper");
+  mkdirSync(dtoDir, { recursive: true });
+  mkdirSync(mapDir, { recursive: true });
+  writeFileSync(join(dtoDir, "OrderMappedResponse.java"), `package com.acme.dto;
+public class OrderMappedResponse {
+  private Details details;
+  public void setDetails(Details v) { this.details = v; }
+  public static class Details {
+    private Summary summary;
+    public void setSummary(Summary v) { this.summary = v; }
+  }
+  public static class Summary {
+    private String orderNumber;
+    public void setOrderNumber(String v) { this.orderNumber = v; }
+  }
+}`);
+  const mapperFile = join(mapDir, "OrderRequestMapper.java");
+  writeFileSync(mapperFile, `package com.acme.mapper;
+import com.acme.dto.OrderMappedResponse;
+import com.acme.dto.OrderMappedResponse.Details;
+import com.acme.dto.OrderMappedResponse.Summary;
+public class OrderRequestMapper {
+  public OrderMappedResponse map(In in) {
+    OrderMappedResponse out = new OrderMappedResponse();
+    Details details = new Details();
+    details.setSummary(buildSummary(in));
+    out.setDetails(details);
+    return out;
+  }
+  private Summary buildSummary(In in) {
+    Summary summary = new Summary();
+    summary.setOrderNumber(normalizeOrderNumber(in.getOrderNumber()));
+    return summary;
+  }
+  private String normalizeOrderNumber(String raw) {
+    if (raw == null) return null;
+    String trimmed = stripEdges(raw);
+    if (trimmed.isEmpty()) return null;
+    if (!trimmed.startsWith("ORD-") && trimmed.length() < 3) return null;
+    return trimmed;
+  }
+  private String stripEdges(String raw) {
+    return raw.trim();
+  }
+}
+class In { String getOrderNumber() { return null; } }
+`);
+
+  const tasks = buildLabelTasks({
+    mapper: {
+      id: "nested-helpers",
+      sourceFile: mapperFile,
+      class: "com.acme.mapper.OrderRequestMapper",
+      entryMethod: "map",
+      sourceType: "com.acme.dto.In",
+      targetType: "com.acme.dto.OrderMappedResponse",
+    } as any,
+    sourceJava: readFileSync(mapperFile, "utf8"),
+    worktree: wt,
+  });
+
+  const order = tasks.tasks.find((t) =>
+    t.field.toLowerCase().endsWith("ordernumber") ||
+    t.field.toLowerCase().includes("summary.ordernumber"),
+  );
+  assert.ok(order, `expected …OrderNumber, got ${tasks.tasks.map((t) => t.field)}`);
+  assert.equal(order!.state, "mapped");
+  assert.ok(
+    order!.sliceText.includes("normalizeOrderNumber"),
+    `slice must name the helper, got:\n${order!.sliceText}`,
+  );
+  assert.ok(
+    order!.sliceText.includes("stripEdges") || order!.sliceText.includes(".trim()"),
+    `slice must carry helper body (stripEdges/trim), got:\n${order!.sliceText}`,
+  );
+  assert.ok(
+    order!.slices.some((s) => s.helperClosure.some((h) => h.name === "normalizeOrderNumber")),
+    "helperClosure must list normalizeOrderNumber",
+  );
+  rmSync(wt, { recursive: true, force: true });
+});
+
 test("same-file nested classes flatten without a separate .java per type", async () => {
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const wt = mkdtempSync(join(tmpdir(), "kodiak-inner-"));
