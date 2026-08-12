@@ -505,6 +505,7 @@ async function main(): Promise<void> {
         fieldsLabeled: pipeline.fieldsLabeled,
         fingerprint: pipeline.fingerprint,
         audit: result.audit,
+        reconciliationDiagnostics: result.reconciliationDiagnostics,
         promoted,
         viewPath,
       }, null, 2));

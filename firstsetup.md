@@ -13,11 +13,13 @@ Shared pieces (wipe, Scorecard, tests) apply to both.
 
 ## You need
 
-| Tool | Notes |
-| --- | --- |
-| Node.js 20+ | `node -v` |
-| Mapper checkout | `MAPPER_WORKTREE` in `.env`, or pass `--worktree` |
+
+| Tool                           | Notes                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| Node.js 20+                    | `node -v`                                                                  |
+| Mapper checkout                | `MAPPER_WORKTREE` in `.env`, or pass `--worktree`                          |
 | Model key **or** VS Code agent | online path needs `MODEL_API_KEY`; offline needs Copilot/Cursor agent mode |
+
 
 ```bash
 cp .env.example .env   # if needed
@@ -32,17 +34,23 @@ Shell tip: `npm run` does **not** load `$MAPPER_WORKTREE` from `.env` into the s
 
 ---
 
+
+
 ## Where to see monitoring & miss
 
-| Surface | What it shows |
-| --- | --- |
-| **Viewer Scorecard** | Expand “Scorecard” on `/pipeline-viewer/?mapper=…` — coverage, journal miss signals, live miss list (click → field), recent runs |
-| `GET /api/report?mapper=…` | Same payload (uses `MAPPER_WORKTREE` when set) |
-| `npm run report` | CLI scorecard |
-| `/api/health` | Ops snapshot (`pendingReview`, stale, `modelConfigured`) |
-| Viewer field list | Provenance badges, pending pill, approve bar, expansion diagnostics |
+
+| Surface                    | What it shows                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Viewer Scorecard**       | Expand “Scorecard” on `/pipeline-viewer/?mapper=…` — coverage, journal miss signals, live miss list (click → field), recent runs |
+| `GET /api/report?mapper=…` | Same payload (uses `MAPPER_WORKTREE` when set)                                                                                   |
+| `npm run report`           | CLI scorecard                                                                                                                    |
+| `/api/health`              | Ops snapshot (`pendingReview`, stale, `modelConfigured`)                                                                         |
+| Viewer field list          | Provenance badges, pending pill, approve bar, expansion diagnostics                                                              |
+
 
 ---
+
+
 
 ## Shared: wipe old data
 
@@ -86,6 +94,8 @@ npm run ui:serve
 
 ---
 
+
+
 # 1. With model agent (online)
 
 HTTP model labels fields via Kodiak’s agent-loop. No VS Code job export required.
@@ -100,6 +110,8 @@ MODEL_NAME=claude-sonnet-4-5
 MODEL_API_KEY=sk-ant-...
 ```
 
+
+
 ### 1b. Optional wipe, then label
 
 ```bash
@@ -110,6 +122,9 @@ npm run label -- \
   --mapper order-request-mapper \
   --worktree "$MAPPER_WORKTREE" \
   --analyzer
+
+npm run label -- --mapper order-request-mapper --worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform --analyzer --fields ORDER.DETAILS.SUMMARY.OrderNumber
+
 # optional: --verify --critic
 # optional: --promote          → pending-review
 # optional: --promote --approve
@@ -134,6 +149,8 @@ npm run label -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE" --a
 npm run verified:approve -- --mapper order-request-mapper --worktree "$MAPPER_WORKTREE"
 ```
 
+
+
 ### 1e. Minimal copy-paste (online)
 
 ```bash
@@ -152,6 +169,8 @@ npm run ui:serve
 ```
 
 ---
+
+
 
 # 2. VS Code offline
 
@@ -182,6 +201,8 @@ test ! -f registry/runs.jsonl && echo "no runs.jsonl"
 ls ui/pipeline-viewer/data/*.view.json 2>/dev/null || echo "no view.json"
 ```
 
+
+
 ### 2c. Export offline job
 
 ```bash
@@ -205,7 +226,7 @@ Copy: `.cache/agent-jobs/order-request-mapper/<fingerprint>/job.json`
 
 ### 2d. VS Code custom agent (full E2E) or fill `result.json`
 
-**Terminal approvals:** workspace [`.vscode/settings.json`](.vscode/settings.json) turns on `chat.tools.terminal.autoApproveWorkspaceNpmScripts` so `npm run …` scripts from this repo’s `package.json` (e.g. `label:export`, `label:import`) can auto-approve. Requires a **trusted** workspace and `chat.tools.terminal.enableAutoApprove`. Org policy can still force prompts. Session bypass: permissions picker → Bypass Approvals, or `/autoApprove`.
+**Terminal approvals:** workspace `[.vscode/settings.json](.vscode/settings.json)` turns on `chat.tools.terminal.autoApproveWorkspaceNpmScripts` so `npm run …` scripts from this repo’s `package.json` (e.g. `label:export`, `label:import`) can auto-approve. Requires a **trusted** workspace and `chat.tools.terminal.enableAutoApprove`. Org policy can still force prompts. Session bypass: permissions picker → Bypass Approvals, or `/autoApprove`.
 
 **Preferred — custom agent (includes export):** in Copilot chat, select agent **kodiak-label**. The input hint shows:
 
@@ -249,6 +270,8 @@ npm run verified:approve -- \
   --worktree "$MAPPER_WORKTREE"
 ```
 
+
+
 ### 2f. Viewer + Scorecard
 
 ```bash
@@ -285,31 +308,39 @@ npm run ui:serve
 
 ---
 
+
+
 ## UI URLs
 
 After `npm run ui:serve` (port `4173`):
 
-| URL | Purpose |
-| --- | --- |
-| `http://localhost:4173/kodiak` | Main entry (schema → pipeline when ready) |
-| `http://localhost:4173/kodiak/frame/schema` | Schema builder without the `/kodiak` iframe shell |
-| `http://localhost:4173/kodiak/frame/pipeline` | Pipeline viewer without the `/kodiak` iframe shell |
-| `http://localhost:4173/schema-builder/index.html` | Same schema page via static path |
-| `http://localhost:4173/pipeline-viewer/index.html` | Same pipeline page via static path |
+
+| URL                                                | Purpose                                            |
+| -------------------------------------------------- | -------------------------------------------------- |
+| `http://localhost:4173/kodiak`                     | Main entry (schema → pipeline when ready)          |
+| `http://localhost:4173/kodiak/frame/schema`        | Schema builder without the `/kodiak` iframe shell  |
+| `http://localhost:4173/kodiak/frame/pipeline`      | Pipeline viewer without the `/kodiak` iframe shell |
+| `http://localhost:4173/schema-builder/index.html`  | Same schema page via static path                   |
+| `http://localhost:4173/pipeline-viewer/index.html` | Same pipeline page via static path                 |
+
 
 Use a frame or `index.html` URL for Cursor **Select Element** (Design Mode cannot pick inside the `/kodiak` iframe). Bare `/schema-builder` and `/pipeline-viewer` redirect to `/kodiak`.
 
 ---
 
+
+
 ## Stale data checklist
 
-| Symptom | Likely cause |
-| --- | --- |
-| Report miss signals all 0 | Never labeled/imported after wipe |
-| Field still labeled after wipe | New label after wipe, verified store not deleted, or leftover `ui/pipeline-viewer/data/*.view.json` |
-| “Labeled from model” while intending offline | `MODEL_API_KEY` still set |
-| UI looks unchanged | Old `ui:serve` / browser cache / uncleared `.view.json` |
-| Select Element only gets outer iframe / “Not found” | Open a `/kodiak/frame/…` or `…/index.html` URL (see UI URLs) |
+
+| Symptom                                             | Likely cause                                                                                        |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Report miss signals all 0                           | Never labeled/imported after wipe                                                                   |
+| Field still labeled after wipe                      | New label after wipe, verified store not deleted, or leftover `ui/pipeline-viewer/data/*.view.json` |
+| “Labeled from model” while intending offline        | `MODEL_API_KEY` still set                                                                           |
+| UI looks unchanged                                  | Old `ui:serve` / browser cache / uncleared `.view.json`                                             |
+| Select Element only gets outer iframe / “Not found” | Open a `/kodiak/frame/…` or `…/index.html` URL (see UI URLs)                                        |
+
 
 ---
 

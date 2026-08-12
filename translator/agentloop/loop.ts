@@ -179,7 +179,25 @@ export async function runAgentLoop(
         `ai-miner reconciled: ${agreed.length} agreed, ${aiOnly.length} ai-only, ${cstOnly.length} cst-only`;
       reconciliationDiagnostics.push(summary);
       console.error(`[ai-miner] ${summary}`);
-    } catch (err) {
+      if (agreed.length) {
+        console.error(`[ai-miner]   agreed: ${agreed.join(", ")}`);
+        reconciliationDiagnostics.push(`agreed: ${agreed.join(", ")}`);
+      }
+      if (aiOnly.length) {
+        const aiList = aiOnly.map((c) => `${c.field}@${c.line}`).join(", ");
+        console.error(`[ai-miner]   ai-only: ${aiList}`);
+        reconciliationDiagnostics.push(`ai-only: ${aiList}`);
+      }
+      if (cstOnly.length) {
+        const cstList = cstOnly
+          .map((s) => `${s.targetField}@${s.line}`)
+          .join(", ");
+        console.error(`[ai-miner]   cst-only: ${cstList}`);
+        reconciliationDiagnostics.push(`cst-only: ${cstList}`);
+      }
+      console.error(
+        `[ai-miner]   miner candidates: ${candidates.length}, dropped claims: ${dropped.length}`,
+      );    } catch (err) {
       console.error(`[ai-miner] skipped: ${(err as Error).message}`);
     }
   }

@@ -110,6 +110,38 @@ test("gemini via config alias: openai wire style against Google's compat endpoin
   assert.equal(cap.headers["Authorization"], "Bearer k-gem");
 });
 
+test("deepseek: disables thinking and still parses content", async () => {
+  const cap = stubFetch({
+    choices: [{ message: { content: '{"recognized":false,"reason":"ds"}' } }],
+  });
+  const p = new HttpModelProvider(config({
+    apiStyle: "openai",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+  }));
+  const res = await p.labelFieldMapping({ javaTargetField: "a", indexerOps: [] });
+  assert.deepEqual(cap.body.thinking, { type: "disabled" });
+  assert.equal(res.reason, "ds");
+});
+
+test("deepseek: falls back to reasoning_content when content is empty", async () => {
+  stubFetch({
+    choices: [{
+      message: {
+        content: "",
+        reasoning_content: '{"recognized":false,"reason":"from-cot"}',
+      },
+    }],
+  });
+  const p = new HttpModelProvider(config({
+    apiStyle: "openai",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+  }));
+  const res = await p.labelFieldMapping({ javaTargetField: "a", indexerOps: [] });
+  assert.equal(res.reason, "from-cot");
+});
+
 test("retry: 429 then success", async () => {
   let call = 0;
   globalThis.fetch = (async () => {

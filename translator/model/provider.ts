@@ -176,7 +176,13 @@ Rules:
 - javaTargetHint can be a setter name, simple field, or dotted path — leaf name is enough.`;
 
 interface OpenAiChatResponse {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      /** DeepSeek thinking-mode CoT (sibling of content). */
+      reasoning_content?: string | null;
+    };
+  }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: { message?: string };
 }
@@ -226,6 +232,22 @@ function chatCompletionsUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/$/, "");
   if (trimmed.endsWith("/chat/completions")) return trimmed;
   return `${trimmed}/chat/completions`;
+}
+
+/** DeepSeek V4 thinking is on by default; labeling needs JSON in `content`. */
+function isDeepSeekEndpoint(baseUrl: string, model: string): boolean {
+  return /deepseek/i.test(baseUrl) || /^deepseek/i.test(model);
+}
+
+/** Prefer final answer; fall back to reasoning_content if content is empty. */
+function openAiMessageText(payload: OpenAiChatResponse): string | null {
+  const msg = payload.choices?.[0]?.message;
+  if (!msg) return null;
+  const content = typeof msg.content === "string" ? msg.content.trim() : "";
+  if (content) return unwrapJsonText(content);
+  const reasoning =
+    typeof msg.reasoning_content === "string" ? msg.reasoning_content.trim() : "";
+  return reasoning ? unwrapJsonText(reasoning) : null;
 }
 
 /**
@@ -376,11 +398,14 @@ export class HttpModelProvider implements ModelProvider {
     if (jsonObjectFormat) {
       body.response_format = { type: "json_object" };
     }
+    // DeepSeek V4: thinking defaults to enabled and can leave content empty.
+    // Disable it so JSON labeling lands in message.content.
+    if (isDeepSeekEndpoint(this.baseUrl, this.model)) {
+      body.thinking = { type: "disabled" };
+    }
 
     return this.fetchText(url, headers, body, (payload) => {
-      const p = payload as OpenAiChatResponse;
-      const text = p.choices?.[0]?.message?.content?.trim() ?? null;
-      return text ? unwrapJsonText(text) : null;
+      return openAiMessageText(payload as OpenAiChatResponse);
     }, (payload) => (payload as OpenAiChatResponse).error?.message);
   }
 
@@ -545,7 +570,7 @@ export async function runToolLoop(options: {
     throw new Error(`tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);
   }
 
-  // openai-compatible (openai / gemini alias / copilot)
+  // openai-compatible (openai / gemini alias / copilot / deepseek)
   headers["Authorization"] = `Bearer ${config.apiKey}`;
   if (config.apiStyle === "copilot") headers["Copilot-Integration-Id"] = "vscode-chat";
   const tools = options.tools.map((t) => ({
@@ -557,15 +582,19 @@ export async function runToolLoop(options: {
     { role: "user", content: options.userPrompt },
   ];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const res = await fetch(`${config.baseUrl}/chat/completions`, {
+    const body: Record<string, unknown> = {
+      model: config.model,
+      temperature: config.temperature,
+      tools,
+      messages,
+    };
+    if (isDeepSeekEndpoint(config.baseUrl, config.model)) {
+      body.thinking = { type: "disabled" };
+    }
+    const res = await fetch(chatCompletionsUrl(config.baseUrl), {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        model: config.model,
-        temperature: config.temperature,
-        tools,
-        messages,
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`tool loop HTTP ${res.status}`);
     const data = (await res.json()) as {
