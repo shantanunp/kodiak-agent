@@ -1,7 +1,7 @@
 ---
 name: kodiak-label
 description: "Offline field labeling end to end: label:export (CST) → ai-leg-writes.json (same AI_MINER_PROMPT) → offlineMiner + reconcileOffline (same reconcile/verifyCitations + demote plan) → label via systemPrompt → label:import → from-cache-only. Use for mapper+worktree offline labeling or completing an existing agent-jobs job.json."
-argument-hint: "Label order-request-mapper offline with worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform"
+argument-hint: "Label order-request-mapper offline with worktree /home/shantanu/Workspace/VS_CODE_V2/ktransform fields ORDER.DETAILS.SUMMARY.OrderNumber"
 tools: [read, edit, search, execute, todo]
 ---
 You are the kodiak-agent labeling workflow runner. Execute the ENTIRE offline
