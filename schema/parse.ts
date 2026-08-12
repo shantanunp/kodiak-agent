@@ -120,6 +120,16 @@ interface XmlElement {
   text: string;
 }
 
+/** Local name only — strip `ns:` so tree fields are `Customer`, not `ns:Customer`. */
+function xmlLocalName(qname: string): string {
+  const i = qname.indexOf(":");
+  return i >= 0 ? qname.slice(i + 1) : qname;
+}
+
+function isXmlnsAttr(name: string): boolean {
+  return name === "xmlns" || name.startsWith("xmlns:");
+}
+
 function parseXmlDocument(xml: string): XmlElement {
   const tagRe = /<(\/?)([\w:-]+)([^>]*)>/g;
   const stack: XmlElement[] = [];
@@ -170,12 +180,16 @@ function parseXmlDocument(xml: string): XmlElement {
 }
 
 function inferFromXmlElement(el: XmlElement): SchemaNode {
-  const attrNodes = el.attrs.map((a) => makeNode(`@${a.name}`, jsPrimitiveType(a.value)));
+  const localTag = xmlLocalName(el.tag);
+  const attrNodes = el.attrs
+    .filter((a) => !isXmlnsAttr(a.name))
+    .map((a) => makeNode(`@${xmlLocalName(a.name)}`, jsPrimitiveType(a.value)));
   const groups = new Map<string, XmlElement[]>();
   for (const child of el.children) {
-    const list = groups.get(child.tag) ?? [];
+    const key = xmlLocalName(child.tag);
+    const list = groups.get(key) ?? [];
     list.push(child);
-    groups.set(child.tag, list);
+    groups.set(key, list);
   }
 
   const childNodes: SchemaNode[] = [];
@@ -196,10 +210,10 @@ function inferFromXmlElement(el: XmlElement): SchemaNode {
   }
 
   if (childNodes.length === 0 && attrNodes.length === 0) {
-    return makeNode(el.tag, jsPrimitiveType(el.text.trim()));
+    return makeNode(localTag, jsPrimitiveType(el.text.trim()));
   }
 
-  const node = makeNode(el.tag, "object");
+  const node = makeNode(localTag, "object");
   node.children = [...attrNodes, ...childNodes];
   return node;
 }
