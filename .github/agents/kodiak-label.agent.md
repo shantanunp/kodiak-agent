@@ -88,6 +88,13 @@ Parse from the user request:
    - `demotedUnresolved` — demote parity; label with miner note as hint
    - `unmapped` — omit / `recognized: false`
 
+   **Label fidelity (offline-only — do not invent steps):**
+   - Label ONLY from `fields[].slice` / `sourceJava`. Never invent transforms from the allowed-op list.
+   - Emit `keepDigits` / `lettersOnly` ONLY when the helper body actually filters characters that way (`Character.isDigit` / `isLetter` loops, etc.).
+   - Every helper-body guard that returns null or skips the write (`raw == null`, `isEmpty()`, `length < N`, prefix checks) MUST become a **filter** step — even without `// control flow:` headers.
+   - Prefer `trim` when the body is edge-whitespace only (`stripEdges` / start–end walks). Do not upgrade trim to digit/letter sanitizers.
+   - After writing `result.json`, check each TRANSFORM op is evidenced in the slice; if not, remove it before import (import rejects ungrounded TRANSFORM/CONSTANT for `agent:offline`).
+
    Write `result.json`:
    ```json
    {
@@ -145,5 +152,5 @@ npm run label -- --mapper order-request-mapper --from-cache-only --fields <path>
 ```
 
 ```bash
-npx tsx --test translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts translator/agent/reconcileOffline.test.ts
+npx tsx --test translator/agent/offlineFields.test.ts translator/agent/vscodeSteps.test.ts translator/agent/reconcileOffline.test.ts translator/agent/offlineGrounding.test.ts
 ```

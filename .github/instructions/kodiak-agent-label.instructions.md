@@ -69,6 +69,13 @@ When asked to complete an offline label job (or `.cache/agent-jobs/**/job.json` 
 }
 ```
 
+   **Label fidelity (offline-only — do not invent steps):**
+   - Label ONLY from `fields[].slice` / `sourceJava`. Never invent transforms from the allowed-op list.
+   - Emit `keepDigits` / `lettersOnly` ONLY when the helper body actually filters characters that way (`Character.isDigit` / `isLetter` loops, etc.).
+   - Every helper-body guard that returns null or skips the write (`raw == null`, `isEmpty()`, `length < N`, prefix checks) MUST become a **filter** step — even without `// control flow:` headers.
+   - Prefer `trim` when the body is edge-whitespace only (`stripEdges` / start–end walks). Do not upgrade trim to digit/letter sanitizers.
+   - After writing `result.json`, check each TRANSFORM op is evidenced in the slice; if not, remove it before import (import rejects ungrounded TRANSFORM/CONSTANT for `agent:offline`).
+
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
 6. Do **not** run npm import/from-cache yourself — print `job.vscodeSteps` for the user.
 7. If the online path is being used, follow the same parity rules and do not let online mode skip the CST/miner/reconcile gate or treat miner-only claims as mapped.

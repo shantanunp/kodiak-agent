@@ -37,6 +37,7 @@ import {
 } from "./paths.js";
 import { formatOfflineVscodePrompt, offlineVscodeSteps } from "./vscodeSteps.js";
 import { AI_MINER_PROMPT } from "./offlineMiner.js";
+import { OFFLINE_LABEL_FIDELITY } from "./offlineGrounding.js";
 
 export interface ExportAgentJobOptions {
   mapper: string;
@@ -233,6 +234,8 @@ export async function exportAgentJob(
       "     using the note as a HINT; never stamp recognized=true from the miner alone",
       "   - unmapped: leave out (or recognized=false) — not demoted",
       "4. Every control-flow header in a slice MUST become a filter step.",
+      "",
+      OFFLINE_LABEL_FIDELITY,
       "",
       `Write the complete result to: ${resultFile}`,
       "Do not call external model HTTP APIs.",

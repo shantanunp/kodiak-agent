@@ -32,6 +32,7 @@ import { AGENT_OFFLINE_MODEL, type AgentJob, type AgentResult } from "./types.js
 import { agentJobFile, agentJobsRoot, agentResultFile } from "./paths.js";
 import { exportAgentJob } from "./exportJob.js";
 import { appendRun, sourceSha } from "../telemetry/journal.js";
+import { assertOfflineImportGrounded } from "./offlineGrounding.js";
 
 const { values } = parseArgs({
   options: {
@@ -44,6 +45,7 @@ const { values } = parseArgs({
     fields: { type: "string" },
     result: { type: "string" },
     strict: { type: "boolean", default: false },
+    "allow-ungrounded": { type: "boolean", default: false },
   },
 });
 
@@ -185,6 +187,36 @@ async function main(): Promise<void> {
     };
   } catch {
     mapperTypes = undefined;
+  }
+
+  // Offline-only: reject invented TRANSFORM/CONSTANT before writing cache/view.
+  // Online agentloop stays warn-only; non-offline labelModel skips this gate.
+  try {
+    assertOfflineImportGrounded({
+      labelModel: result.labelModel,
+      allowUngrounded: values["allow-ungrounded"] === true,
+      fields: result.fields
+        .filter((field) =>
+          fieldMatchesSelectors(
+            field.javaTargetField,
+            field.response.targetField,
+            selectors,
+          ),
+        )
+        .map((field) => {
+          const jobField = job?.fields?.find(
+            (f) => f.javaTargetField === field.javaTargetField,
+          );
+          return {
+            javaTargetField: field.javaTargetField,
+            response: field.response,
+            sliceText: jobField?.slice,
+          };
+        }),
+    });
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
   }
 
   for (const field of result.fields) {

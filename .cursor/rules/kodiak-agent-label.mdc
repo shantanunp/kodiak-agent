@@ -37,6 +37,14 @@ When the user asks you to complete an offline label job (or you have `.cache/age
    - `demotedUnresolved` — online aiOnly demote: label from `sourceJava` using the note as a **hint**; never stamp `recognized: true` from the miner alone
    - `unmapped` — leave out (or `recognized: false`)
 4. Write **only** `result.json` next to `job.json` using `systemPrompt` + `schemaContext`.
+
+   **Label fidelity (offline-only — do not invent steps):**
+   - Label ONLY from `fields[].slice` / `sourceJava`. Never invent transforms from the allowed-op list.
+   - Emit `keepDigits` / `lettersOnly` ONLY when the helper body actually filters characters that way (`Character.isDigit` / `isLetter` loops, etc.).
+   - Every helper-body guard that returns null or skips the write (`raw == null`, `isEmpty()`, `length < N`, prefix checks) MUST become a **filter** step — even without `// control flow:` headers.
+   - Prefer `trim` when the body is edge-whitespace only (`stripEdges` / start–end walks). Do not upgrade trim to digit/letter sanitizers.
+   - After writing `result.json`, check each TRANSFORM op is evidenced in the slice; if not, remove it before import (import rejects ungrounded TRANSFORM/CONSTANT for `agent:offline`).
+
 5. Do **not** call external model HTTP APIs. Do **not** invent schema field paths.
 6. Do **not** run npm commands yourself (except the two `npx tsx` scripts above when you have execute).
 7. After writing `result.json`, print `job.vscodeSteps` for the user.
