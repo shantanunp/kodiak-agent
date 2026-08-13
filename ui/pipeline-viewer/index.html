@@ -211,6 +211,41 @@
   }
   .schema-drawer-close:hover{border-color:var(--ink-faint);}
   .schema-drawer iframe{flex:1;border:0;width:100%;background:var(--bg);}
+  .badge-shared{background:var(--cond);color:#fff;margin-left:0;}
+  .shared-tip{position:relative;display:inline-flex;align-items:center;margin-left:6px;cursor:default;z-index:1;}
+  .shared-tip:hover,.shared-tip:focus-within{z-index:8;}
+  .shared-tip-pop{
+    display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:8;
+    min-width:180px;max-width:280px;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;color:var(--ink);font-size:12px;font-weight:500;
+    letter-spacing:0;text-transform:none;line-height:1.45;white-space:normal;
+  }
+  .shared-tip:hover .shared-tip-pop,.shared-tip:focus-within .shared-tip-pop{display:block;}
+  .shared-tip-pop b{display:block;font-family:var(--font-mono);font-size:11.5px;font-weight:600;color:var(--ink);margin-bottom:4px;}
+  .shared-tip-pop .also{color:var(--ink-soft);font-size:11px;margin-bottom:4px;}
+  .shared-tip-pop ul{margin:0;padding:0;list-style:none;}
+  .shared-tip-pop li{font-family:var(--font-mono);font-size:11.5px;color:var(--ink);padding:2px 0;}
+  .step{position:relative;}
+  .step:has(.shared-tip:hover),.step:has(.shared-tip:focus-within){z-index:6;}
+  .shared-banner{display:flex;align-items:flex-start;gap:10px;background:var(--cond-bg);color:var(--cond);border-radius:8px;padding:10px 12px;margin:12px 0 4px;font-size:12.5px;line-height:1.5;}
+  .shared-banner b{font-weight:600;}
+  .shared-banner .mono{background:rgba(255,255,255,.55);border-color:transparent;}
+  .shared-fields{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .field-jump{font-family:var(--font-mono);font-size:11px;border:1px solid transparent;background:rgba(255,255,255,.7);color:var(--cond);padding:3px 8px;border-radius:6px;cursor:pointer;}
+  .field-jump:hover{border-color:var(--cond);}
+  .shared-modal{position:fixed;inset:0;z-index:50;display:none;background:rgba(23,32,28,.45);align-items:center;justify-content:center;padding:24px;}
+  .shared-modal.open{display:flex;}
+  .shared-modal-card{width:min(520px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;}
+  .shared-modal-card h2{margin:0 0 8px;font-size:16px;font-weight:600;}
+  .shared-modal-card p{margin:0 0 12px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;}
+  .shared-modal-list{margin:0 0 16px;padding:10px 12px;background:var(--cond-bg);border-radius:8px;font-size:12.5px;color:var(--cond);line-height:1.55;}
+  .shared-modal-actions{display:flex;flex-direction:column;gap:8px;}
+  .shared-modal-actions button{border:1px solid var(--line);background:var(--bg);color:var(--ink);font-weight:600;font-size:13px;padding:9px 12px;border-radius:8px;cursor:pointer;text-align:left;}
+  .shared-modal-actions button:hover{border-color:var(--ink-faint);}
+  .shared-modal-actions .primary{background:var(--cond);border-color:var(--cond);color:#fff;}
+  .shared-modal-actions .primary:hover{filter:brightness(0.95);}
+  .shared-modal-actions .ghost{color:var(--ink-soft);}
+  .shared-modal-hint{display:block;font-weight:500;font-size:11.5px;color:inherit;opacity:.8;margin-top:2px;}
 </style>
 </head>
 <body>
@@ -238,7 +273,7 @@
     <input id="aiInput" type="text" placeholder="e.g. strip punctuation in this field's transform helper" />
     <button type="button" id="aiBtn">Build with AI</button>
   </div>
-  <div class="ai-status" id="aiStatus">Edits only the currently selected field’s mapping functions in MAPPER_WORKTREE, then re-labels that field.</div>
+  <div class="ai-status" id="aiStatus">Edits the currently selected field’s mapping functions in MAPPER_WORKTREE. Shared helpers prompt before apply.</div>
 
   <details class="score-wrap" id="scoreWrap">
     <summary>
@@ -283,6 +318,24 @@
     <div class="canvas" id="canvas"><p style="color:var(--ink-soft);font-size:13.5px;line-height:1.6">Select a target field on the left to load its pipeline.</p></div>
   </div>
 </div>
+<div class="shared-modal" id="sharedModal" role="dialog" aria-labelledby="sharedModalTitle" aria-modal="true">
+  <div class="shared-modal-card">
+    <h2 id="sharedModalTitle">This change touches a shared helper</h2>
+    <p id="sharedModalLead"></p>
+    <div class="shared-modal-list" id="sharedModalList"></div>
+    <div class="shared-modal-actions">
+      <button type="button" class="primary" id="sharedApplyAllBtn">
+        Apply to all sharing fields
+        <span class="shared-modal-hint">Edit the helper in place, then re-label every listed field.</span>
+      </button>
+      <button type="button" id="sharedForkBtn">
+        Fork for this field only
+        <span class="shared-modal-hint">Copy the helper so only the current field changes.</span>
+      </button>
+      <button type="button" class="ghost" id="sharedCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
 <script>
 const ICONS = { read:'R', filter:'F', select:'Sel', transform:'Tx', build:'B', write:'W', constant:'C', raw:'?' };
 const COLOR = { read:'--source', filter:'--cond', select:'--op', transform:'--op', build:'--op', write:'--target', constant:'--target', raw:'--raw' };
@@ -298,6 +351,10 @@ let lastChangedFiles = [];
 let checklist = null;
 let scorecard = null;
 let activeField = null;
+/** Shared helpers for the field currently painted on the canvas. */
+let activeSharedHelpers = [];
+/** Pending Build-with-AI intent while the shared-helper confirm is open. */
+let pendingSharedApply = null;
 /** Lowercased target path → view steps from .view.json (sole paint source). */
 const fieldPipelines = {};
 
@@ -305,6 +362,66 @@ function badge(step) {
   if (step.kind === 'raw') return '<span class="badge badge-raw">needs review</span>';
   if (step.labelSource === 'model' || step.labelSource === 'gemini') return '<span class="badge badge-model">AI labeled</span>';
   return '<span class="badge badge-det">deterministic</span>';
+}
+
+function helperSimpleName(name) {
+  const trimmed = String(name || '').trim();
+  return trimmed.includes('.') ? trimmed.slice(trimmed.lastIndexOf('.') + 1) : trimmed;
+}
+
+function sharedHelpersForField(field) {
+  const row = fieldRow(field) || checklist?.fields?.find((f) =>
+    fieldLeaf(f.field).toLowerCase() === fieldLeaf(field).toLowerCase()
+  );
+  return Array.isArray(row?.sharedHelpers) ? row.sharedHelpers : [];
+}
+
+function transformSharedHelper(step, helpers) {
+  if (step.kind !== 'transform' || !helpers?.length) return null;
+  const hay = `${step.op || ''} ${step.summary || ''} ${step.sourceText || ''}`.toLowerCase();
+  const compactHay = hay.replace(/[^a-z0-9]/g, '');
+  for (const helper of helpers) {
+    const simple = helperSimpleName(helper.name);
+    const compact = simple.replace(/[^a-z0-9]/g, '').toLowerCase();
+    if (compact && (hay.includes(simple.toLowerCase()) || compactHay.includes(compact))) return helper;
+    const opCompact = String(step.op || '').replace(/[^a-z0-9]/g, '').toLowerCase();
+    if (opCompact.length >= 4 && compact.includes(opCompact)) return helper;
+  }
+  return null;
+}
+
+function sharedBadgeHtml(shared) {
+  if (!shared) return '';
+  const fields = shared.fields || [];
+  const items = fields.length
+    ? fields.map((f) => `<li>${esc(fieldLeaf(f))}</li>`).join('')
+    : '<li>other fields</li>';
+  return `<span class="shared-tip" tabindex="0">
+    <span class="badge badge-shared">Shared</span>
+    <span class="shared-tip-pop" role="tooltip">
+      <b>${esc(shared.name)}</b>
+      <div class="also">Also used by</div>
+      <ul>${items}</ul>
+    </span>
+  </span>`;
+}
+
+function sharedBannerHtml(field) {
+  const helpers = sharedHelpersForField(field);
+  if (!helpers.length) return '';
+  const lines = helpers.map((h) => {
+    const chips = (h.fields || []).map((name) =>
+      `<button type="button" class="field-jump" data-jump="${esc(name)}">${esc(fieldLeaf(name))}</button>`
+    ).join('');
+    return `<div style="margin-top:6px"><span class="mono">${esc(h.name)}</span> also used by</div><div class="shared-fields">${chips}</div>`;
+  }).join('');
+  return `<div class="shared-banner">
+    <span>!</span>
+    <div>
+      <div>Shared methods — editing these Java helpers in place changes other field mappings.</div>
+      ${lines}
+    </div>
+  </div>`;
 }
 
 function fieldReasonFromSteps(steps) {
@@ -455,11 +572,12 @@ function renderStep(step) {
   const summary = typeof step.summary === 'string' ? step.summary.trim() : '';
   // Nested filter→constant already shows the outcome; skip redundant summary clutter.
   const showSummary = summary && !(isLiteralBranch(step));
+  const shared = transformSharedHelper(step, activeSharedHelpers);
   return `<div class="step">
     <div class="step-rail"><div class="step-icon" style="background:var(${BG[k]});color:var(${COLOR[k]})">${ICONS[k]||'?'}</div><div class="step-line"></div></div>
     <div class="step-card">
-      <div class="step-kicker" style="color:var(${COLOR[k]})">${LABELS[k]||k}${badge(step)}</div>
-      <div class="step-body">${renderStepBody(step)}</div>
+      <div class="step-kicker" style="color:var(${COLOR[k]})">${LABELS[k]||k}${badge(step)}${sharedBadgeHtml(shared)}</div>
+      <div class="step-body">${renderStepBody(step)}${shared ? ` via <span class="mono">${esc(shared.name)}</span>` : ''}</div>
       ${showSummary ? `<div class="step-summary">${esc(summary)}</div>` : ''}
       ${step.sourceText ? `<div class="code-block">${esc(step.sourceText)}</div>` : ''}
     </div>
@@ -761,9 +879,28 @@ function parseIntentAndFields(raw) {
   return { intent, fields };
 }
 
+function closeSharedModal() {
+  document.getElementById('sharedModal').classList.remove('open');
+  pendingSharedApply = null;
+}
+
+function openSharedModal(intent, focusField, helpers) {
+  pendingSharedApply = { intent, focusField };
+  const others = [...new Set(helpers.flatMap((h) => h.fields || []))];
+  document.getElementById('sharedModalLead').textContent =
+    `You asked to change ${focusField}. That pipeline uses helper${helpers.length === 1 ? '' : 's'} also called by other mappings.`;
+  document.getElementById('sharedModalList').innerHTML =
+    helpers.map((h) =>
+      `<div><b>${esc(h.name)}</b> — also ${(h.fields || []).map(esc).join(', ')}</div>`
+    ).join('') +
+    (others.length
+      ? `<div style="margin-top:8px">Editing in place will change ${others.map(esc).join(', ')} as well.</div>`
+      : '');
+  document.getElementById('sharedModal').classList.add('open');
+}
+
 async function buildWithAi() {
   const statusEl = document.getElementById('aiStatus');
-  const btn = document.getElementById('aiBtn');
   const parsed = parseIntentAndFields(document.getElementById('aiInput').value);
   const intent = parsed.intent;
   const focusField = parsed.fields || currentFocusField();
@@ -780,19 +917,38 @@ async function buildWithAi() {
     return;
   }
 
-  statusEl.textContent = `AI is editing helpers for ${focusField}…`;
+  const helpers = sharedHelpersForField(focusField);
+  if (helpers.length) {
+    openSharedModal(intent, focusField, helpers);
+    return;
+  }
+  await applyChangeWithMode(intent, focusField);
+}
+
+async function applyChangeWithMode(intent, focusField, sharedHelperMode) {
+  const statusEl = document.getElementById('aiStatus');
+  const btn = document.getElementById('aiBtn');
+  statusEl.classList.remove('error');
+  const modeNote = sharedHelperMode === 'apply-all'
+    ? ' (shared helper, all sharing fields)'
+    : sharedHelperMode === 'fork'
+      ? ' (fork helper for this field)'
+      : '';
+  statusEl.textContent = `AI is editing helpers for ${focusField}${modeNote}…`;
   btn.disabled = true;
 
   try {
+    const payload = {
+      mapperId: currentMapper,
+      intent,
+      fields: focusField,
+      pipelineHint: currentPipelineHint(),
+    };
+    if (sharedHelperMode) payload.sharedHelperMode = sharedHelperMode;
     const res = await fetch('/api/apply-change', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mapperId: currentMapper,
-        intent,
-        fields: focusField,
-        pipelineHint: currentPipelineHint(),
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -803,12 +959,18 @@ async function buildWithAi() {
 
     const parts = [];
     parts.push(`field ${esc(focusField)}`);
+    if (sharedHelperMode === 'apply-all') parts.push('applied to all sharing fields');
+    if (sharedHelperMode === 'fork') parts.push('forked helper for this field');
     if (data.alreadyApplied) parts.push('Already applied — no file writes');
     if (data.summary) parts.push(esc(data.summary));
     if (lastChangedFiles.length) parts.push(`files: ${lastChangedFiles.map(esc).join(', ')}`);
+    if (Array.isArray(data.relabelFields) && data.relabelFields.length > 1) {
+      parts.push(`re-labeled ${data.relabelFields.map(esc).join(', ')}`);
+    }
     if (data.labelError) parts.push(`label warning: ${esc(data.labelError)}`);
     statusEl.innerHTML = parts.join(' · ') || 'Done.';
 
+    await loadChecklist();
     if (data.view && (data.view.steps?.length || data.view.fields?.length)) {
       await reloadViewPipelines();
       const fields = Array.isArray(viewData?.fields) ? viewData.fields : null;
@@ -836,6 +998,20 @@ async function buildWithAi() {
 document.getElementById('aiBtn').addEventListener('click', buildWithAi);
 document.getElementById('aiInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') buildWithAi();
+});
+document.getElementById('sharedApplyAllBtn').addEventListener('click', () => {
+  const pending = pendingSharedApply;
+  closeSharedModal();
+  if (pending) applyChangeWithMode(pending.intent, pending.focusField, 'apply-all');
+});
+document.getElementById('sharedForkBtn').addEventListener('click', () => {
+  const pending = pendingSharedApply;
+  closeSharedModal();
+  if (pending) applyChangeWithMode(pending.intent, pending.focusField, 'fork');
+});
+document.getElementById('sharedCancelBtn').addEventListener('click', closeSharedModal);
+document.getElementById('sharedModal').addEventListener('click', (e) => {
+  if (e.target.id === 'sharedModal') closeSharedModal();
 });
 
 
@@ -1218,17 +1394,20 @@ function renderFieldList(){
 
 function renderFieldSteps(field, steps, sourceNote, provenance){
   activeField = field;
+  activeSharedHelpers = sharedHelpersForField(field);
   renderFieldList();
   const canvas = document.getElementById('canvas');
   const provLine = provenance
     ? `<div class="ai-banner"><span>◇</span><span>Provenance: <b>${esc(PROVENANCE_NOTE[provenance]||provenance)}</b></span></div>`
     : '';
+  const sharedLine = sharedBannerHtml(field);
   if(!steps || !steps.length){
     const noteHtml = sourceNote
       ? `<p style="color:var(--ink-soft);font-size:13.5px">${esc(sourceNote)}</p>`
       : '';
     canvas.innerHTML = `<span class="target-name">${esc(field)}</span>
       ${provLine}
+      ${sharedLine}
       ${noteHtml}
       <button type="button" class="re-label" id="reLabelBtn">Re-label (bypass cache)</button>
       ${correctionBoxHtml(field)}`;
@@ -1236,15 +1415,29 @@ function renderFieldSteps(field, steps, sourceNote, provenance){
     canvas.innerHTML = `
       <span class="target-name">${esc(field)}</span>
       ${provLine}
+      ${sharedLine}
       ${sourceNote?`<div class="ai-banner"><span>&#10003;</span><span>${esc(sourceNote)}</span></div>`:''}
       <div class="pipeline">${renderPipeline(steps)}</div>
       <div class="summary"><strong>Summary:</strong> ${esc(summarize(steps))}</div>
       <button type="button" class="re-label" id="reLabelBtn">Re-label (bypass cache)</button>
       ${correctionBoxHtml(field)}`;
   }
+  wireSharedBannerJumps();
   wireCorrectionBox(field, steps||[]);
   const re = document.getElementById('reLabelBtn');
   if(re) re.addEventListener('click', () => labelField(field, true));
+}
+
+function wireSharedBannerJumps(){
+  document.querySelectorAll('[data-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const name = btn.getAttribute('data-jump');
+      if(!name || !checklist?.fields) return;
+      const match = checklist.fields.find((f) => f.field === name)
+        || checklist.fields.find((f) => fieldLeaf(f.field).toLowerCase() === fieldLeaf(name).toLowerCase());
+      if(match) selectField(match.field);
+    });
+  });
 }
 
 function fieldRow(field){

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared helper flag — mockup</title>
+<style>
+  :root{
+    --bg:#EEF1EC; --panel:#FFFFFF; --ink:#17201C; --ink-soft:#5C665F; --ink-faint:#8B948D; --line:#DADFD9;
+    --source:#0F6E56; --source-bg:#E1F3EC;
+    --target:#9A5B0A; --target-bg:#FBEFDC;
+    --op:#4A3F8C; --op-bg:#ECE9F8;
+    --cond:#A32B4B; --cond-bg:#FBE7ED;
+    --raw:#6B7280; --raw-bg:#F3F4F6;
+    --font-display:ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-body:ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono:ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);}
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 60px;}
+  header{margin-bottom:18px;}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:4px;}
+  .brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink);display:flex;align-items:center;justify-content:center;}
+  .brand-mark span{width:10px;height:10px;border-radius:2px;background:var(--bg);}
+  h1{font-family:var(--font-display);font-weight:600;font-size:20px;margin:0;}
+  .tagline{color:var(--ink-soft);font-size:13.5px;margin:4px 0 0 36px;}
+  .meta-bar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0;font-size:12px;color:var(--ink-soft);}
+  .pill{font-family:var(--font-mono);background:var(--panel);border:1px solid var(--line);padding:4px 10px;border-radius:6px;}
+  .pill.mock{background:var(--op-bg);border-color:var(--op);color:var(--op);font-weight:600;}
+
+  .ai-bar{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 14px;margin-top:4px;}
+  .ai-bar-icon{color:var(--op);font-size:14px;flex-shrink:0;}
+  .ai-bar input{flex:1;border:none;outline:none;font-family:var(--font-body);font-size:14px;background:transparent;color:var(--ink);padding:6px 0;}
+  .ai-bar input::placeholder{color:var(--ink-faint);}
+  .ai-bar button{border:none;background:var(--ink);color:var(--bg);font-family:var(--font-body);font-weight:600;font-size:13px;padding:8px 16px;border-radius:7px;cursor:pointer;white-space:nowrap;}
+  .ai-bar button:hover{opacity:.88;}
+  .ai-status{font-size:12.5px;color:var(--ink-faint);margin:8px 2px 0;min-height:16px;line-height:1.45;}
+  .ai-status.ok{color:var(--source);}
+  .ai-status.error{color:var(--cond);}
+
+  .legend{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;font-size:12.5px;color:var(--ink-soft);}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
+  .layout{display:grid;grid-template-columns:minmax(280px,340px) 1fr;gap:18px;align-items:start;}
+  @media (max-width:720px){.layout{grid-template-columns:1fr;}}
+  .fieldlist{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;}
+  .fieldlist h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);margin:4px 6px 10px;}
+  .fielditem{display:flex;align-items:center;gap:6px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:5px 8px;cursor:pointer;font-family:var(--font-mono);font-size:12px;color:var(--ink);}
+  .fielditem:hover{background:var(--bg);}
+  .fielditem.active{background:var(--target-bg);border-color:var(--target);color:var(--target);font-weight:600;}
+  .tree-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .state-b{font-size:9.5px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 6px;flex-shrink:0;}
+  .state-mapped{background:var(--source-bg);color:var(--source);}
+  .fl-legend{font-size:11px;color:var(--ink-faint);margin:10px 6px 2px;line-height:1.8;}
+
+  .canvas{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;}
+  .target-name{font-family:var(--font-mono);font-size:15px;font-weight:500;color:var(--target);background:var(--target-bg);padding:3px 9px;border-radius:6px;display:inline-block;}
+  .pipeline{margin-top:18px;padding-left:6px;}
+  .step{display:flex;gap:14px;padding-bottom:20px;}
+  .step-rail{position:relative;display:flex;flex-direction:column;align-items:center;width:30px;flex-shrink:0;}
+  .step-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;border:2px solid var(--panel);}
+  .step-line{position:absolute;top:28px;bottom:-20px;width:2px;background:repeating-linear-gradient(var(--line),var(--line) 4px,transparent 4px,transparent 8px);}
+  .step:last-child .step-line{display:none;}
+  .step-card{flex:1;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;}
+  .step-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .step-body{margin-top:8px;font-size:13px;line-height:1.55;}
+  .step-summary{margin-top:8px;font-size:12.5px;color:var(--ink-soft);line-height:1.55;}
+  .mono{font-family:var(--font-mono);font-size:12px;background:var(--panel);padding:2px 6px;border-radius:4px;border:1px solid var(--line);}
+  .badge{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:4px;}
+  .badge-det{background:var(--source-bg);color:var(--source);}
+  .badge-shared{background:var(--cond);color:#fff;}
+  .shared-tip{position:relative;display:inline-flex;align-items:center;cursor:default;z-index:1;}
+  .shared-tip:hover,.shared-tip:focus-within{z-index:8;}
+  .shared-tip-pop{
+    display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:8;
+    min-width:180px;max-width:280px;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;color:var(--ink);font-size:12px;font-weight:500;
+    letter-spacing:0;text-transform:none;line-height:1.45;white-space:normal;
+  }
+  .shared-tip:hover .shared-tip-pop,.shared-tip:focus-within .shared-tip-pop{display:block;}
+  .shared-tip-pop b{display:block;font-family:var(--font-mono);font-size:11.5px;font-weight:600;color:var(--ink);margin-bottom:4px;}
+  .shared-tip-pop .also{color:var(--ink-soft);font-size:11px;margin-bottom:4px;}
+  .shared-tip-pop ul{margin:0;padding:0;list-style:none;}
+  .shared-tip-pop li{font-family:var(--font-mono);font-size:11.5px;color:var(--ink);padding:2px 0;}
+  .step{position:relative;}
+  .step:has(.shared-tip:hover),.step:has(.shared-tip:focus-within){z-index:6;}
+  .summary{margin-top:20px;border-top:1px solid var(--line);padding-top:14px;font-size:13.5px;color:var(--ink-soft);line-height:1.7;}
+
+  .modal{position:fixed;inset:0;z-index:50;display:none;background:rgba(23,32,28,.45);align-items:center;justify-content:center;padding:24px;}
+  .modal.open{display:flex;}
+  .modal-card{width:min(520px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;}
+  .modal-card h2{margin:0 0 8px;font-size:16px;font-weight:600;}
+  .modal-card p{margin:0 0 12px;font-size:13.5px;color:var(--ink-soft);line-height:1.55;}
+  .modal-list{margin:0 0 16px;padding:10px 12px;background:var(--cond-bg);border-radius:8px;font-size:12.5px;color:var(--cond);line-height:1.55;}
+  .modal-actions{display:flex;flex-direction:column;gap:8px;}
+  .modal-actions button{border:1px solid var(--line);background:var(--bg);color:var(--ink);font-weight:600;font-size:13px;padding:9px 12px;border-radius:8px;cursor:pointer;text-align:left;}
+  .modal-actions button:hover{border-color:var(--ink-faint);}
+  .modal-actions .primary{background:var(--cond);border-color:var(--cond);color:#fff;}
+  .modal-actions .primary:hover{filter:brightness(0.95);}
+  .modal-actions .ghost{color:var(--ink-soft);}
+  .modal-hint{display:block;font-weight:500;font-size:11.5px;color:inherit;opacity:.8;margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><div class="brand-mark"><span></span></div><h1>Pipeline Viewer</h1></div>
+    <p class="tagline">Mockup — a Shared badge on a transform step is the only flag. No field-list chip, no tinted card.</p>
+  </header>
+  <div class="meta-bar">
+    <span class="pill mock">mockup</span>
+    <span class="pill">shipment-notice-mapper</span>
+    <span class="pill">ShipmentNoticeMapper</span>
+    <span class="pill">checklist: target-type</span>
+  </div>
+
+  <div class="ai-bar">
+    <span class="ai-bar-icon">&#10022;</span>
+    <input id="aiInput" type="text" value="also strip punctuation in trim" />
+    <button type="button" id="aiBtn">Build with AI</button>
+  </div>
+  <div class="ai-status" id="aiStatus">Edits only the currently selected field’s mapping functions — unless a shared helper is involved.</div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:var(--source)"></span>Read</span>
+    <span><span class="dot" style="background:var(--op)"></span>Transform</span>
+    <span><span class="dot" style="background:var(--target)"></span>Write</span>
+  </div>
+
+  <div class="layout">
+    <aside class="fieldlist">
+      <h2>Target fields</h2>
+      <div id="fieldItems"></div>
+      <div class="fl-legend">A <b>Shared</b> badge on a transform step means that Java helper is also used by another field. Editing it in place changes those mappings too.</div>
+    </aside>
+    <div class="canvas" id="canvas"></div>
+  </div>
+</div>
+
+<div class="modal" id="sharedModal" role="dialog" aria-labelledby="sharedModalTitle" aria-modal="true">
+  <div class="modal-card">
+    <h2 id="sharedModalTitle">This change touches a shared helper</h2>
+    <p id="sharedModalLead"></p>
+    <div class="modal-list" id="sharedModalList"></div>
+    <div class="modal-actions">
+      <button type="button" class="primary" id="applyAllBtn">
+        Apply to all sharing fields
+        <span class="modal-hint">Edit the helper in place, then re-label every listed field.</span>
+      </button>
+      <button type="button" id="forkBtn">
+        Fork for this field only
+        <span class="modal-hint">Copy the helper so only the current field changes.</span>
+      </button>
+      <button type="button" class="ghost" id="cancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const FIELDS = [
+  {
+    field: "recipientFirst",
+    state: "mapped",
+    sharedHelpers: [
+      { name: "trimValue", fields: ["recipientLast", "trackingDigits", "regionCode"] },
+      { name: "splitName", fields: ["recipientLast"] },
+    ],
+    steps: [
+      { kind: "read", field: "shipment.customerName", summary: "Reads the customer display name." },
+      { kind: "transform", op: "Trim", helper: "trimValue", summary: "trimValue trims leading/trailing whitespace." },
+      { kind: "transform", op: "Split", helper: "splitName", summary: "splitName splits the trimmed name on whitespace." },
+      { kind: "transform", op: "Take first", summary: "Takes the first token as the given name." },
+      { kind: "write", target: "recipientFirst", summary: "Writes the given name." },
+    ],
+  },
+  {
+    field: "recipientLast",
+    state: "mapped",
+    sharedHelpers: [
+      { name: "trimValue", fields: ["recipientFirst", "trackingDigits", "regionCode"] },
+      { name: "splitName", fields: ["recipientFirst"] },
+    ],
+    steps: [
+      { kind: "read", field: "shipment.customerName", summary: "Reads the customer display name." },
+      { kind: "transform", op: "Trim", helper: "trimValue", summary: "trimValue trims leading/trailing whitespace." },
+      { kind: "transform", op: "Split", helper: "splitName", summary: "splitName splits the trimmed name on whitespace." },
+      { kind: "transform", op: "Take last", summary: "Takes the last token as the family name." },
+      { kind: "write", target: "recipientLast", summary: "Writes the family name." },
+    ],
+  },
+  {
+    field: "trackingDigits",
+    state: "mapped",
+    sharedHelpers: [
+      { name: "trimValue", fields: ["recipientFirst", "recipientLast", "regionCode"] },
+    ],
+    steps: [
+      { kind: "read", field: "shipment.refCode", summary: "Reads the shipment reference." },
+      { kind: "transform", op: "Trim", helper: "trimValue", summary: "trimValue trims leading/trailing whitespace." },
+      { kind: "transform", op: "Keep digits", summary: "keepDigits drops non-digit characters (except hyphen)." },
+      { kind: "write", target: "trackingDigits", summary: "Writes the sanitized tracking id." },
+    ],
+  },
+  {
+    field: "regionCode",
+    state: "mapped",
+    sharedHelpers: [
+      { name: "trimValue", fields: ["recipientFirst", "recipientLast", "trackingDigits"] },
+    ],
+    steps: [
+      { kind: "read", field: "shipment.region", summary: "Reads the region string." },
+      { kind: "transform", op: "Trim", helper: "trimValue", summary: "trimValue trims leading/trailing whitespace." },
+      { kind: "transform", op: "Letters only", summary: "Keeps letters, then uppercases." },
+      { kind: "write", target: "regionCode", summary: "Writes the region code." },
+    ],
+  },
+  {
+    field: "weightGrams",
+    state: "mapped",
+    sharedHelpers: [],
+    steps: [
+      { kind: "read", field: "shipment.weightKg", summary: "Reads weight in kilograms." },
+      { kind: "transform", op: "Multiply", summary: "Converts kg to grams." },
+      { kind: "write", target: "weightGrams", summary: "Writes the gram weight." },
+    ],
+  },
+];
+
+const ICONS = { read: "R", transform: "Tx", write: "W" };
+const COLOR = { read: "--source", transform: "--op", write: "--target" };
+const BG = { read: "--source-bg", transform: "--op-bg", write: "--target-bg" };
+const LABELS = { read: "Read", transform: "Transform", write: "Write to target" };
+
+let activeField = "recipientFirst";
+
+function esc(s) {
+  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function row(field) {
+  return FIELDS.find((f) => f.field === field);
+}
+
+function renderFieldList() {
+  document.getElementById("fieldItems").innerHTML = FIELDS.map((f) => {
+    return `<button type="button" class="fielditem${f.field === activeField ? " active" : ""}" data-field="${esc(f.field)}">
+      <span class="tree-label">${esc(f.field)}</span>
+      <span class="state-b state-mapped">MAPPED</span>
+    </button>`;
+  }).join("");
+  document.querySelectorAll(".fielditem[data-field]").forEach((btn) => {
+    btn.addEventListener("click", () => selectField(btn.getAttribute("data-field")));
+  });
+}
+
+function othersForHelper(helperName) {
+  const hit = (row(activeField).sharedHelpers || []).find((h) => h.name === helperName);
+  return hit ? hit.fields : [];
+}
+
+function sharedBadgeHtml(helperName) {
+  if (!helperName) return "";
+  const fields = othersForHelper(helperName);
+  const items = fields.length
+    ? fields.map((f) => `<li>${esc(f)}</li>`).join("")
+    : "<li>other fields</li>";
+  return `<span class="shared-tip" tabindex="0">
+    <span class="badge badge-shared">Shared</span>
+    <span class="shared-tip-pop" role="tooltip">
+      <b>${esc(helperName)}</b>
+      <div class="also">Also used by</div>
+      <ul>${items}</ul>
+    </span>
+  </span>`;
+}
+
+function renderStep(step) {
+  const shared = step.kind === "transform" && step.helper;
+  const k = step.kind;
+  let body = "";
+  if (k === "read") body = `Field <span class="mono">${esc(step.field)}</span>`;
+  if (k === "transform") body = `Apply <span class="mono">${esc(step.op)}</span>${shared ? ` via <span class="mono">${esc(step.helper)}</span>` : ""}`;
+  if (k === "write") body = `Save to <span class="mono">${esc(step.target)}</span>`;
+  return `<div class="step">
+    <div class="step-rail"><div class="step-icon" style="background:var(${BG[k]});color:var(${COLOR[k]})">${ICONS[k]}</div><div class="step-line"></div></div>
+    <div class="step-card">
+      <div class="step-kicker" style="color:var(${COLOR[k]})">
+        ${LABELS[k]}
+        <span class="badge badge-det">deterministic</span>
+        ${sharedBadgeHtml(shared ? step.helper : "")}
+      </div>
+      <div class="step-body">${body}</div>
+      ${step.summary ? `<div class="step-summary">${esc(step.summary)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderCanvas() {
+  const f = row(activeField);
+  const summary = f.steps.map((s) => s.kind === "transform" ? s.op : s.kind).join(", then ") + ".";
+  document.getElementById("canvas").innerHTML = `
+    <span class="target-name">${esc(f.field)}</span>
+    <div class="pipeline">${f.steps.map(renderStep).join("")}</div>
+    <div class="summary"><strong>Summary:</strong> ${esc(summary)}</div>`;
+}
+
+function selectField(field) {
+  if (!row(field)) return;
+  activeField = field;
+  renderFieldList();
+  renderCanvas();
+}
+
+function closeModal() {
+  document.getElementById("sharedModal").classList.remove("open");
+}
+
+function openModal() {
+  const f = row(activeField);
+  const helpers = f.sharedHelpers || [];
+  const names = helpers.map((h) => h.name);
+  const others = [...new Set(helpers.flatMap((h) => h.fields))];
+  document.getElementById("sharedModalLead").textContent =
+    `You asked to change ${f.field}. That pipeline uses helper${names.length === 1 ? "" : "s"} also called by other mappings.`;
+  document.getElementById("sharedModalList").innerHTML =
+    helpers.map((h) => `<div><b>${esc(h.name)}</b> — also ${h.fields.map(esc).join(", ")}</div>`).join("") +
+    `<div style="margin-top:8px">Editing in place will change ${others.map(esc).join(", ")} as well.</div>`;
+  document.getElementById("sharedModal").classList.add("open");
+}
+
+function finish(mode) {
+  closeModal();
+  const f = row(activeField);
+  const el = document.getElementById("aiStatus");
+  el.classList.remove("error");
+  el.classList.add("ok");
+  if (mode === "apply-all") {
+    const others = [...new Set(f.sharedHelpers.flatMap((h) => h.fields))];
+    el.textContent = `Would edit shared helpers in place, then re-label ${[f.field, ...others].join(", ")}.`;
+  } else if (mode === "fork") {
+    el.textContent = `Would copy ${f.sharedHelpers.map((h) => h.name).join(", ")} for ${f.field} only, then re-label that field.`;
+  } else {
+    el.textContent = `Would edit helpers used only by ${f.field}, then re-label that field.`;
+  }
+}
+
+document.getElementById("aiBtn").addEventListener("click", () => {
+  const f = row(activeField);
+  const el = document.getElementById("aiStatus");
+  const intent = document.getElementById("aiInput").value.trim();
+  el.classList.remove("ok", "error");
+  if (!intent) {
+    el.textContent = "Describe the code change for the field shown below.";
+    el.classList.add("error");
+    return;
+  }
+  if ((f.sharedHelpers || []).length) {
+    openModal();
+    return;
+  }
+  finish("solo");
+});
+document.getElementById("applyAllBtn").addEventListener("click", () => finish("apply-all"));
+document.getElementById("forkBtn").addEventListener("click", () => finish("fork"));
+document.getElementById("cancelBtn").addEventListener("click", closeModal);
+document.getElementById("sharedModal").addEventListener("click", (e) => {
+  if (e.target.id === "sharedModal") closeModal();
+});
+document.getElementById("aiInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("aiBtn").click();
+});
+
+selectField("recipientFirst");
+</script>
+</body>
+</html>

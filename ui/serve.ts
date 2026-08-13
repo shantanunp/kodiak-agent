@@ -32,7 +32,9 @@ import {
 import {
   applyChangeToMapper,
   resolveMapperWorktree,
+  type SharedHelperMode,
 } from "../translator/applyChange.js";
+import type { SharedHelperRef } from "../analyzer/sharedHelpers.js";
 import { loadRegistry } from "../src/registry/loadRegistry.js";
 import { buildLabelTasks } from "../translator/agentloop/tasks.js";
 import { runAgentLoop } from "../translator/agentloop/loop.js";
@@ -162,6 +164,40 @@ async function labelAndWriteView(options: {
 }
 
 
+function taskForField(
+  tasks: Array<{ field: string; sharedHelpers?: SharedHelperRef[] }>,
+  field: string,
+): { field: string; sharedHelpers?: SharedHelperRef[] } | undefined {
+  const needle = field.toLowerCase();
+  const leaf = field.split(".").pop()!.toLowerCase();
+  return (
+    tasks.find((t) => t.field.toLowerCase() === needle) ??
+    tasks.find((t) => t.field.split(".").pop()!.toLowerCase() === leaf)
+  );
+}
+
+function mergeSharedHelpers(
+  tasks: Array<{ field: string; sharedHelpers?: SharedHelperRef[] }>,
+  focusFields: string[],
+): SharedHelperRef[] {
+  const byName = new Map<string, Set<string>>();
+  for (const focus of focusFields) {
+    const task = taskForField(tasks, focus);
+    for (const helper of task?.sharedHelpers ?? []) {
+      let set = byName.get(helper.name);
+      if (!set) {
+        set = new Set();
+        byName.set(helper.name, set);
+      }
+      for (const f of helper.fields) set.add(f);
+    }
+  }
+  return [...byName.entries()].map(([name, fields]) => ({
+    name,
+    fields: [...fields].sort((a, b) => a.localeCompare(b)),
+  }));
+}
+
 function viewStepsFor(mapperId: string, mapping: Array<{ targetField: string; pipeline: unknown[] }>): unknown[] {
   try {
     const view = toPipelineView({ mapperId, mapping } as never);
@@ -274,6 +310,7 @@ createServer(async (req, res) => {
         fields?: string;
         pipelineHint?: string;
         worktree?: string;
+        sharedHelperMode?: SharedHelperMode;
       };
 
       const mapperId = body.mapperId?.trim();
@@ -297,6 +334,39 @@ createServer(async (req, res) => {
 
       const focusFields = fieldsFilter.split(",").map((s) => s.trim()).filter(Boolean);
       const worktree = resolveMapperWorktree(body.worktree);
+      const sharedHelperMode =
+        body.sharedHelperMode === "apply-all" || body.sharedHelperMode === "fork"
+          ? body.sharedHelperMode
+          : undefined;
+
+      let sharedHelpers: SharedHelperRef[] = [];
+      let relabelFields = [...focusFields];
+      try {
+        const resolved = await resolveMapperAst(mapperId, paths.registry, {
+          worktree, remote: false,
+        });
+        const registry = loadRegistry(paths.registry);
+        const mapperEntry = registry.mappers.find((m) => m.id === mapperId);
+        if (mapperEntry) {
+          const tasks = buildLabelTasks({
+            mapper: mapperEntry,
+            sourceJava: resolved.sourceJava,
+            worktree,
+          });
+          sharedHelpers = mergeSharedHelpers(tasks.tasks, focusFields);
+          if (sharedHelperMode === "apply-all" && sharedHelpers.length > 0) {
+            relabelFields = [
+              ...new Set([
+                ...focusFields,
+                ...sharedHelpers.flatMap((h) => h.fields),
+              ]),
+            ];
+          }
+        }
+      } catch {
+        // Scan failure must not block the edit; prompt falls back to default scope rules.
+      }
+
       const applied = await applyChangeToMapper({
         mapperId,
         intent,
@@ -304,15 +374,18 @@ createServer(async (req, res) => {
         registryPath: paths.registry,
         focusFields,
         pipelineHint: body.pipelineHint,
+        sharedHelperMode,
+        sharedHelpers,
       });
 
+      const relabelFilter = relabelFields.join(",");
       let viewResult: Awaited<ReturnType<typeof labelAndWriteView>> | undefined;
       let labelError: string | undefined;
       try {
         viewResult = await labelAndWriteView({
           mapperId,
           worktree,
-          fields: fieldsFilter,
+          fields: relabelFilter,
           noCache: true,
         });
       } catch (err) {
@@ -328,6 +401,8 @@ createServer(async (req, res) => {
         fieldsLabeled: viewResult?.fieldsLabeled,
         labelError,
         labeled: true,
+        relabelFields,
+        sharedHelpers,
       });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
@@ -434,6 +509,7 @@ createServer(async (req, res) => {
             field: t.field,
             state: t.state,
             note: t.note,
+            sharedHelpers: t.sharedHelpers ?? [],
             provenance,
             // Load button uses inView (view.json). labelAvailability is for dots only.
             inView: viewLeaves.has(leaf),

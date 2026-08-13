@@ -12,6 +12,10 @@ import { scanWriteSites, adapterFor } from "../../analyzer/scanWriteSites.js";
 import { runAuditGate } from "../../analyzer/auditGate.js";
 import { findTypeFile } from "../../analyzer/resolveType.js";
 import { missDiagnostics } from "../../analyzer/secondOpinion.js";
+import {
+  sharedHelpersByField,
+  type SharedHelperRef,
+} from "../../analyzer/sharedHelpers.js";
 import { schemaTargetLeafPaths } from "../../schema/io.js";
 import { injectionDiagnostics } from "./promptInjection.js";
 import { attributeMultiInstanceWrites, type NestedTypeRef } from "./multiInstance.js";
@@ -28,6 +32,11 @@ export interface FieldTask {
   /** Combined slice text handed to the agent. */
   sliceText: string;
   note?: string;
+  /**
+   * Java helpers in this field's closure that other mapped fields also call.
+   * Empty when the helper is private to this field (or the CST scan was skipped).
+   */
+  sharedHelpers?: SharedHelperRef[];
 }
 
 export interface LabelTasks {
@@ -49,6 +58,18 @@ export interface LabelTasks {
   targetTypeFile?: string;
   /** Human-readable notes on why nested expansion did or didn't happen. */
   diagnostics: string[];
+}
+
+/** Stamp shared-helper refs on every task (entry method never counts as shared). */
+function withSharedHelpers(result: LabelTasks, entryMethod?: string): LabelTasks {
+  const byField = sharedHelpersByField(
+    result.tasks,
+    entryMethod ? [entryMethod] : [],
+  );
+  for (const task of result.tasks) {
+    task.sharedHelpers = byField.get(task.field) ?? [];
+  }
+  return result;
 }
 
 /** "com.acme.dto.Out$Notice" -> "Notice"; "Notice" -> "Notice". */
@@ -466,7 +487,7 @@ export function buildLabelTasks(options: {
   const targetClass = simpleTypeName(options.mapper.targetType);
 
   if (options.skipCst) {
-    return skipCstFallback(options, schemaPaths);
+    return withSharedHelpers(skipCstFallback(options, schemaPaths), options.mapper.entryMethod);
   }
 
   let parsed: ReturnType<typeof scanWriteSites>["parsed"];
@@ -481,7 +502,12 @@ export function buildLabelTasks(options: {
       worktree: options.worktree,
     }));
   } catch (err) {
-    if (schemaPaths.length > 0) return schemaOnlyFallback(options, schemaPaths, err);
+    if (schemaPaths.length > 0) {
+      return withSharedHelpers(
+        schemaOnlyFallback(options, schemaPaths, err),
+        options.mapper.entryMethod,
+      );
+    }
     throw err;
   }
 
@@ -633,15 +659,18 @@ export function buildLabelTasks(options: {
         applied.tasks.map((t) => ({ field: t.field, sliceText: t.sliceText })),
       ),
     );
-    return {
-      report: applied.report,
-      tasks: applied.tasks,
-      mapperClass,
-      targetClass,
-      checklistSource,
-      targetTypeFile,
-      diagnostics,
-    };
+    return withSharedHelpers(
+      {
+        report: applied.report,
+        tasks: applied.tasks,
+        mapperClass,
+        targetClass,
+        checklistSource,
+        targetTypeFile,
+        diagnostics,
+      },
+      options.mapper.entryMethod,
+    );
   }
 
   // Last resort: derive the checklist from the writes themselves. Functional,
@@ -720,5 +749,8 @@ export function buildLabelTasks(options: {
     ...injectionDiagnostics(tasks.map((t) => ({ field: t.field, sliceText: t.sliceText }))),
   );
 
-  return { report, tasks, mapperClass, targetClass, checklistSource, targetTypeFile, diagnostics };
+  return withSharedHelpers(
+    { report, tasks, mapperClass, targetClass, checklistSource, targetTypeFile, diagnostics },
+    options.mapper.entryMethod,
+  );
 }

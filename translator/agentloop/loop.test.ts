@@ -71,6 +71,17 @@ test("tasks: parser resolves simple names from FQCN and yields all three states"
 
   const tracking = tasks.tasks.find((t) => t.field === "trackingDigits")!;
   assert.ok(tracking.sliceText.includes("keepDigits"), "slice carries helper closure");
+
+  const first = tasks.tasks.find((t) => t.field === "recipientFirst")!;
+  const trim = (first.sharedHelpers ?? []).find((h) => h.name === "trimValue");
+  assert.ok(trim, "recipientFirst must flag shared trimValue");
+  assert.ok(trim!.fields.includes("recipientLast"));
+  assert.ok(trim!.fields.includes("trackingDigits"));
+  assert.equal(
+    (first.sharedHelpers ?? []).find((h) => h.name === "map"),
+    undefined,
+    "entry method is not a shared helper",
+  );
 });
 
 test("loop: slices feed mapped fields, escalation settles or honestly fails unresolved ones", async () => {

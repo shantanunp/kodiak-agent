@@ -9,13 +9,18 @@ import { dirname, join, resolve, sep } from "node:path";
 import { getEnvOptional, paths } from "../src/config/env.js";
 import { loadRegistry, type MapperEntry } from "../src/registry/loadRegistry.js";
 import { createModelProvider, HttpModelProvider, isModelConfigured } from "./model/index.js";
+import type { SharedHelperRef } from "../analyzer/sharedHelpers.js";
 
-const APPLY_CHANGE_PROMPT = `You edit Java mapper source for ONE target field only (POC scope).
+export type SharedHelperMode = "apply-all" | "fork";
+
+const APPLY_CHANGE_PROMPT_BASE = `You edit Java mapper source for ONE target field only (POC scope).
 
 You receive:
 - intent: what to change
 - focusFields: business target field path(s) in scope (schema paths for the field shown in the UI)
 - pipelineHint: labeled pipeline / reason for that field (helpers mentioned there are the edit scope)
+- sharedHelpers: Java helpers in this field's closure that other fields also call (name + other fields)
+- sharedHelperMode: how to treat those shared helpers (absent | apply-all | fork)
 - allowedPaths: repo-relative paths you may modify
 - files: current contents of those paths
 
@@ -27,13 +32,52 @@ Return JSON only (no markdown fences):
 
 CRITICAL scope rules:
 - Change ONLY the private helpers / methods used by focusFields (from pipelineHint).
-- Do NOT modify unrelated field mappings or shared helpers used by other fields.
-- Do NOT change shared helpers that other fields use unless the intent explicitly requires it AND the helper is only for focusFields.
 - Return the FULL file content for each changed file (not a diff).
 - Paths MUST be exact members of allowedPaths.
 - Keep the code compiling; update tests in allowed files only when they cover focusFields.
 - If already satisfied, return the current file contents unchanged (or files: []).
 - If the intent cannot be applied safely within this field scope, return {"summary":"...","files":[]}.`;
+
+/** Extra prompt rules when the focused field shares Java helpers with other mappings. */
+export function sharedHelperScopeRules(
+  mode: SharedHelperMode | undefined,
+  helpers: SharedHelperRef[],
+): string {
+  if (helpers.length === 0) {
+    return (
+      "- Do NOT modify unrelated field mappings or shared helpers used by other fields.\n" +
+      "- Do NOT change shared helpers that other fields use unless the intent explicitly requires it AND the helper is only for focusFields."
+    );
+  }
+  const listed = helpers
+    .map((h) => `${h.name} (also ${h.fields.join(", ")})`)
+    .join("; ");
+  if (mode === "apply-all") {
+    return (
+      `- Shared helpers in scope (edit these IN PLACE): ${listed}.\n` +
+      "- You MAY modify those listed shared helpers; other listed fields will be re-labeled.\n" +
+      "- Do NOT modify helpers that are not in that shared list and are used only by unrelated fields."
+    );
+  }
+  if (mode === "fork") {
+    return (
+      `- Shared helpers that MUST NOT be edited in place: ${listed}.\n` +
+      "- Extract a private copy of each listed helper (new private method) used only by focusFields, then apply the intent to the copy.\n" +
+      "- Leave the original shared helper bodies unchanged so other fields keep their current behavior."
+    );
+  }
+  return (
+    `- Shared helpers (do not edit in place): ${listed}.\n` +
+    "- Do NOT modify those shared helpers. If the intent requires changing them, return files: [] and say so in summary."
+  );
+}
+
+function applyChangePrompt(
+  mode: SharedHelperMode | undefined,
+  helpers: SharedHelperRef[],
+): string {
+  return `${APPLY_CHANGE_PROMPT_BASE}\n\n${sharedHelperScopeRules(mode, helpers)}`;
+}
 
 export interface ApplyChangeOptions {
   mapperId: string;
@@ -44,6 +88,10 @@ export interface ApplyChangeOptions {
   focusFields?: string[];
   /** Short pipeline / reason text from the current view for those fields. */
   pipelineHint?: string;
+  /** How to treat helpers shared with other fields (from the viewer's confirm dialog). */
+  sharedHelperMode?: SharedHelperMode;
+  /** Authoritative shared-helper list for focusFields (from the analyzer, not the client). */
+  sharedHelpers?: SharedHelperRef[];
 }
 
 export interface ApplyChangeResult {
@@ -53,6 +101,7 @@ export interface ApplyChangeResult {
   /** True when model echoed current files — intent already satisfied. */
   alreadyApplied?: boolean;
   focusFields?: string[];
+  sharedHelperMode?: SharedHelperMode;
 }
 
 interface ModelFileEdit {
@@ -114,6 +163,8 @@ async function proposeEdits(
   fileContents: Record<string, string>,
   focusFields: string[],
   pipelineHint: string,
+  sharedHelperMode: SharedHelperMode | undefined,
+  sharedHelpers: SharedHelperRef[],
 ): Promise<ModelEditResponse> {
   if (!isModelConfigured()) {
     throw new Error("MODEL_API_KEY not configured");
@@ -123,10 +174,15 @@ async function proposeEdits(
     intent,
     focusFields,
     pipelineHint,
+    sharedHelperMode: sharedHelperMode ?? null,
+    sharedHelpers,
     allowedPaths,
     files: allowedPaths.map((path) => ({ path, content: fileContents[path] ?? "" })),
   });
-  const text = await provider.generate(APPLY_CHANGE_PROMPT, userPayload);
+  const text = await provider.generate(
+    applyChangePrompt(sharedHelperMode, sharedHelpers),
+    userPayload,
+  );
   try {
     return JSON.parse(unwrapJson(text)) as ModelEditResponse;
   } catch {
@@ -178,6 +234,8 @@ export async function applyChangeToMapper(options: ApplyChangeOptions): Promise<
     fileContents,
     focusFields,
     options.pipelineHint?.trim() || "",
+    options.sharedHelperMode,
+    options.sharedHelpers ?? [],
   );
   const edits = Array.isArray(proposal.files) ? proposal.files : [];
   if (edits.length === 0) {
@@ -208,6 +266,7 @@ export async function applyChangeToMapper(options: ApplyChangeOptions): Promise<
       worktree,
       alreadyApplied: true,
       focusFields,
+      sharedHelperMode: options.sharedHelperMode,
     };
   }
 
@@ -222,6 +281,7 @@ export async function applyChangeToMapper(options: ApplyChangeOptions): Promise<
     summary: proposal.summary?.trim() || `Updated ${validated.length} file(s) for ${focusFields.join(", ")}`,
     worktree,
     focusFields,
+    sharedHelperMode: options.sharedHelperMode,
   };
 }
 
